@@ -80,4 +80,4 @@ Full-quality WAV masters were downloaded from Mixkit and recompressed to mono OG
 
 ## Poly Haven HDRI — CC0 1.0
 
-[Moonless Golf](https://polyhaven.com/a/moonless_golf) 2K HDRI (`hdris/moonless_golf_2k.hdr`), used when `ARENA.hdri` or the Settings toggle is on. Night-sky stand-in until a final space/sky pick is chosen; swap the file with `ARENA.hdriUrl`. License: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/). Credit is optional.
+[Industrial Pipe and Valve 01](https://polyhaven.com/a/industrial_pipe_and_valve_01) 2K HDRI (`hdris/industrial_pipe_and_valve_01_2k.hdr`), used when `ARENA.hdri` or the Settings toggle is on. License: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/). Credit is optional.

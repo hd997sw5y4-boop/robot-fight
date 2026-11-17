@@ -154,7 +154,7 @@ function loadHdri() {
   if (hdriLoading) return hdriLoading;
   hdriLoading = new Promise((resolve) => {
     new RGBELoader().load(
-      ARENA.hdriUrl || './hdris/moonless_golf_2k.hdr',
+      ARENA.hdriUrl || './hdris/industrial_pipe_and_valve_01_2k.hdr',
       (tex) => {
         tex.mapping = THREE.EquirectangularReflectionMapping;
         hdriBg = tex;
