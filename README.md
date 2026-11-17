@@ -18,7 +18,7 @@ Desktop only in this first version. Open the link in a web browser.
 
 Press **Fight again** after a knockout to restart.
 
-Settings (saved in the browser) include graphics quality, master and SFX volume, camera shake, CPU difficulty, an optional round timer, a controls overlay, a read-only keyboard/gamepad list, and an FPS counter.
+Settings (saved in the browser) include graphics quality, master, SFX, and crowd/ambience volume, camera shake, CPU difficulty, an optional round timer, a controls overlay, a read-only keyboard/gamepad list, and an FPS counter.
 
 Hits land on a body part (head, torso, left/right arm, left/right leg). That spot dents and scuffs, sparks fly, and heavy damage makes the part smoke and malfunction (weaker or slower punches, a limp, a jittery head). When a limb or the head is wrecked it tears off, falls onto the mat, and stops working. The torso can be crushed but stays attached. Tiny pips under each health bar show part condition.
 
@@ -31,3 +31,7 @@ The part-to-bone map lives in `js/config.js` (`DAMAGE.bind`) so a later Mixamo-r
 - **3D engine:** [three.js](https://threejs.org/) r187, MIT license.
 - **Arena metal textures:** [Metal009](https://ambientcg.com/view?id=Metal009) from ambientCG, CC0 1.0 (resized to 512).
 - **Settings panel look and volume taper:** adapted from Window Workshop Games UI (periwinkle frosted sheet, squared master-volume taper, graphics quality control). Only those pieces were reused.
+- **Sound effects:** CC0 and royalty-free clips (no credit required). Sources and licenses are listed in `CREDITS/LICENSES.md`.
+- **Physics:** [cannon-es](https://github.com/pmndrs/cannon-es) (MIT), vendored from the official package. Fighter capsules, cage/posts, ragdoll knockdowns and KOs, and detached parts that bounce then settle.
+
+The menu/arcade shell can start and end fights through `js/api.js` (`startFight`, `onFightEnd`, `setFighterConfig` with paint colors and AI personality). Flip attacks and win celebrations will use upcoming Mixamo clips (`MODEL.animations.flipSpecial` / `victory`); missing names are skipped until that pack is in the GLB.

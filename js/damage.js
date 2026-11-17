@@ -1,3 +1,5 @@
+import { playSfx } from './audio.js';
+import { spawnDebris, clearPhysicsDebris, PART_MASS, stepPhysics } from './physics.js';
 import * as THREE from 'three';
 import { DAMAGE, ARENA } from './config.js';
 
@@ -125,6 +127,7 @@ export function prepareFighterDamage(f) {
       meshes: [],
       skinned: [],
       smokeAcc: 0,
+      wear: 0,
       stump: null,
     };
   }
@@ -503,7 +506,15 @@ function detachPart(f, part, dir, scene) {
     (Math.random() - 0.5) * 12,
     (Math.random() - 0.5) * 10,
   );
-  debrisList.push({ obj: pivot, vel, ang, settled: false, owner: f.id });
+  const rec = spawnDebris({
+    mesh: pivot,
+    mass: PART_MASS[part.id] || 3.2,
+    velocity: vel,
+    angularVelocity: ang,
+    ownerId: f.id,
+  });
+  debrisList.push({ obj: pivot, phys: rec, owner: f.id, settled: false });
+  playSfx('tear');
   part.stump = part.bones.find((b) => {
     const n = normName(b.name);
     return !n.endsWith('end') && !n.includes('pole');
@@ -526,10 +537,10 @@ function emitSparks(point, dir, count = 16) {
     // Spray outward from the impact as well as backward along the hit.
     vel.addScaledVector(dir, -1.5);
     if (vel.lengthSq() < 0.01) vel.set(0, 2, 0);
-    const speed = 3.5 + Math.random() * 5;
+    const speed = 4.2 + Math.random() * 6;
     vel.normalize().multiplyScalar(speed);
     m.lookAt(m.position.x + vel.x, m.position.y + vel.y, m.position.z + vel.z);
-    sparks.push({ m, vel, life: 0.18 + Math.random() * 0.28, age: 0 });
+    sparks.push({ m, vel, life: 0.22 + Math.random() * 0.38, age: 0 });
     m.userData.worldSpark = true;
   }
 }
@@ -570,9 +581,12 @@ export function applyPartHit(f, partId, damage, point, dir, scene, opts = {}) {
   if (!part || part.detached) return { wrecked: false, point };
   const amount = opts.blocked ? 0.45 : 1;
   const dmg = Math.max(1, Math.round(damage * amount));
+  const force = opts.force != null ? opts.force : (dmg / 8);
   part.hp = Math.max(0, part.hp - dmg);
-  dentPart(part, point, dir, (opts.blocked ? 0.55 : 1.15) * Math.min(2, dmg / 8));
-  emitSparks(point, dir, opts.blocked ? 8 : 18);
+  part.wear = (part.wear || 0) + force;
+  const dentAmt = (opts.blocked ? 0.4 : 1) * Math.min(2.6, (0.4 + force * 0.32) * (1 + Math.min(1.2, part.wear * 0.08)));
+  dentPart(part, point, dir, dentAmt);
+  emitSparks(point, dir, opts.blocked ? 8 : 18 + Math.min(16, Math.round(force * 3)));
   addSparkScene(scene);
   let wrecked = false;
   if (part.hp <= 0 && part.canDetach && !part.detached) {
@@ -586,28 +600,7 @@ export function stepDamage(scene, dt) {
   addSparkScene(scene);
   const floor = ARENA.floorY + 0.02;
   for (const d of debrisList) {
-    if (d.settled) continue;
-    d.vel.y -= 9.6 * dt;
-    d.obj.position.addScaledVector(d.vel, dt);
-    d.obj.rotation.x += d.ang.x * dt;
-    d.obj.rotation.y += d.ang.y * dt;
-    d.obj.rotation.z += d.ang.z * dt;
-    _box.setFromObject(d.obj);
-    if (!_box.isEmpty() && _box.min.y < floor) {
-      d.obj.position.y += floor - _box.min.y;
-      if (d.vel.y < 0) d.vel.y *= -0.34;
-      d.vel.x *= 0.72;
-      d.vel.z *= 0.72;
-      d.ang.multiplyScalar(0.62);
-      if (d.vel.length() < 0.45 && Math.abs(d.vel.y) < 0.5) {
-        d.settled = true;
-        d.vel.set(0, 0, 0);
-        d.ang.set(0, 0, 0);
-      }
-    }
-    const cl = clampXZ(d.obj.position.x, d.obj.position.z, 0.15);
-    d.obj.position.x = cl[0];
-    d.obj.position.z = cl[1];
+    if (d.phys) d.settled = !!d.phys.settled;
   }
 
   for (let i = sparks.length - 1; i >= 0; i--) {
@@ -753,6 +746,7 @@ function restoreMesh(mesh) {
 }
 
 export function clearAllDebris(scene) {
+  clearPhysicsDebris();
   for (const d of debrisList) {
     d.obj.traverse((o) => {
       if (o.isMesh && o.geometry && !o.userData.deformReady) {
@@ -778,6 +772,7 @@ export function resetFighterDamage(f, scene) {
     part.hp = part.max;
     part.detached = false;
     part.smokeAcc = 0;
+    part.wear = 0;
     part.stump = null;
     for (const mesh of part.meshes.concat(part.skinned)) restoreMesh(mesh);
     for (const b of part.bones) {
@@ -831,26 +826,34 @@ export function previewDamage(p2, scene, towardCam) {
   }
   // Send the torn-off piece forward onto the mat, in front of the fighter.
   for (const d of debrisList) {
-    if (d.owner === p2.id && !d.settled) {
-      d.vel.set(-0.55, 1.85, 1.25);
+    if (d.owner === p2.id && d.phys && d.phys.body) {
+      d.phys.body.velocity.set(-0.55, 1.85, 1.25);
+      d.phys.body.angularVelocity.set(2.2, -1.4, 3.1);
     }
   }
   emitSparks(last, dir, 20);
   addSparkScene(scene);
-  stepDebrisSeconds(scene, 1.2);
+  const step = 1 / 60;
+  for (let time = 0; time < 1.2; time += step) {
+    stepPhysics(step);
+    stepDamage(scene, step);
+  }
   for (const d of debrisList) {
     if (d.owner !== p2.id) continue;
     const targetX = p2.root.position.x - 0.55;
     const targetZ = p2.root.position.z + 1.55;
-    d.obj.position.x += (targetX - d.obj.position.x) * 0.8;
-    d.obj.position.z += (targetZ - d.obj.position.z) * 0.8;
-    _box.setFromObject(d.obj);
-    if (!_box.isEmpty() && _box.min.y < ARENA.floorY + 0.02) {
-      d.obj.position.y += ARENA.floorY + 0.02 - _box.min.y;
+    if (d.phys && d.phys.body) {
+      d.phys.body.position.x += (targetX - d.phys.body.position.x) * 0.8;
+      d.phys.body.position.z += (targetZ - d.phys.body.position.z) * 0.8;
+      if (d.phys.body.position.y < 0.12) d.phys.body.position.y = 0.12;
+      d.phys.body.velocity.setZero();
+      d.phys.body.angularVelocity.setZero();
+      d.phys.settled = true;
     }
     d.settled = true;
-    d.vel.set(0, 0, 0);
-    d.ang.set(0, 0, 0);
+    if (d.phys && d.phys.mesh) {
+      d.obj.position.copy(d.phys.mesh.position);
+    }
   }
   const debris = debrisList.map((d) => ({
     x: d.obj.position.x, y: d.obj.position.y, z: d.obj.position.z, settled: d.settled, owner: d.owner,

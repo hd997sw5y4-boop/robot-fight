@@ -18,6 +18,11 @@ export const MODEL = {
     kick: 'Kicking',
     kickVariants: ['Kicking', 'MmaKick'],
     kickSpecial: ['FlipKick', 'ChapaGiratoria'],
+    // Extra flip attacks from a later Mixamo pack (js will skip missing names).
+    flipSpecial: ['FlipKick', 'ChapaGiratoria', 'Backflip', 'FrontFlip', 'Tumbling'],
+    // Win celebrations from the same upcoming pack. Missing clips fall back in playVictory().
+    victory: 'Victory',
+    victoryVariants: ['Victory', 'WinCelebration', 'Cheer', 'HipHopDancing'],
     block: 'CenterBlock',
     blockVariants: ['CenterBlock', 'BodyBlock', 'LeftBlock', 'RightBlock'],
     hit: 'Stunned',
@@ -66,8 +71,8 @@ export const COMBAT = {
 };
 
 export const GFX_PRESETS = {
-  low: { pixelCap: 1, shadows: false, shadowSize: 512, exposure: 1.05 },
-  high: { pixelCap: 2, shadows: true, shadowSize: 2048, exposure: 1.15 },
+  low: { pixelCap: 1, shadows: false, shadowSize: 512, exposure: 0.95 },
+  high: { pixelCap: 2, shadows: true, shadowSize: 2048, exposure: 1.05 },
 };
 
 // Per-part wrecking. Names in `bind` are normalized (lowercase, no "mixamorig",

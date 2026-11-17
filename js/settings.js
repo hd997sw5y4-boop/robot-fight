@@ -3,12 +3,13 @@
    Layout and periwinkle sheet styling follow WW3D addons/menu-tidy.js + ui2027.css.
    Volume rows follow WW3D addons/master-volume.js (squared taper lives in audio.js). */
 
-import { unlockAudio, setVolumes, playSfx } from './audio.js';
+import { unlockAudio, setVolumes, playSfx, startCrowd } from './audio.js';
 
 const KEYS = {
   gfx: 'rf_gfx',
   master: 'rf_vol_master',
   sfx: 'rf_vol_sfx',
+  crowd: 'rf_vol_crowd',
   shake: 'rf_shake',
   cpu: 'rf_cpu',
   round: 'rf_round',
@@ -20,6 +21,7 @@ const defaults = {
   gfx: 'high',
   master: 1,
   sfx: 1,
+  crowd: 0.7,
   shake: true,
   cpu: 'normal',
   round: 0,
@@ -36,6 +38,8 @@ function read() {
     if (m != null && isFinite(+m)) s.master = Math.max(0, Math.min(1, +m));
     const x = localStorage.getItem(KEYS.sfx);
     if (x != null && isFinite(+x)) s.sfx = Math.max(0, Math.min(1, +x));
+    const cr = localStorage.getItem(KEYS.crowd);
+    if (cr != null && isFinite(+cr)) s.crowd = Math.max(0, Math.min(1, +cr));
     const sh = localStorage.getItem(KEYS.shake);
     if (sh != null) s.shake = sh !== '0';
     const cpu = localStorage.getItem(KEYS.cpu);
@@ -55,6 +59,7 @@ function write(s) {
     localStorage.setItem(KEYS.gfx, s.gfx);
     localStorage.setItem(KEYS.master, String(s.master));
     localStorage.setItem(KEYS.sfx, String(s.sfx));
+    localStorage.setItem(KEYS.crowd, String(s.crowd));
     localStorage.setItem(KEYS.shake, s.shake ? '1' : '0');
     localStorage.setItem(KEYS.cpu, s.cpu);
     localStorage.setItem(KEYS.round, String(s.round));
@@ -91,6 +96,10 @@ function paint() {
   const sfxV = $('setSfxV');
   if (sfx && document.activeElement !== sfx) sfx.value = String(settings.sfx);
   if (sfxV) sfxV.textContent = Math.round(settings.sfx * 100) + '%';
+  const crowd = $('setCrowd');
+  const crowdV = $('setCrowdV');
+  if (crowd && document.activeElement !== crowd) crowd.value = String(settings.crowd);
+  if (crowdV) crowdV.textContent = Math.round(settings.crowd * 100) + '%';
   const cpu = $('setCpu');
   if (cpu) cpu.value = settings.cpu;
   const round = $('setRound');
@@ -108,7 +117,8 @@ function applyChrome() {
     fpsEl.classList.toggle('hidden', !settings.fps);
     fpsEl.setAttribute('aria-hidden', settings.fps ? 'false' : 'true');
   }
-  setVolumes(settings.master, settings.sfx);
+  setVolumes(settings.master, settings.sfx, settings.crowd);
+  startCrowd();
 }
 
 function persist() {
@@ -217,6 +227,7 @@ export function initSettings(nextHooks) {
   });
   bindSlider('setMaster', 'master');
   bindSlider('setSfx', 'sfx');
+  bindSlider('setCrowd', 'crowd');
 }
 
 export function updateFps(dt) {

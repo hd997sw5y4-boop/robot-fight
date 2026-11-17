@@ -4,7 +4,28 @@ import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MODEL, ARENA, COMBAT, GFX_PRESETS, LOOP_CLIPS } from './config.js';
 import { getSettings, isSettingsOpen, initSettings, updateFps } from './settings.js';
-import { unlockAudio, playSfx } from './audio.js';
+import { unlockAudio, playSfx, playHit, setBuzz, startCrowd } from './audio.js';
+import { buildArena as buildArenaVisual, addArenaLights } from './arena.js';
+import {
+  initArenaPhysics,
+  attachFighter,
+  setFighterMove,
+  stepPhysics,
+  enableRagdoll,
+  disableRagdoll,
+  isRagdoll,
+  impactVelocity,
+  resetFighterPhysics,
+  clearPhysicsDebris,
+  onPhysicsBounce,
+} from './physics.js';
+import {
+  registerFightRuntime,
+  notifyFightEnd,
+  defaultFighterConfig,
+  AI_PERSONALITIES,
+  onFightEnd,
+} from './api.js';
 import {
   prepareFighterDamage,
   canPunch,
@@ -36,50 +57,19 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0a0c12);
-scene.fog = new THREE.Fog(0x0a0c12, 16, 38);
+scene.background = new THREE.Color(0x05060a);
+scene.fog = new THREE.Fog(0x05060a, 12, 32);
 
 const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 80);
 camera.position.set(0, 3.2, 12.5);
 
-const hemi = new THREE.HemisphereLight(0xb9d4ff, 0x1a120c, 0.55);
-scene.add(hemi);
-
-const keyLight = new THREE.DirectionalLight(0xfff1dd, 2.15);
-keyLight.position.set(5.5, 10, 6);
-keyLight.userData.wantsShadow = true;
-keyLight.castShadow = true;
-keyLight.shadow.mapSize.set(2048, 2048);
-keyLight.shadow.camera.near = 1;
-keyLight.shadow.camera.far = 30;
-keyLight.shadow.camera.left = keyLight.shadow.camera.bottom = -12;
-keyLight.shadow.camera.right = keyLight.shadow.camera.top = 12;
-keyLight.shadow.bias = -0.00025;
-scene.add(keyLight);
-
-const fill = new THREE.DirectionalLight(0x7ea7ff, 0.55);
-fill.position.set(-6, 4, -3);
-scene.add(fill);
-
-const rim = new THREE.DirectionalLight(0x9ad0ff, 0.7);
-rim.position.set(0, 3, -8);
-scene.add(rim);
-
-const spot = new THREE.SpotLight(0xfff6e8, 8, 16, Math.PI / 4.2, 0.6, 1.2);
-spot.position.set(0, 5.9, 0);
-spot.target.position.set(0, 0, 0);
-spot.userData.wantsShadow = true;
-spot.castShadow = true;
-spot.shadow.mapSize.set(1024, 1024);
-scene.add(spot);
-scene.add(spot.target);
-
-const hitLight = new THREE.PointLight(0xffe08a, 0, 5);
+const hitLight = new THREE.PointLight(0xffb44a, 0, 6);
+hitLight.decay = 2;
 scene.add(hitLight);
 
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.06).texture;
-scene.environmentIntensity = 0.45;
+scene.environmentIntensity = 0.22;
 
 function applyGfx(key) {
   gfxKey = key === 'low' ? 'low' : 'high';
@@ -139,144 +129,6 @@ function tiled(src, sx, sy) {
   return t;
 }
 
-function buildArena() {
-  const group = new THREE.Group();
-  const a = ARENA.apothem;
-  const r = a / Math.cos(Math.PI / 8);
-
-  const floorMat = new THREE.MeshStandardMaterial({
-    color: 0x2a3038,
-    metalness: 0.22,
-    roughness: 0.68,
-    map: tiled(metalColor, 4, 4),
-    roughnessMap: tiled(metalRough, 4, 4),
-    metalnessMap: tiled(metalMetal, 4, 4),
-  });
-  const floor = new THREE.Mesh(new THREE.CylinderGeometry(r, r, ARENA.floorThickness, 8), floorMat);
-  floor.position.y = -ARENA.floorThickness / 2;
-  floor.rotation.y = Math.PI / 8;
-  floor.receiveShadow = true;
-  group.add(floor);
-
-  const edge = new THREE.Mesh(
-    new THREE.CylinderGeometry(r + 0.06, r + 0.06, 0.12, 8),
-    new THREE.MeshStandardMaterial({
-      color: 0x8f9aa4,
-      metalness: 0.9,
-      roughness: 0.3,
-      map: tiled(metalColor, 6, 0.4),
-      roughnessMap: tiled(metalRough, 6, 0.4),
-    }),
-  );
-  edge.position.y = 0.02;
-  edge.rotation.y = Math.PI / 8;
-  edge.receiveShadow = true;
-  edge.castShadow = true;
-  group.add(edge);
-
-  const lineMat = new THREE.MeshStandardMaterial({
-    color: 0x9fe7ff,
-    emissive: 0x4bb8d8,
-    emissiveIntensity: 0.7,
-    metalness: 0.2,
-    roughness: 0.35,
-  });
-  const inner = new THREE.Mesh(new THREE.RingGeometry(a - 0.18, a - 0.04, 8), lineMat);
-  inner.rotation.x = -Math.PI / 2;
-  inner.rotation.z = Math.PI / 8;
-  inner.position.y = 0.008;
-  group.add(inner);
-
-  const center = new THREE.Mesh(new THREE.RingGeometry(0.55, 0.68, 48), lineMat.clone());
-  center.rotation.x = -Math.PI / 2;
-  center.position.y = 0.008;
-  group.add(center);
-
-  const apron = new THREE.Mesh(
-    new THREE.CylinderGeometry(r + 9, r + 9, 0.16, 8),
-    new THREE.MeshStandardMaterial({ color: 0x12151c, metalness: 0.2, roughness: 0.9 }),
-  );
-  apron.position.y = -0.22;
-  apron.rotation.y = Math.PI / 8;
-  apron.receiveShadow = true;
-  group.add(apron);
-
-  const wall = new THREE.Mesh(
-    new THREE.CylinderGeometry(20, 20, 12, 32, 1, true),
-    new THREE.MeshStandardMaterial({ color: 0x10141c, roughness: 0.95, metalness: 0.05, side: THREE.BackSide }),
-  );
-  wall.position.y = 5;
-  group.add(wall);
-
-  const postMat = new THREE.MeshStandardMaterial({
-    color: 0xc5ccd3,
-    metalness: 1,
-    roughness: 0.28,
-    map: tiled(metalColor, 1, 3),
-    roughnessMap: tiled(metalRough, 1, 3),
-    metalnessMap: tiled(metalMetal, 1, 3),
-  });
-  const railMat = new THREE.MeshStandardMaterial({
-    color: 0x9aa3ab,
-    metalness: 0.95,
-    roughness: 0.32,
-    map: tiled(metalColor, 3, 0.4),
-    roughnessMap: tiled(metalRough, 3, 0.4),
-  });
-  const lightMat = new THREE.MeshStandardMaterial({
-    color: 0xdff6ff,
-    emissive: 0x7ec8e3,
-    emissiveIntensity: 1.2,
-    metalness: 0.3,
-    roughness: 0.25,
-  });
-
-  const postH = 3.15;
-  const corners = [];
-  for (let i = 0; i < 8; i++) {
-    const ang = i * Math.PI / 4 + Math.PI / 8;
-    const x = Math.cos(ang) * r;
-    const z = Math.sin(ang) * r;
-    corners.push(new THREE.Vector3(x, 0, z));
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.1, postH, 16), postMat);
-    post.position.set(x, postH / 2, z);
-    post.castShadow = true;
-    post.receiveShadow = true;
-    group.add(post);
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.07, 16), lightMat);
-    cap.position.set(x, postH + 0.02, z);
-    group.add(cap);
-  }
-
-  const railHeights = [0.65, 1.45, 2.25];
-  const xAxis = new THREE.Vector3(1, 0, 0);
-  for (let i = 0; i < 8; i++) {
-    const apos = corners[i];
-    const bpos = corners[(i + 1) % 8];
-    const dir = new THREE.Vector3().subVectors(bpos, apos);
-    const len = dir.length();
-    const mid = new THREE.Vector3().addVectors(apos, bpos).multiplyScalar(0.5);
-    const quat = new THREE.Quaternion().setFromUnitVectors(xAxis, dir.normalize());
-    for (const h of railHeights) {
-      const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, len, 8), railMat);
-      rail.geometry.rotateZ(Math.PI / 2);
-      rail.quaternion.copy(quat);
-      rail.position.set(mid.x, h, mid.z);
-      rail.castShadow = true;
-      group.add(rail);
-    }
-  }
-
-  const bulb = new THREE.Mesh(
-    new THREE.SphereGeometry(0.12, 16, 12),
-    new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff3d6, emissiveIntensity: 2, roughness: 0.3 }),
-  );
-  bulb.position.set(0, 5.9, 0);
-  group.add(bulb);
-
-  scene.add(group);
-}
-
 function clampToOctagon(x, z, padding) {
   const a = ARENA.apothem - padding;
   x = Math.max(-a, Math.min(a, x));
@@ -291,6 +143,15 @@ function clampToOctagon(x, z, padding) {
   return [x, z];
 }
 
+function placeInOctagon(pos, padding, rattle) {
+  const c = clampToOctagon(pos.x, pos.z, padding);
+  const hit = Math.hypot(c[0] - pos.x, c[1] - pos.z) > 0.002;
+  pos.x = c[0];
+  pos.z = c[1];
+  if (hit && rattle) playSfx('cage');
+  return hit;
+}
+
 function findClip(clips, name) {
   const lower = name.toLowerCase();
   return clips.find((c) => c.name === name) || clips.find((c) => c.name.toLowerCase() === lower);
@@ -303,7 +164,10 @@ function tint(root, color) {
     const mats = [].concat(o.material);
     o.material = mats.length === 1 ? mats[0].clone() : mats.map((m) => m.clone());
     for (const m of [].concat(o.material)) {
-      if (m && m.color) m.color.lerp(c, 0.38);
+      if (m && m.color) {
+        if (!m.userData.baseColor) m.userData.baseColor = m.color.clone();
+        m.color.copy(m.userData.baseColor).lerp(c, 0.42);
+      }
       if (m && m.aoMap && o.geometry && o.geometry.attributes.uv && !o.geometry.attributes.uv2) {
         o.geometry.setAttribute('uv2', o.geometry.attributes.uv);
       }
@@ -326,7 +190,57 @@ function meshBox(root) {
   return found && Number.isFinite(box.min.y) ? box : null;
 }
 
+function addVisor(model, color) {
+  let head = null;
+  model.traverse((o) => {
+    if (head) return;
+    if (!o.isBone && o.type !== 'Bone') return;
+    const n = String(o.name || '').replace(/^mixamorig[:._]*/i, '');
+    if (n === 'Head') head = o;
+  });
+  if (!head) return;
+  const c = new THREE.Color(color);
+  const vis = new THREE.Mesh(
+    new THREE.BoxGeometry(1, 1, 1),
+    new THREE.MeshStandardMaterial({
+      color: c, emissive: c, emissiveIntensity: 3.4, roughness: 0.22, metalness: 0.08, toneMapped: false,
+    }),
+  );
+  vis.name = 'rfVisor';
+  head.add(vis);
+  head.updateWorldMatrix(true, false);
+  const ws = new THREE.Vector3();
+  head.getWorldScale(ws);
+  vis.scale.set(0.2 / Math.max(ws.x, 1e-5), 0.05 / Math.max(ws.y, 1e-5), 0.06 / Math.max(ws.z, 1e-5));
+  vis.position.set(0, 0.07 / Math.max(ws.y, 1e-5), 0.11 / Math.max(ws.z, 1e-5));
+}
+
+function retintFighter(f, color) {
+  const c = new THREE.Color(color);
+  f.model.traverse((o) => {
+    if (!o.isMesh) return;
+    for (const m of [].concat(o.material)) {
+      if (!m || !m.color) continue;
+      if (!m.userData.baseColor) m.userData.baseColor = m.color.clone();
+      m.color.copy(m.userData.baseColor).lerp(c, 0.42);
+    }
+    if (o.name === 'rfVisor' && o.material) {
+      o.material.color.copy(c);
+      o.material.emissive.copy(c);
+    }
+  });
+}
+
+function applyFighterConfig(f, cfg) {
+  const base = defaultFighterConfig(f.id);
+  f.config = { ...base, ...cfg, ai: { ...base.ai, ...(cfg && cfg.ai) } };
+  if (f.config.color != null) retintFighter(f, f.config.color);
+  const el = document.getElementById(f.id === 'p1' ? 'n1' : 'n2');
+  if (el) el.textContent = f.config.name;
+}
+
 function makeFighter(gltf, color, side) {
+
   const root = new THREE.Group();
   const model = cloneSkinned(gltf.scene);
   const box = meshBox(model);
@@ -336,6 +250,7 @@ function makeFighter(gltf, color, side) {
   const box2 = meshBox(model);
   if (box2) model.position.y = -box2.min.y + MODEL.footOffset;
   tint(model, color);
+  addVisor(model, color);
   root.add(model);
 
   const shield = new THREE.Mesh(
@@ -403,10 +318,12 @@ function makeFighter(gltf, color, side) {
     hips,
     spine,
     hipsBind: hips ? hips.position.clone() : null,
+    config: defaultFighterConfig(side),
   };
+  f.config.color = color;
 
   mixer.addEventListener('finished', () => {
-    if (f.state === 'ko') return;
+    if (f.state === 'ko' || f.state === 'down' || isRagdoll(f)) return;
     if (f.health > 0 && (f.state === 'punch' || f.state === 'kick' || f.state === 'hit')) {
       f.state = 'idle';
       setAnim(f, idleClipFor(f), 0.15);
@@ -545,12 +462,7 @@ function moveFighter(f, other, sidestep, inout, dt, speed) {
   vel.addScaledVector(right, sidestep);
   vel.addScaledVector(fwd, inout);
   if (vel.lengthSq() > 1) vel.normalize();
-  const p = f.root.position;
-  p.x += vel.x * speed * dt;
-  p.z += vel.z * speed * dt;
-  const clamped = clampToOctagon(p.x, p.z, 0.55);
-  p.x = clamped[0];
-  p.z = clamped[1];
+  setFighterMove(f, vel.x * speed, vel.z * speed);
 }
 
 function separate(a, b) {
@@ -566,18 +478,14 @@ function separate(a, b) {
     a.root.position.z -= nz * push;
     b.root.position.x += nx * push;
     b.root.position.z += nz * push;
-    const ca = clampToOctagon(a.root.position.x, a.root.position.z, 0.55);
-    const cb = clampToOctagon(b.root.position.x, b.root.position.z, 0.55);
-    a.root.position.x = ca[0];
-    a.root.position.z = ca[1];
-    b.root.position.x = cb[0];
-    b.root.position.z = cb[1];
+    placeInOctagon(a.root.position, 0.55, true);
+    placeInOctagon(b.root.position, 0.55, true);
   }
 }
 
 function faceEachOther(a, b) {
-  if (a.state !== 'ko') a.root.lookAt(b.root.position.x, a.root.position.y, b.root.position.z);
-  if (b.state !== 'ko') b.root.lookAt(a.root.position.x, b.root.position.y, a.root.position.z);
+  if (a.state !== 'ko' && a.state !== 'down' && !isRagdoll(a)) a.root.lookAt(b.root.position.x, a.root.position.y, b.root.position.z);
+  if (b.state !== 'ko' && b.state !== 'down' && !isRagdoll(b)) b.root.lookAt(a.root.position.x, b.root.position.y, a.root.position.z);
 }
 
 function tryAttack(f, kind, clipName) {
@@ -628,64 +536,97 @@ function attackHits(atk, def, spec) {
   return atk.root.position.distanceTo(def.root.position) <= spec.range;
 }
 
+const LOC_MUL = { head: 1.35, torso: 1, armL: 0.8, armR: 0.8, legL: 0.85, legR: 0.85 };
+
 function applyHit(atk, def, spec, kind) {
-  if (def.state === 'ko' || def.invuln > 0) return;
+  if (def.state === 'ko' || def.state === 'down' || def.invuln > 0) return;
   const blocked = def.blocking;
+  const hit = pickHit(atk, def, kind || 'punch', toward);
   const mul = (atk.atkMods && atk.atkMods.damageMul) || 1;
   const blockMul = blocked ? (1 - COMBAT.blockReduction * blockReductionMul(def)) : 1;
-  const dmg = Math.max(1, Math.round(spec.damage * mul * blockMul));
+  const loc = LOC_MUL[hit.partId] || 1;
+  const closing = impactVelocity(atk, def, hit.dir);
+  const swing = (kind === 'kick' ? 3.4 : 2.4) * mul;
+  const force = (closing + swing) * (blocked ? 0.45 : 1);
+  const dmg = Math.max(1, Math.round(spec.damage * mul * blockMul * loc * (0.5 + 0.55 * (force / 5))));
   def.health = Math.max(0, def.health - dmg);
-  const hit = pickHit(atk, def, kind || 'punch', toward);
-  applyPartHit(def, hit.partId, dmg, hit.point, hit.dir, scene, { blocked });
-  hitLight.color.setHex(blocked ? 0x88ccff : 0xffe08a);
-  hitLight.intensity = 9;
+  applyPartHit(def, hit.partId, dmg, hit.point, hit.dir, scene, { blocked, force });
+  hitLight.color.setHex(blocked ? 0x88ccff : 0xffc060);
+  hitLight.intensity = 12 + Math.min(8, force);
   hitLight.position.copy(hit.point);
-  playSfx(blocked ? 'block' : 'hit');
-  addShake(blocked ? 0.08 : 0.16 + dmg * 0.01);
+  playHit({ blocked, heavy: dmg >= 12 || force >= 5, kick: kind === 'kick' });
+  addShake(blocked ? 0.08 : 0.16 + dmg * 0.01 + force * 0.02);
   const fwd = hit.dir;
-  const kb = COMBAT.knockback * (blocked ? 0.35 : 1);
-  def.root.position.x += fwd.x * kb;
-  def.root.position.z += fwd.z * kb;
-  const c = clampToOctagon(def.root.position.x, def.root.position.z, 0.55);
-  def.root.position.x = c[0];
-  def.root.position.z = c[1];
+  const kb = COMBAT.knockback * (blocked ? 0.35 : 1) * (0.8 + force * 0.08);
+  if (def.phys && def.phys.body && !isRagdoll(def)) {
+    def.phys.body.velocity.x += fwd.x * kb * 3.6;
+    def.phys.body.velocity.z += fwd.z * kb * 3.6;
+  } else {
+    def.root.position.x += fwd.x * kb;
+    def.root.position.z += fwd.z * kb;
+    placeInOctagon(def.root.position, 0.55, true);
+  }
   if (def.health <= 0) {
-    ko(def, atk);
+    ko(def, atk, { dir: fwd, force });
     return;
   }
   if (!blocked) {
-    def.state = 'hit';
-    def.stateT = 0;
-    def.invuln = COMBAT.hitInvuln;
     def.blocking = false;
     def.shield.visible = false;
-    const heavy = dmg >= 12 && def.actions[MODEL.animations.hitHeavy];
-    setAnim(def, heavy ? MODEL.animations.hitHeavy : hitClipFor(hit.partId), 0.06);
+    def.invuln = COMBAT.hitInvuln;
+    const heavy = force >= 5.1 || dmg >= 12;
+    if (heavy) {
+      def.state = 'down';
+      def.stateT = 0;
+      enableRagdoll(def, { x: fwd.x * (4 + force), y: 2.2 + force * 0.15, z: fwd.z * (4 + force) }, { kind: 'down', until: performance.now() + 850 });
+    } else {
+      def.state = 'hit';
+      def.stateT = 0;
+      setAnim(def, hitClipFor(hit.partId), 0.06);
+    }
   }
 }
 
-function ko(loser, winner) {
+function playVictory(f) {
+  if (!f) return;
+  const names = []
+    .concat(MODEL.animations.victoryVariants || [])
+    .concat(MODEL.animations.victory || []);
+  const clip = names.find((n) => n && f.actions[n]);
+  if (clip) setAnim(f, clip, 0.2);
+}
+
+function ko(loser, winner, info) {
   loser.health = 0;
   loser.state = 'ko';
   loser.blocking = false;
   loser.shield.visible = false;
-  setAnim(loser, 'ko', 0.12);
+  const dir = (info && info.dir) || new THREE.Vector3(winner.root.position.x - loser.root.position.x, 0, winner.root.position.z - loser.root.position.z).normalize();
+  const force = (info && info.force) || 6;
+  enableRagdoll(loser, { x: dir.x * (5 + force), y: 3.1, z: dir.z * (5 + force) }, { kind: 'ko', until: Infinity });
+  if (winner && winner.state !== 'ko') playVictory(winner);
   match.over = true;
-  match.winner = winner.id;
-  document.getElementById('ko-title').textContent = winner.id === 'p1' ? 'Blue wins' : 'Red wins';
-  document.getElementById('ko-sub').textContent = winner.id === 'p1' ? 'You won the fight.' : 'CPU won the fight.';
+  match.winner = winner ? winner.id : null;
+  document.getElementById('ko-title').textContent = winner && winner.id === 'p1' ? 'Blue wins' : 'Red wins';
+  document.getElementById('ko-sub').textContent = winner && winner.id === 'p1' ? 'You won the fight.' : 'CPU won the fight.';
   document.getElementById('overlay').classList.remove('hidden');
   playSfx('ko');
   addShake(0.28);
+  notifyFightEnd({
+    winner: match.winner,
+    reason: 'ko',
+    p1: { health: p1.health, config: p1.config },
+    p2: { health: p2.health, config: p2.config },
+  });
 }
 
 const ai = { t: 0, sidestep: 0, inout: 0, block: false, punch: false, kick: false };
 
 function aiProfile() {
-  const d = getSettings().cpu;
-  if (d === 'easy') return { think: [0.45, 0.85], react: 0.18, punch: 0.32, kick: 0.14, special: 0.05, block: 0.18 };
-  if (d === 'hard') return { think: [0.10, 0.16], react: 0.62, punch: 0.55, kick: 0.28, special: 0.38, block: 0.22 };
-  return { think: [0.22, 0.25], react: 0.4, punch: 0.5, kick: 0.25, special: 0.22, block: 0.13 };
+  const custom = p2 && p2.config && p2.config.ai;
+  if (custom && custom.think) return custom;
+  const d = (custom && custom.personality) || getSettings().cpu || 'normal';
+  return { ...(AI_PERSONALITIES[d] || AI_PERSONALITIES.normal) };
 }
 
 function updateAI(cpu, player, dt) {
@@ -694,7 +635,7 @@ function updateAI(cpu, player, dt) {
   ai.punchClip = null;
   ai.kickClip = null;
   ai.t -= dt;
-  if (cpu.state === 'ko' || cpu.state === 'hit' || cpu.state === 'punch' || cpu.state === 'kick') {
+  if (cpu.state === 'ko' || cpu.state === 'down' || isRagdoll(cpu) || cpu.state === 'hit' || cpu.state === 'punch' || cpu.state === 'kick') {
     ai.block = false;
     return ai;
   }
@@ -723,7 +664,7 @@ function updateAI(cpu, player, dt) {
       } else if (r < prof.punch + prof.kick) {
         ai.kick = true;
         ai.kickClip = Math.random() < prof.special
-          ? pickClip(MODEL.animations.kickSpecial, MODEL.animations.kick)
+          ? pickClip(MODEL.animations.flipSpecial || MODEL.animations.kickSpecial, MODEL.animations.kick)
           : pickClip(MODEL.animations.kickVariants, MODEL.animations.kick);
       } else if (r < prof.punch + prof.kick + prof.block) {
         ai.block = true;
@@ -738,7 +679,7 @@ function stepFighter(f, other, inp, dt) {
   f.cooldown = Math.max(0, f.cooldown - dt);
   f.invuln = Math.max(0, f.invuln - dt);
   f.stateT += dt;
-  if (f.state === 'ko') return;
+  if (f.state === 'ko' || f.state === 'down' || isRagdoll(f)) return;
 
   if (f.state === 'hit') {
     if (f.stateT > COMBAT.hitStun) {
@@ -775,15 +716,28 @@ function stepFighter(f, other, inp, dt) {
   const moving = Math.abs(inp.sidestep) + Math.abs(inp.inout) > 0.12;
   if (moving) {
     moveFighter(f, other, inp.sidestep, inp.inout, dt, speed);
+    f.stepT = (f.stepT || 0) + dt;
+    if (f.stepT > 0.32) {
+      f.stepT = 0;
+      playSfx('step', { vol: 0.5 + Math.min(0.25, (Math.abs(inp.sidestep) + Math.abs(inp.inout)) * 0.2) });
+    }
+    f.servoT = (f.servoT || 0) + dt;
+    if (f.servoT > 0.72) {
+      f.servoT = 0;
+      playSfx('servo', { vol: 0.28, rate: 1.05, limit: 200 });
+    }
     if (!f.blocking) {
       f.state = 'walk';
       const clip = moveClipFor(inp.sidestep, inp.inout);
       if (f.current !== clip) setAnim(f, clip, 0.12);
     }
-  } else if (!f.blocking) {
-    const idle = idleClipFor(f);
-    if (f.current !== idle) setAnim(f, idle, 0.18);
-    f.state = 'idle';
+  } else {
+    setFighterMove(f, 0, 0);
+    if (!f.blocking) {
+      const idle = idleClipFor(f);
+      if (f.current !== idle) setAnim(f, idle, 0.18);
+      f.state = 'idle';
+    }
   }
 }
 
@@ -820,10 +774,12 @@ function updateCamera(dt) {
 
 let p1;
 let p2;
-const match = { phase: 'intro', introT: 0, over: false, winner: null, roundLeft: null };
+const match = { phase: 'intro', introT: 0, over: false, winner: null, roundLeft: null, roundIndex: 1, roundTimeOverride: null };
 const clock = new THREE.Clock();
 
 function paintRound() {
+  const label = document.getElementById('roundLabel');
+  if (label) label.textContent = 'ROUND ' + (match.roundIndex || 1);
   const el = document.getElementById('round');
   if (!el) return;
   if (match.roundLeft == null) {
@@ -840,7 +796,7 @@ function paintRound() {
 }
 
 function startRoundClock() {
-  const r = getSettings().round;
+  const r = match.roundTimeOverride != null ? match.roundTimeOverride : getSettings().round;
   match.roundLeft = r > 0 ? r : null;
   paintRound();
 }
@@ -854,6 +810,7 @@ function endByTime() {
     document.getElementById('ko-sub').textContent = 'The round ends in a draw.';
     document.getElementById('overlay').classList.remove('hidden');
     playSfx('ko');
+    notifyFightEnd({ winner: null, reason: 'draw', p1: { health: p1.health, config: p1.config }, p2: { health: p2.health, config: p2.config } });
     return;
   }
   if (p1.health > p2.health) {
@@ -876,6 +833,7 @@ function stepRound(dt) {
 }
 
 function poseAfterMixer(f) {
+  if (isRagdoll(f)) return;
   // Keep the game's movement in charge: pin hips X/Z, leave Y for clip bounce.
   if (f.hips && f.hipsBind) {
     f.hips.position.x = f.hipsBind.x;
@@ -886,6 +844,8 @@ function poseAfterMixer(f) {
 
 function resetMatch() {
   for (const f of [p1, p2]) {
+    disableRagdoll(f);
+    if (f.mixer) f.mixer.timeScale = 1;
     f.health = COMBAT.maxHealth;
     f.state = 'idle';
     f.stateT = 0;
@@ -896,6 +856,7 @@ function resetMatch() {
     f.shield.visible = false;
     f.root.position.set(f.startX, 0, 0);
     f.root.scale.set(1, 1, 1);
+    resetFighterPhysics(f, f.startX, 0);
     f.atkMods = null;
     resetFighterDamage(f, scene);
     setAnim(f, MODEL.animations.getUp || 'idle', 0.08);
@@ -940,6 +901,8 @@ function tick() {
       match.phase = 'fight';
       document.getElementById('banner').classList.remove('show');
       startRoundClock();
+      playSfx('bell');
+      startCrowd();
     }
   }
   if (match.phase === 'fight' && !match.over) stepRound(dt);
@@ -947,34 +910,126 @@ function tick() {
   const pin = canAct ? consumeAttacks(rawInput()) : consumeAttacks({ sidestep: 0, inout: 0, punch: false, kick: false, block: false });
   const ain = canAct ? updateAI(p2, p1, dt) : { sidestep: 0, inout: 0, punch: false, kick: false, block: false };
 
+  for (const f of [p1, p2]) {
+    if (f && f.state === 'down' && isRagdoll(f) && f.phys.ragdoll.until < performance.now()) {
+      disableRagdoll(f);
+      f.state = 'idle';
+      f.stateT = 0;
+      setAnim(f, idleClipFor(f), 0.2);
+    }
+  }
   stepFighter(p1, p2, pin, dt);
   stepFighter(p2, p1, ain, dt);
-  separate(p1, p2);
-  faceEachOther(p1, p2);
-  p1.mixer.update(dt);
-  p2.mixer.update(dt);
-  p1.root.position.y = 0;
-  p2.root.position.y = 0;
-  poseAfterMixer(p1);
-  poseAfterMixer(p2);
-  applyMalfunctions(p1, dt);
-  applyMalfunctions(p2, dt);
+  stepPhysics(dt);
+  if (!isRagdoll(p1) && !isRagdoll(p2)) separate(p1, p2);
+  if (!isRagdoll(p1) && !isRagdoll(p2)) faceEachOther(p1, p2);
+  for (const f of [p1, p2]) {
+    if (isRagdoll(f)) continue;
+    f.mixer.update(dt);
+    f.root.position.y = 0;
+    poseAfterMixer(f);
+    applyMalfunctions(f, dt);
+  }
+  if (isRagdoll(p1)) applyMalfunctions(p1, dt);
+  if (isRagdoll(p2)) applyMalfunctions(p2, dt);
   stepDamage(scene, dt);
 
   if (!match.camLock) updateCamera(dt);
   hitLight.intensity = Math.max(0, hitLight.intensity - dt * 28);
+  setBuzz(isSettingsOpen() ? 0 : buzzFromFighters());
   syncHud();
   renderer.render(scene, camera);
 }
 
+function buzzFromFighters() {
+  let b = 0;
+  for (const f of [p1, p2]) {
+    if (!f || !f.parts) continue;
+    for (const part of Object.values(f.parts)) {
+      if (!part || part.detached || !part.max) continue;
+      const t = 1 - part.hp / part.max;
+      if (t > 0.35) b = Math.max(b, (t - 0.35) / 0.65);
+    }
+  }
+  return b;
+}
+
+function startFightFromShell(opts) {
+  opts = opts || {};
+  if (opts.p1) applyFighterConfig(p1, opts.p1);
+  if (opts.p2) applyFighterConfig(p2, opts.p2);
+  if (opts.round != null) match.roundIndex = opts.round;
+  if (opts.roundTime != null) match.roundTimeOverride = opts.roundTime;
+  if (opts.onEnd) onFightEnd(opts.onEnd);
+  resetMatch();
+  if (opts.skipIntro) {
+    match.phase = 'fight';
+    match.introT = 99;
+    p1.state = 'idle';
+    p2.state = 'idle';
+    setAnim(p1, idleClipFor(p1), 0.1);
+    setAnim(p2, idleClipFor(p2), 0.1);
+    document.getElementById('banner').classList.remove('show');
+    startRoundClock();
+    startCrowd();
+  }
+  paintRound();
+  return getFightState();
+}
+
+function getFightState() {
+  if (!p1 || !p2) return { ready: false };
+  return {
+    ready: true,
+    phase: match.phase,
+    over: match.over,
+    winner: match.winner,
+    roundIndex: match.roundIndex,
+    roundLeft: match.roundLeft,
+    p1: { health: p1.health, state: p1.state, config: p1.config },
+    p2: { health: p2.health, state: p2.state, config: p2.config },
+  };
+}
+
 function onLoad(gltf) {
-  buildArena();
+  const built = buildArenaVisual(scene, { tiled, metalColor, metalRough, metalMetal });
+  addArenaLights(scene, built.fixturePos);
+  initArenaPhysics();
   p1 = makeFighter(gltf, MODEL.colors.p1, 'p1');
   p2 = makeFighter(gltf, MODEL.colors.p2, 'p2');
+  applyFighterConfig(p1, defaultFighterConfig('p1'));
+  applyFighterConfig(p2, defaultFighterConfig('p2'));
+  attachFighter(p1);
+  attachFighter(p2);
+  onPhysicsBounce((kind, impact, rec) => {
+    const vol = Math.min(1, 0.25 + impact / 6.5);
+    const rate = 0.88 + Math.min(0.3, impact / 18);
+    const id = rec && rec.body ? rec.body.id : undefined;
+    if (kind === 'cage' || kind === 'post') playSfx('cage', { vol, rate, id });
+    else playSfx('bounce', { vol, rate, id });
+  });
+  registerFightRuntime({
+    startFight: startFightFromShell,
+    endFight(reason) {
+      if (match.over) return getFightState();
+      if (reason === 'draw' || (p1.health === p2.health)) endByTime();
+      else if (p1.health >= p2.health) ko(p2, p1);
+      else ko(p1, p2);
+      return getFightState();
+    },
+    getState: getFightState,
+    setFighterConfig(id, cfg) {
+      const f = id === 'p2' ? p2 : p1;
+      if (!f) return null;
+      applyFighterConfig(f, cfg);
+      return f.config;
+    },
+  });
   scene.add(p1.root, p2.root);
   applyGfx(gfxKey);
   resize();
   faceEachOther(p1, p2);
+  paintRound();
   syncHud();
   document.getElementById('loader').classList.add('hidden');
   document.getElementById('banner').classList.add('show');

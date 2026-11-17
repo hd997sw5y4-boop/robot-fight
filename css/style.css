@@ -10,7 +10,7 @@ html, body { margin: 0; height: 100%; background: #07080c; color: #eef2f6; font-
   grid-template-columns: 1fr auto 1fr;
   gap: 16px;
   align-items: center;
-  padding: 18px 24px 0;
+  padding: 16px 28px 0;
 }
 .fighter-hud { display: flex; flex-direction: column; gap: 6px; }
 .fighter-hud.right { text-align: right; }
@@ -18,21 +18,24 @@ html, body { margin: 0; height: 100%; background: #07080c; color: #eef2f6; font-
 .fighter-hud.right .parts { justify-content: flex-end; }
 .parts i {
   display: block;
-  width: 11px;
-  height: 7px;
-  border-radius: 1px;
-  background: #49c56c;
-  box-shadow: 0 0 0 1px rgba(0,0,0,0.45);
+  width: 13px;
+  height: 9px;
+  border-radius: 2px;
+  background: #cfd4dc;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.55), 0 1px 4px #0008;
+  opacity: 0.95;
 }
-.parts i[data-part="head"] { width: 8px; border-radius: 4px; }
+.parts i[data-part="head"] { width: 9px; height: 9px; border-radius: 50%; }
+.parts i[data-part="torso"] { width: 11px; height: 12px; }
+.parts i[data-part="legL"], .parts i[data-part="legR"] { width: 8px; height: 12px; }
 .parts i.hurt { background: #e8c14a; }
 .parts i.wreck { background: #2a2d33; box-shadow: 0 0 0 1px #6b6f76; }
-.name { font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; opacity: 0.9; }
+.name { font-size: 13px; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 700; opacity: 0.95; text-shadow: 0 1px 8px #000; }
 .bar {
-  height: 16px;
-  background: rgba(8, 10, 16, 0.7);
-  border: 1px solid rgba(255,255,255,0.18);
-  border-radius: 3px;
+  height: 14px;
+  background: rgba(6, 8, 12, 0.72);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 2px;
   overflow: hidden;
   box-shadow: 0 0 0 1px rgba(0,0,0,0.4), 0 6px 18px rgba(0,0,0,0.35);
 }
@@ -159,8 +162,16 @@ html, body { margin: 0; height: 100%; background: #07080c; color: #eef2f6; font-
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
   position: relative;
+  min-width: 140px;
+}
+.round-label {
+  font: 700 11px/1.2 var(--ww-font, system-ui);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #f4f6fb;
+  text-shadow: 0 1px 8px #000;
 }
 .gear {
   pointer-events: auto;
@@ -186,10 +197,11 @@ html, body { margin: 0; height: 100%; background: #07080c; color: #eef2f6; font-
 .gear[aria-expanded="true"] { background: var(--ww-accent-soft); color: var(--ww-accent); border-color: var(--ww-accent-line); }
 .gear:focus-visible { outline: 2px solid var(--ww-accent); outline-offset: 2px; }
 .round {
-  font: 600 13px/1 ui-monospace, monospace;
-  letter-spacing: 0.08em;
+  font: 700 22px/1.1 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0.04em;
   color: #fff;
   text-shadow: 0 1px 8px #000;
+  font-variant-numeric: tabular-nums;
 }
 .round.low { color: #ffb4b4; }
 .round.hidden { display: none; }
