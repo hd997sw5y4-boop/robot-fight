@@ -528,7 +528,10 @@ function groundFeet(f, dt) {
   }
   f.root.position.y = f.groundY;
   f.model.updateWorldMatrix(true, true);
-  if (!skipIK) plantStanceIK(f, top);
+  // Stance IK is temporarily skipped: the two-bone solver was twisting the legs
+  // and lifting planted feet 8–15 cm off the mat after the 121addd grounding change.
+  if (!skipIK && ARENA.stanceIK) plantStanceIK(f, top);
+
   // Per-frame clamp after IK; not stored, so it can't accumulate.
   minY = lowestFootY(f);
   if (minY != null && minY < top - 0.0004) {
@@ -551,11 +554,27 @@ function plantStanceIK(f, top) {
       low = Math.min(low, _ikT.y);
     }
     const sink = top - low;
-    // Swing foot high in the air: leave the clip alone. Plant if it's through or hovering a little.
-    if (sink < -0.07) continue;
+    // Swing foot, or a huge hover: leave the clip alone. Only nudge a nearly planted foot.
+    if (sink < -0.06 || sink > 0.10) continue;
+    const qThigh = leg.thigh.quaternion.clone();
+    const qShin = leg.shin.quaternion.clone();
+    const qFoot = leg.foot.quaternion.clone();
+    const before = _ikC.clone();
     _ikT.copy(_ikC);
     _ikT.y += sink;
     twoBoneIK(leg.thigh, leg.shin, leg.foot, _ikT);
+    leg.foot.updateWorldMatrix(true, false);
+    leg.foot.getWorldPosition(_ikC);
+    // If the solver missed the target or yanked the ankle, restore the clip pose.
+    if (_ikC.distanceTo(_ikT) > 0.04 || _ikC.distanceTo(before) > 0.12) {
+      leg.thigh.quaternion.copy(qThigh);
+      leg.shin.quaternion.copy(qShin);
+      leg.foot.quaternion.copy(qFoot);
+      leg.thigh.updateMatrix();
+      leg.shin.updateMatrix();
+      leg.foot.updateMatrix();
+      leg.thigh.updateWorldMatrix(true, true);
+    }
   }
 }
 
@@ -604,7 +623,7 @@ function alignBoneToward(bone, origin, toward, child) {
   const parent = bone.parent;
   child.updateWorldMatrix(true, false);
   child.getWorldPosition(_footY);
-  const cur = _footY.sub(origin);
+  const cur = _footY.clone().sub(origin);
   const want = toward.clone().sub(origin);
   if (cur.lengthSq() < 1e-10 || want.lengthSq() < 1e-10) return;
   cur.normalize();
@@ -614,9 +633,8 @@ function alignBoneToward(bone, origin, toward, child) {
   worldQ.premultiply(_ikQ);
   if (parent) {
     parent.updateWorldMatrix(true, false);
-    _ikInv.copy(parent.matrixWorld).invert();
     const parentQ = new THREE.Quaternion();
-    _ikInv.decompose(_ikA, parentQ, _ikB);
+    parent.getWorldQuaternion(parentQ);
     bone.quaternion.copy(parentQ.invert().multiply(worldQ));
   } else {
     bone.quaternion.copy(worldQ);

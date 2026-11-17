@@ -64,6 +64,8 @@ export const ARENA = {
   // Visible fence/posts/rails. Physics ring walls stay on either way so fighters and debris stay in.
   // Set true later to bring the cage back.
   cage: false,
+  // Two-bone stance IK is off: the solver was twisting legs and lifting feet off the mat.
+  stanceIK: false,
 };
 
 export const COMBAT = {
