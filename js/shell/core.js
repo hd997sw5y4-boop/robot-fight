@@ -1,7 +1,7 @@
 /* Window Workshop Games — Robot Fight game shell: core (namespace, hook, input, loop).
    Plain script (no bundler). Drives fights through the public js/api.js (startFight / getState /
    setFighterConfig), loaded with a dynamic import so it is the same module instance game.js uses.
-   js/game.js only calls window.RFShellHook for input override, pause, and a read handle. */
+   js/game.js only calls window.RFShellHook for an input override and a lazy read handle. */
 (function () {
   'use strict';
   const S = (window.RFShell = window.RFShell || {});
@@ -34,7 +34,6 @@
   let handle = null;
   window.RFShellHook = {
     onReady(h) { handle = h; tryReady(); },
-    paused() { return S.state.paused; },
     input(side) { return S.inputFor ? S.inputFor(side) : null; },
   };
   const modUrl = (p) => new URL(p, document.baseURI).href;
@@ -48,6 +47,13 @@
     const st = S.fight.getFightState();
     if (!st || !st.ready) { setTimeout(tryReady, 50); return; }
     S.api = handle;
+    // Pause without touching the game loop: the shared clock reports zero time while paused.
+    const clock = handle.clock;
+    if (clock && !clock.__rfsWrapped) {
+      const getDelta = clock.getDelta.bind(clock);
+      clock.getDelta = () => { const d = getDelta(); return S.state.paused ? 0 : d; };
+      clock.__rfsWrapped = true;
+    }
     S.emit('ready');
   }
 

@@ -53,6 +53,15 @@ function shellCall(name, ...args) {
   const sh = window.RFShellHook;
   return sh && typeof sh[name] === 'function' ? sh[name](...args) : undefined;
 }
+// Lazy read handle for the shell (paint, stats, menu camera, pause via the clock). Getters only.
+shellCall('onReady', {
+  THREE,
+  get camera() { return camera; },
+  get clock() { return clock; },
+  get match() { return match; },
+  get p1() { return p1; },
+  get p2() { return p2; },
+});
 
 let gfxKey = getSettings().gfx === 'low' ? 'low' : 'high';
 
@@ -891,7 +900,7 @@ function resetMatch() {
 function tick() {
   const rawDt = Math.min(0.05, clock.getDelta());
   updateFps(rawDt);
-  const dt = (isSettingsOpen() || shellCall('paused')) ? 0 : rawDt; // [game-shell hook] pause menu
+  const dt = isSettingsOpen() ? 0 : rawDt;
   if (match.phase === 'getup') {
     match.getupT = (match.getupT || 0) + dt;
     const getup = (p1.actions.GettingUp || p1.actions.getUp);
@@ -1063,7 +1072,6 @@ function onLoad(gltf) {
     syncHud();
     renderer.render(scene, camera);
   };
-  shellCall('onReady', { THREE, camera, match, get p1() { return p1; }, get p2() { return p2; } }); // [game-shell hook]
   renderer.setAnimationLoop(tick);
 }
 
