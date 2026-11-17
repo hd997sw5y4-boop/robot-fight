@@ -514,30 +514,25 @@ function groundFeet(f, dt) {
   if (f.parts && f.parts.legL && f.parts.legL.detached && f.parts.legR && f.parts.legR.detached) return;
   const skipIK = f.state === 'getup' && (f.getupBlend || 0) > 0.2;
   const top = matTopY();
+  // Measure the animated pose with the root at zero, so last frame's lift never feeds back
+  // into this frame (that feedback ratcheted the robots up into the air).
+  f.root.position.y = 0;
   let minY = lowestFootY(f);
   if (minY == null) return;
-  const err = top - minY;
+  const target = top - minY;
   f.groundY = f.groundY || 0;
-  // World-space lift on the root (root scale is 1). Lift instantly so feet never stay below the mat;
-  // ease downward so the stance doesn't bounce.
-  if (err > 0.0004) f.groundY += err;
-  else if (err < -0.0004) {
-    const k = 1 - Math.pow(0.0008, Math.max(dt || 0.016, 1 / 120));
-    f.groundY += err * k;
+  if (target > f.groundY) f.groundY = target; // lift instantly: feet never sink
+  else {
+    const k = 1 - Math.pow(0.0005, Math.max(dt || 0.016, 1 / 120));
+    f.groundY += (target - f.groundY) * k; // settle down quickly but smoothly
   }
   f.root.position.y = f.groundY;
-  minY = lowestFootY(f);
-  if (minY != null && minY < top - 0.0004) {
-    f.groundY += (top - minY);
-    f.root.position.y = f.groundY;
-    f.model.updateWorldMatrix(true, true);
-  }
+  f.model.updateWorldMatrix(true, true);
   if (!skipIK) plantStanceIK(f, top);
-  // Final clamp after IK (IK can dip a toe).
+  // Per-frame clamp after IK; not stored, so it can't accumulate.
   minY = lowestFootY(f);
   if (minY != null && minY < top - 0.0004) {
-    f.groundY += (top - minY);
-    f.root.position.y = f.groundY;
+    f.root.position.y += (top - minY);
   }
 }
 
