@@ -55,6 +55,10 @@ function classifyObject(obj) {
 function ensureDeformable(mesh) {
   if (mesh.userData.deformReady) return;
   mesh.geometry = mesh.geometry.clone();
+  // The packed GLB stores some vertex data interleaved; dents need plain, writable arrays.
+  for (const [name, attr] of Object.entries(mesh.geometry.attributes)) {
+    if (attr.isInterleavedBufferAttribute) mesh.geometry.setAttribute(name, attr.clone());
+  }
   const pos = mesh.geometry.attributes.position;
   if (!mesh.geometry.attributes.color) {
     const colors = new Float32Array(pos.count * 3);
