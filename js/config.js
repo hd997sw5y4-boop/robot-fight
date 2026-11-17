@@ -69,6 +69,8 @@ export const ARENA = {
   // Arena lights stay on either way.
   hdri: false,
   hdriUrl: './hdris/industrial_pipe_and_valve_01_2k.hdr',
+  // Two-bone stance IK is off: the solver was twisting legs and lifting feet off the mat.
+  stanceIK: false,
 };
 
 export const COMBAT = {
