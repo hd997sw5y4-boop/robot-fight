@@ -48,6 +48,12 @@ const canvas = document.getElementById('c');
 const keys = new Set();
 const held = { punch: false, kick: false };
 
+// [game-shell hook] Optional menus / rounds / ladder layer (js/shell/*.js). No-op when absent.
+function shellCall(name, ...args) {
+  const sh = window.RFShellHook;
+  return sh && typeof sh[name] === 'function' ? sh[name](...args) : undefined;
+}
+
 let gfxKey = getSettings().gfx === 'low' ? 'low' : 'high';
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -408,6 +414,8 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 
 function rawInput() {
+  const shellInp = shellCall('input', 'p1'); // [game-shell hook] versus keys / menu idle
+  if (shellInp) return shellInp;
   const inp = { sidestep: 0, inout: 0, punch: false, kick: false, block: false };
   if (keys.has('a') || keys.has('arrowleft')) inp.sidestep -= 1;
   if (keys.has('d') || keys.has('arrowright')) inp.sidestep += 1;
@@ -630,6 +638,8 @@ function aiProfile() {
 }
 
 function updateAI(cpu, player, dt) {
+  const shellAi = shellCall('input', 'p2'); // [game-shell hook] versus P2 / training dummy / menu idle
+  if (shellAi) return shellAi;
   ai.punch = false;
   ai.kick = false;
   ai.punchClip = null;
@@ -881,7 +891,7 @@ function resetMatch() {
 function tick() {
   const rawDt = Math.min(0.05, clock.getDelta());
   updateFps(rawDt);
-  const dt = isSettingsOpen() ? 0 : rawDt;
+  const dt = (isSettingsOpen() || shellCall('paused')) ? 0 : rawDt; // [game-shell hook] pause menu
   if (match.phase === 'getup') {
     match.getupT = (match.getupT || 0) + dt;
     const getup = (p1.actions.GettingUp || p1.actions.getUp);
@@ -1053,6 +1063,7 @@ function onLoad(gltf) {
     syncHud();
     renderer.render(scene, camera);
   };
+  shellCall('onReady', { THREE, camera, match, get p1() { return p1; }, get p2() { return p2; } }); // [game-shell hook]
   renderer.setAnimationLoop(tick);
 }
 

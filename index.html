@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Robot Fight</title>
   <link rel="stylesheet" href="./css/style.css">
+  <link rel="stylesheet" href="./css/shell.css">
   <script type="importmap">
   {
     "imports": {
@@ -150,6 +151,11 @@
       </section>
     </div>
   </div>
+  <!-- Game shell (menus, rounds, arcade, training, fighter select). Classic scripts; they run before the game module. -->
+  <script src="./js/shell/core.js"></script>
+  <script src="./js/shell/roster.js"></script>
+  <script src="./js/shell/match.js"></script>
+  <script src="./js/shell/menus.js"></script>
   <script type="module" src="./js/game.js"></script>
 </body>
 </html>
