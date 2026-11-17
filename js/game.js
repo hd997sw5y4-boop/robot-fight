@@ -994,11 +994,10 @@ function pickBlock(f, other) {
 
 function pickHitClip(f, partId) {
   const map = MODEL.animations.hitByPart || {};
-  const extra = ['Stunned', 'StumbleBackwards', 'HitToBody', 'BigStomachHit', 'HeadHit', 'HitOnSideOfHead', 'HitOnLegs'];
+  const extra = ['Stunned', 'HitToBody', 'BigStomachHit', 'HeadHit', 'HitOnSideOfHead', 'HitOnLegs'];
   const list = availableClips(f, (map[partId] || map.torso || []).concat(extra));
   const clip = pickClip(list, MODEL.animations.hit || 'Stunned', f.lastHit, f, (n) => {
     if ((map[partId] || []).includes(n)) return 3;
-    if (n === 'StumbleBackwards') return 0.6;
     return 1;
   });
   f.lastHit = clip;
@@ -1228,11 +1227,13 @@ function applyHit(atk, def, spec, kind) {
   if (!blocked && heavy) triggerHitStop(0.09);
   else if (!blocked) triggerHitStop(0.04);
   const fwd = hit.dir;
-  const kb = COMBAT.knockback * (blocked ? 0.35 : 1) * (0.8 + force * 0.08);
-  if (def.phys && def.phys.body && !isRagdoll(def)) {
-    def.phys.body.velocity.x += fwd.x * kb * 3.6;
-    def.phys.body.velocity.z += fwd.z * kb * 3.6;
-  } else {
+  // No free sliding: a blocked hit is absorbed by the guard, a light hit only rocks the robot
+  // a few centimetres (hidden inside its in-place hit clip), and a solid hit becomes a real
+  // stumble-back whose travel is spread over the clip's own steps (see stepFighter 'hit').
+  const solid = !blocked && force >= COMBAT.stumbleForce;
+  const stumbleClip = solid && def.actions.StumbleBackwards ? 'StumbleBackwards' : null;
+  if (!(def.phys && def.phys.body && !isRagdoll(def))) {
+    const kb = blocked ? 0 : COMBAT.hitRock * (0.8 + force * 0.08);
     def.root.position.x += fwd.x * kb;
     def.root.position.z += fwd.z * kb;
     placeInOctagon(def.root.position, 0.55, true);
@@ -1252,7 +1253,14 @@ function applyHit(atk, def, spec, kind) {
     } else {
       def.state = 'hit';
       def.stateT = 0;
-      setAnim(def, pickHitClip(def, hit.partId), 0.16);
+      const clip = stumbleClip || pickHitClip(def, hit.partId);
+      setAnim(def, clip, 0.12);
+      const act = def.actions[clip];
+      const clipDur = act ? act.getClip().duration / Math.max(0.2, act.timeScale || 1) : COMBAT.hitStun;
+      def.hitDur = stumbleClip ? Math.min(clipDur * 0.9, 1.6) : COMBAT.hitStun;
+      def.hitPush = stumbleClip
+        ? { x: fwd.x, z: fwd.z, dist: COMBAT.stumbleDist * Math.min(1.3, 0.75 + force * 0.06), t0: 0.06, t1: def.hitDur * 0.8 }
+        : { x: fwd.x, z: fwd.z, dist: COMBAT.hitRock * (0.8 + force * 0.08), t0: 0, t1: 0.14 };
     }
   }
 }
@@ -1402,7 +1410,17 @@ function stepFighter(f, other, inp, dt) {
   if (maybeKneeDrop(f, dt)) return;
 
   if (f.state === 'hit') {
-    if (f.stateT > COMBAT.hitStun) {
+    // Hit travel follows the reaction: a smooth sine-shaped push inside [t0, t1], zero outside,
+    // so the feet are never dragged across the mat by leftover velocity.
+    const hp = f.hitPush;
+    if (hp && f.stateT >= hp.t0 && f.stateT <= hp.t1) {
+      const span = Math.max(0.05, hp.t1 - hp.t0);
+      const u = (f.stateT - hp.t0) / span;
+      const v = (hp.dist / span) * (Math.PI / 2) * Math.sin(Math.PI * u);
+      setFighterMove(f, hp.x * v, hp.z * v);
+    } else setFighterMove(f, 0, 0);
+    if (f.stateT > (f.hitDur || COMBAT.hitStun)) {
+      f.hitPush = null;
       f.state = 'idle';
       setAnim(f, idleClipFor(f), 0.16);
     }

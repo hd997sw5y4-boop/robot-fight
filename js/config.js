@@ -87,7 +87,9 @@ export const COMBAT = {
   blockReduction: 0.82,
   hitStun: 0.62,
   hitInvuln: 0.28,
-  knockback: 1.6,
+  hitRock: 0.07,       // metres a light hit rocks a robot back (inside the hit clip)
+  stumbleForce: 3.8,   // impact force that turns a hit into a stepped stumble-back
+  stumbleDist: 0.75,   // metres travelled over the StumbleBackwards steps
   separate: 0.85,
 };
 
