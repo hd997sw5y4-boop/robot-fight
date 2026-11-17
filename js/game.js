@@ -3,6 +3,8 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MODEL, ARENA, COMBAT, GFX_PRESETS, LOOP_CLIPS } from './config.js';
+import { getSettings, isSettingsOpen, initSettings, updateFps } from './settings.js';
+import { unlockAudio, playSfx } from './audio.js';
 import {
   prepareFighterDamage,
   canPunch,
@@ -25,10 +27,7 @@ const canvas = document.getElementById('c');
 const keys = new Set();
 const held = { punch: false, kick: false };
 
-let gfxKey = 'high';
-try { gfxKey = localStorage.getItem('rf_gfx') || 'high'; } catch (_) {}
-const gfxSelect = document.getElementById('gfx');
-if (gfxSelect) gfxSelect.value = gfxKey === 'low' ? 'low' : 'high';
+let gfxKey = getSettings().gfx === 'low' ? 'low' : 'high';
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -109,6 +108,16 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 window.addEventListener('resize', resize);
+initSettings({
+  applyGfx,
+  onChange(s) {
+    if (s.round === 0) {
+      match.roundLeft = null;
+      paintRound();
+    }
+  },
+});
+window.addEventListener('pointerdown', unlockAudio, { once: true });
 
 const texLoader = new THREE.TextureLoader();
 function loadTex(url, colorSpace) {
@@ -473,6 +482,9 @@ function moveClipFor(sidestep, inout) {
 }
 
 window.addEventListener('keydown', (e) => {
+  unlockAudio();
+  if (e.key === 'Escape') return;
+  if (isSettingsOpen()) return;
   keys.add(e.key.toLowerCase());
   if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(e.key.toLowerCase())) e.preventDefault();
 });
@@ -584,6 +596,7 @@ function tryAttack(f, kind, clipName) {
   f.blocking = false;
   f.shield.visible = false;
   setAnim(f, clip, 0.08);
+  playSfx('whoosh');
   const action = f.actions[clip] || f.actions[kind];
   if (action) {
     action.timeScale = mods.timeScale;
@@ -627,6 +640,8 @@ function applyHit(atk, def, spec, kind) {
   hitLight.color.setHex(blocked ? 0x88ccff : 0xffe08a);
   hitLight.intensity = 9;
   hitLight.position.copy(hit.point);
+  playSfx(blocked ? 'block' : 'hit');
+  addShake(blocked ? 0.08 : 0.16 + dmg * 0.01);
   const fwd = hit.dir;
   const kb = COMBAT.knockback * (blocked ? 0.35 : 1);
   def.root.position.x += fwd.x * kb;
@@ -660,9 +675,18 @@ function ko(loser, winner) {
   document.getElementById('ko-title').textContent = winner.id === 'p1' ? 'Blue wins' : 'Red wins';
   document.getElementById('ko-sub').textContent = winner.id === 'p1' ? 'You won the fight.' : 'CPU won the fight.';
   document.getElementById('overlay').classList.remove('hidden');
+  playSfx('ko');
+  addShake(0.28);
 }
 
 const ai = { t: 0, sidestep: 0, inout: 0, block: false, punch: false, kick: false };
+
+function aiProfile() {
+  const d = getSettings().cpu;
+  if (d === 'easy') return { think: [0.45, 0.85], react: 0.18, punch: 0.32, kick: 0.14, special: 0.05, block: 0.18 };
+  if (d === 'hard') return { think: [0.10, 0.16], react: 0.62, punch: 0.55, kick: 0.28, special: 0.38, block: 0.22 };
+  return { think: [0.22, 0.25], react: 0.4, punch: 0.5, kick: 0.25, special: 0.22, block: 0.13 };
+}
 
 function updateAI(cpu, player, dt) {
   ai.punch = false;
@@ -676,9 +700,10 @@ function updateAI(cpu, player, dt) {
   }
   const d = cpu.root.position.distanceTo(player.root.position);
   if (ai.t <= 0) {
-    ai.t = 0.22 + Math.random() * 0.25;
+    const prof = aiProfile();
+    ai.t = prof.think[0] + Math.random() * prof.think[1];
     ai.block = false;
-    if ((player.state === 'punch' || player.state === 'kick') && d < 1.8 && Math.random() < 0.4) {
+    if ((player.state === 'punch' || player.state === 'kick') && d < 1.8 && Math.random() < prof.react) {
       ai.block = true;
       ai.inout = -0.25;
       ai.sidestep = 0;
@@ -692,15 +717,15 @@ function updateAI(cpu, player, dt) {
       ai.inout = 0;
       ai.sidestep = (Math.random() - 0.5) * 1.2;
       const r = Math.random();
-      if (r < 0.5) {
+      if (r < prof.punch) {
         ai.punch = true;
         ai.punchClip = pickClip(MODEL.animations.punchVariants, MODEL.animations.punch);
-      } else if (r < 0.75) {
+      } else if (r < prof.punch + prof.kick) {
         ai.kick = true;
-        ai.kickClip = Math.random() < 0.22
+        ai.kickClip = Math.random() < prof.special
           ? pickClip(MODEL.animations.kickSpecial, MODEL.animations.kick)
           : pickClip(MODEL.animations.kickVariants, MODEL.animations.kick);
-      } else if (r < 0.88) {
+      } else if (r < prof.punch + prof.kick + prof.block) {
         ai.block = true;
         ai.blockClip = pickClip(MODEL.animations.blockVariants, MODEL.animations.block);
       }
@@ -772,20 +797,83 @@ function syncHud() {
 
 const camT = new THREE.Vector3();
 const lookT = new THREE.Vector3();
+let shakeAmp = 0;
+function addShake(amount) {
+  if (!getSettings().shake) return;
+  shakeAmp = Math.min(0.45, shakeAmp + amount);
+}
+
 function updateCamera(dt) {
   const a = p1.root.position;
   const b = p2.root.position;
   lookT.set((a.x + b.x) / 2, 1.15, (a.z + b.z) / 2);
   const dist = a.distanceTo(b);
   camT.set(lookT.x, 3.15, lookT.z + 11.2 + dist * 0.35);
-  camera.position.lerp(camT, 1 - Math.pow(0.001, dt));
+  camera.position.lerp(camT, dt <= 0 ? 0 : 1 - Math.pow(0.001, dt));
   camera.lookAt(lookT);
+  if (shakeAmp > 0) {
+    camera.position.x += (Math.random() - 0.5) * shakeAmp;
+    camera.position.y += (Math.random() - 0.5) * shakeAmp * 0.55;
+    if (dt > 0) shakeAmp = Math.max(0, shakeAmp - dt * 2.4);
+  }
 }
 
 let p1;
 let p2;
-const match = { phase: 'intro', introT: 0, over: false, winner: null };
+const match = { phase: 'intro', introT: 0, over: false, winner: null, roundLeft: null };
 const clock = new THREE.Clock();
+
+function paintRound() {
+  const el = document.getElementById('round');
+  if (!el) return;
+  if (match.roundLeft == null) {
+    el.classList.add('hidden');
+    el.textContent = '';
+    return;
+  }
+  const t = Math.max(0, Math.ceil(match.roundLeft));
+  const m = Math.floor(t / 60);
+  const s = String(t % 60).padStart(2, '0');
+  el.textContent = m + ':' + s;
+  el.classList.toggle('low', t <= 10);
+  el.classList.remove('hidden');
+}
+
+function startRoundClock() {
+  const r = getSettings().round;
+  match.roundLeft = r > 0 ? r : null;
+  paintRound();
+}
+
+function endByTime() {
+  if (match.over) return;
+  if (p1.health === p2.health) {
+    match.over = true;
+    match.winner = null;
+    document.getElementById('ko-title').textContent = "Time's up";
+    document.getElementById('ko-sub').textContent = 'The round ends in a draw.';
+    document.getElementById('overlay').classList.remove('hidden');
+    playSfx('ko');
+    return;
+  }
+  if (p1.health > p2.health) {
+    ko(p2, p1);
+    document.getElementById('ko-sub').textContent = 'Time ran out. You had more health.';
+  } else {
+    ko(p1, p2);
+    document.getElementById('ko-sub').textContent = 'Time ran out. CPU had more health.';
+  }
+}
+
+function stepRound(dt) {
+  if (match.roundLeft == null || match.over || match.phase !== 'fight') return;
+  match.roundLeft -= dt;
+  if (match.roundLeft <= 0) {
+    match.roundLeft = 0;
+    endByTime();
+  }
+  paintRound();
+}
 
 function poseAfterMixer(f) {
   // Keep the game's movement in charge: pin hips X/Z, leave Y for clip bounce.
@@ -820,6 +908,8 @@ function resetMatch() {
   match.phase = 'getup';
   match.getupT = 0;
   match.camLock = false;
+  match.roundLeft = null;
+  paintRound();
   const banner = document.getElementById('banner');
   banner.style.opacity = '';
   banner.classList.remove('show');
@@ -828,7 +918,9 @@ function resetMatch() {
 }
 
 function tick() {
-  const dt = Math.min(0.05, clock.getDelta());
+  const rawDt = Math.min(0.05, clock.getDelta());
+  updateFps(rawDt);
+  const dt = isSettingsOpen() ? 0 : rawDt;
   if (match.phase === 'getup') {
     match.getupT = (match.getupT || 0) + dt;
     const getup = (p1.actions.GettingUp || p1.actions.getUp);
@@ -847,9 +939,11 @@ function tick() {
     if (match.introT > 1.05) {
       match.phase = 'fight';
       document.getElementById('banner').classList.remove('show');
+      startRoundClock();
     }
   }
-  const canAct = match.phase === 'fight' && !match.over;
+  if (match.phase === 'fight' && !match.over) stepRound(dt);
+  const canAct = match.phase === 'fight' && !match.over && !isSettingsOpen();
   const pin = canAct ? consumeAttacks(rawInput()) : consumeAttacks({ sidestep: 0, inout: 0, punch: false, kick: false, block: false });
   const ain = canAct ? updateAI(p2, p1, dt) : { sidestep: 0, inout: 0, punch: false, kick: false, block: false };
 
@@ -885,10 +979,6 @@ function onLoad(gltf) {
   document.getElementById('loader').classList.add('hidden');
   document.getElementById('banner').classList.add('show');
   document.getElementById('again').addEventListener('click', resetMatch);
-  gfxSelect.addEventListener('change', () => {
-    applyGfx(gfxSelect.value);
-    try { localStorage.setItem('rf_gfx', gfxKey); } catch (_) {}
-  });
   window.__rfPreviewDamage = () => {
     match.phase = 'fight';
     match.introT = 99;

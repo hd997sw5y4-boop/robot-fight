@@ -132,3 +132,204 @@ html, body { margin: 0; height: 100%; background: #07080c; color: #eef2f6; font-
 #loader .spin { text-align: center; letter-spacing: 0.16em; text-transform: uppercase; font-size: 13px; color: #c5ced6; }
 #loader .barline { width: 180px; height: 4px; margin: 14px auto 0; background: #1a1e28; border-radius: 2px; overflow: hidden; }
 #loader .barline > i { display: block; height: 100%; width: 0; background: #5ea0ff; }
+
+/* Settings panel: periwinkle sheet look adapted from WW3D ui2027.css + menu-tidy.js */
+:root {
+  --ww-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --ww-accent: #9AABFF;
+  --ww-accent-soft: rgba(154,171,255,.16);
+  --ww-accent-line: rgba(154,171,255,.42);
+  --ww-text: #f4f6fb;
+  --ww-text-2: rgba(236,239,248,.72);
+  --ww-surface: rgba(19,21,29,.92);
+  --ww-glass: rgba(22,25,35,.58);
+  --ww-glass-strong: rgba(18,20,29,.78);
+  --ww-fill-2: rgba(255,255,255,.1);
+  --ww-line: rgba(255,255,255,.1);
+  --ww-hi: inset 0 1px 0 rgba(255,255,255,.07);
+  --ww-shadow: 0 6px 20px rgba(0,0,0,.32), 0 1px 2px rgba(0,0,0,.25);
+  --ww-shadow-lg: 0 18px 48px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.25);
+  --ww-blur: blur(18px) saturate(1.5);
+  --ww-r: 12px;
+  --ww-r-lg: 16px;
+  --ww-t: .16s;
+  --ww-ease: cubic-bezier(.2,.8,.2,1);
+}
+.title-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+}
+.gear {
+  pointer-events: auto;
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: var(--ww-r);
+  border: 1px solid var(--ww-line);
+  background: var(--ww-surface);
+  box-shadow: var(--ww-shadow), var(--ww-hi);
+  color: var(--ww-text-2);
+  cursor: pointer;
+  transition: background-color var(--ww-t) var(--ww-ease), color var(--ww-t) var(--ww-ease), border-color var(--ww-t) var(--ww-ease);
+}
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .gear { background: var(--ww-glass); -webkit-backdrop-filter: var(--ww-blur); backdrop-filter: var(--ww-blur); }
+}
+.gear:hover { background: var(--ww-fill-2); color: var(--ww-text); }
+.gear[aria-expanded="true"] { background: var(--ww-accent-soft); color: var(--ww-accent); border-color: var(--ww-accent-line); }
+.gear:focus-visible { outline: 2px solid var(--ww-accent); outline-offset: 2px; }
+.round {
+  font: 600 13px/1 ui-monospace, monospace;
+  letter-spacing: 0.08em;
+  color: #fff;
+  text-shadow: 0 1px 8px #000;
+}
+.round.low { color: #ffb4b4; }
+.round.hidden { display: none; }
+
+#fps {
+  position: absolute;
+  left: 20px;
+  bottom: 52px;
+  font: 11px/1 ui-monospace, monospace;
+  letter-spacing: 0.04em;
+  color: #c5ced6;
+  text-shadow: 0 1px 6px #000;
+  pointer-events: none;
+}
+#fps.hidden { display: none; }
+#bottom.hidden { display: none; }
+
+#setpBack {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgba(8,10,16,.55);
+  pointer-events: auto;
+}
+#setpBack[hidden] { display: none; }
+#setp {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(520px, 94vw);
+  max-height: min(86vh, 860px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  z-index: 21;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 16px 18px;
+  border-radius: 18px;
+  background: #14161c;
+  color: var(--ww-text);
+  border: 1px solid var(--ww-accent-line);
+  box-shadow: 0 18px 50px #000c, 0 0 0 1px rgba(154,171,255,.12), 0 0 22px rgba(126,148,255,.18);
+  font: 15px/1.4 var(--ww-font);
+}
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  #setp {
+    background: var(--ww-glass-strong);
+    -webkit-backdrop-filter: var(--ww-blur);
+    backdrop-filter: var(--ww-blur);
+  }
+}
+#setp.hidden { display: none; }
+#setp .mtHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  position: sticky;
+  top: -16px;
+  z-index: 2;
+  margin: -16px -16px 0;
+  padding: 14px 16px;
+  background: #14161c;
+  border-bottom: 1px solid rgba(154,171,255,.28);
+}
+#setp .mtHead b { font: 600 17px/1.2 var(--ww-font); letter-spacing: .01em; }
+#setpX {
+  min-height: 36px;
+  min-width: 72px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(154,171,255,.55);
+  background: #22283a;
+  color: var(--ww-text);
+  font: 600 14px var(--ww-font);
+  cursor: pointer;
+}
+#setpX:hover { border-color: var(--ww-accent); box-shadow: 0 0 0 1px rgba(154,171,255,.35); }
+#setp .mgrid { display: flex; flex-direction: column; gap: 8px; }
+#setp .mcat {
+  background: #1b1e28;
+  border: 1px solid rgba(154,171,255,.22);
+  border-radius: 14px;
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+#setp .mcat h3 {
+  margin: 0;
+  font: 600 12px/1.2 var(--ww-font);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ww-accent);
+}
+#setp .mcat h4 {
+  margin: 8px 0 0;
+  font: 600 12px/1.2 var(--ww-font);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #c5cdf5;
+}
+#setp label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 32px;
+  color: var(--ww-text);
+  font-size: 14px;
+}
+#setp label input[type=range] { flex: 1 1 120px; max-width: 190px; accent-color: var(--ww-accent); }
+#setp label b { min-width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; color: #c5cdf5; font-weight: 600; }
+#setp select {
+  max-width: 220px;
+  min-height: 36px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #12141c;
+  color: var(--ww-text);
+  border: 1px solid rgba(154,171,255,.4);
+  font: 14px var(--ww-font);
+}
+#setp input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--ww-accent); }
+#setp .hint { margin: 0; color: #b7bdd0; font-size: 12px; line-height: 1.35; }
+#setp .keymap { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; }
+#setp .keymap h4 { margin: 4px 0 0; }
+#setp .keymap ul { margin: 2px 0 0; padding: 0 0 0 18px; color: #c5ced6; font-size: 13px; }
+#setp .keymap li { margin: 2px 0; }
+#setp .keymap kbd {
+  display: inline-block;
+  border: 1px solid rgba(255,255,255,0.25);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 5px;
+  font: 11px/1.6 ui-monospace, monospace;
+  background: rgba(0,0,0,0.35);
+  color: #fff;
+}
+#setp :is(button, select, input):focus-visible { outline: 2px solid var(--ww-accent); outline-offset: 2px; }

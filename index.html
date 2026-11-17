@@ -31,7 +31,16 @@
           <i data-part="legR" title="Right leg"></i>
         </div>
       </div>
-      <div class="title">Window Workshop Games<strong>Robot Fight</strong></div>
+      <div class="title-wrap">
+        <div class="title">Window Workshop Games<strong>Robot Fight</strong></div>
+        <div id="round" class="round hidden" aria-live="polite"></div>
+        <button type="button" id="settingsBtn" class="gear" title="Settings" aria-label="Settings" aria-haspopup="dialog" aria-expanded="false">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+      </div>
       <div class="fighter-hud right">
         <div class="name" id="n2">Red — CPU</div>
         <div class="bar red"><i id="hp2"></i></div>
@@ -46,22 +55,17 @@
       </div>
     </div>
     <div id="bottom">
-      <div>
+      <div id="controlsHint">
         <kbd>A</kbd>/<kbd>D</kbd> sidestep
         · <kbd>W</kbd>/<kbd>S</kbd> in/out
         · <kbd>J</kbd> punch
         · <kbd>K</kbd> kick
         · <kbd>L</kbd> block
         · gamepad OK
-      </div>
-      <div id="gfx-wrap">
-        <label for="gfx">Graphics</label>
-        <select id="gfx">
-          <option value="high">High</option>
-          <option value="low">Low</option>
-        </select>
+        · <kbd>Esc</kbd> settings
       </div>
     </div>
+    <div id="fps" class="hidden" aria-hidden="true">0 FPS</div>
   </div>
   <div id="banner"><span>FIGHT!</span></div>
   <div id="overlay" class="hidden">
@@ -69,6 +73,77 @@
       <h2 id="ko-title">Down</h2>
       <p id="ko-sub">The match is over.</p>
       <button type="button" id="again">Fight again</button>
+    </div>
+  </div>
+  <div id="setpBack" hidden></div>
+  <div id="setp" class="hidden" role="dialog" aria-labelledby="setpTitle" aria-modal="true">
+    <div class="mtHead">
+      <b id="setpTitle">Settings</b>
+      <button type="button" id="setpX">Done</button>
+    </div>
+    <div class="mgrid">
+      <section class="mcat">
+        <h3>Display</h3>
+        <label>Graphics
+          <select id="setGfx">
+            <option value="high">High</option>
+            <option value="low">Low</option>
+          </select>
+        </label>
+        <label>Camera shake <input type="checkbox" id="setShake"></label>
+        <label>FPS counter <input type="checkbox" id="setFps"></label>
+      </section>
+      <section class="mcat">
+        <h3>Sound</h3>
+        <label>Master volume <b id="setMasterV">100%</b>
+          <input type="range" id="setMaster" min="0" max="1" step="0.01">
+        </label>
+        <label>SFX volume <b id="setSfxV">100%</b>
+          <input type="range" id="setSfx" min="0" max="1" step="0.01">
+        </label>
+        <p class="hint">Double-click a slider to reset to 100%.</p>
+      </section>
+      <section class="mcat">
+        <h3>Fight</h3>
+        <label>CPU difficulty
+          <select id="setCpu">
+            <option value="easy">Easy</option>
+            <option value="normal">Normal</option>
+            <option value="hard">Hard</option>
+          </select>
+        </label>
+        <label>Round time
+          <select id="setRound">
+            <option value="0">Off</option>
+            <option value="60">60 seconds</option>
+            <option value="90">90 seconds</option>
+            <option value="120">120 seconds</option>
+          </select>
+        </label>
+      </section>
+      <section class="mcat">
+        <h3>Controls</h3>
+        <label>Show controls overlay <input type="checkbox" id="setControls"></label>
+        <div class="keymap">
+          <div>
+            <h4>Keyboard</h4>
+            <ul>
+              <li><kbd>A</kbd> / <kbd>D</kbd> or arrows — sidestep</li>
+              <li><kbd>W</kbd> / <kbd>S</kbd> or arrows — in / out</li>
+              <li><kbd>J</kbd> punch · <kbd>K</kbd> kick · <kbd>L</kbd> block</li>
+              <li><kbd>Esc</kbd> open or close this panel</li>
+            </ul>
+          </div>
+          <div>
+            <h4>Gamepad</h4>
+            <ul>
+              <li>Left stick or D-pad — move</li>
+              <li><kbd>A</kbd> / × punch · <kbd>B</kbd> / ○ kick</li>
+              <li><kbd>X</kbd> / □ or a shoulder button — block</li>
+            </ul>
+          </div>
+        </div>
+      </section>
     </div>
   </div>
   <script type="module" src="./js/game.js"></script>
