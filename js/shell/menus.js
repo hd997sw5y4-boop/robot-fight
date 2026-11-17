@@ -31,10 +31,11 @@
   const KEYS_SOLO = `
     <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows <span>move</span></li>
     <li><kbd>J</kbd> <span>punch</span> <kbd>K</kbd> <span>kick</span> <kbd>L</kbd> <span>block</span></li>
+    <li>Hold <kbd>Shift</kbd> <span>run forward / back</span></li>
     <li><kbd>Esc</kbd> / <kbd>P</kbd> <span>pause</span></li>`;
-  const KEYS_P1 = '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>F</kbd> punch · <kbd>G</kbd> kick · <kbd>H</kbd> block';
-  const KEYS_P2 = '<kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> move · <kbd>.</kbd> punch · <kbd>/</kbd> kick · <kbd>Right Shift</kbd> block';
-  const PAD = '<li><span>Stick / D-pad</span> move · <kbd>A</kbd> punch · <kbd>B</kbd> kick · <kbd>X</kbd>/shoulder block · <kbd>Start</kbd> pause</li>';
+  const KEYS_P1 = '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>F</kbd> punch · <kbd>G</kbd> kick · <kbd>H</kbd> block · hold <kbd>Left Shift</kbd> run';
+  const KEYS_P2 = '<kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> move · <kbd>.</kbd> punch · <kbd>/</kbd> kick · <kbd>Right Shift</kbd> block · hold <kbd>Right Ctrl</kbd> run';
+  const PAD = '<li><span>Stick / D-pad</span> move · <kbd>A</kbd> punch · <kbd>B</kbd> kick · <kbd>X</kbd>/shoulder block · hold <kbd>LT</kbd>/<kbd>L3</kbd> run · <kbd>Start</kbd> pause</li>';
 
   function screen(name, html, cls) {
     const el = document.createElement('section');

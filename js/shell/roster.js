@@ -97,9 +97,9 @@
   };
 
   /* ---------- input: versus + training dummy ---------- */
-  const P1K = { l: ['KeyA'], r: ['KeyD'], u: ['KeyW'], d: ['KeyS'], punch: ['KeyF'], kick: ['KeyG'], block: ['KeyH'] };
+  const P1K = { l: ['KeyA'], r: ['KeyD'], u: ['KeyW'], d: ['KeyS'], punch: ['KeyF'], kick: ['KeyG'], block: ['KeyH'], run: ['ShiftLeft'] };
   const P2K = { l: ['ArrowLeft'], r: ['ArrowRight'], u: ['ArrowUp'], d: ['ArrowDown'],
-    punch: ['Period', 'Numpad1'], kick: ['Slash', 'Numpad2'], block: ['ShiftRight', 'Quote', 'Numpad3'] };
+    punch: ['Period', 'Numpad1'], kick: ['Slash', 'Numpad2'], block: ['ShiftRight', 'Quote', 'Numpad3'], run: ['ControlRight', 'Numpad0'] };
   S.KEYMAP = { p1: P1K, p2: P2K };
   const anyDown = (codes) => codes.some(S.keyDown);
   function readSide(map, pad) {
@@ -111,6 +111,7 @@
     inp.punch = inp.punch || anyDown(map.punch);
     inp.kick = inp.kick || anyDown(map.kick);
     inp.block = inp.block || anyDown(map.block);
+    inp.run = inp.run || anyDown(map.run || []);
     inp.sidestep = Math.max(-1, Math.min(1, inp.sidestep));
     inp.inout = Math.max(-1, Math.min(1, inp.inout));
     return inp;

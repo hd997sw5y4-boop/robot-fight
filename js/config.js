@@ -75,6 +75,8 @@ export const ARENA = {
 export const COMBAT = {
   maxHealth: 100,
   moveSpeed: 3.4,
+  runMul: 1.8, // Shift: forward speed multiplier
+  runBackMul: 1.5, // Shift: backward speed multiplier
   blockMoveSpeed: 1.4,
   punch: { damage: 10, range: 1.35, cooldown: 0.55, activeFrac: [0.30, 0.62] },
   kick: { damage: 15, range: 1.7, cooldown: 0.8, activeFrac: [0.38, 0.68] },

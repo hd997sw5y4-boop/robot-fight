@@ -528,6 +528,36 @@ function cacheFeet(f) {
     if (n === 'RightFoot') f.ikLegs.R.foot = o;
     if (n === 'RightToeBase') f.ikLegs.R.toe = o;
   });
+  // The foot/toe joints sit inside the mesh; the visible sole and toe tips are lower. Keep a
+  // small sample of the skinned vertices driven by the foot/toe bones so grounding can put the
+  // real sole on the mat.
+  f.soleVerts = { left: [], right: [] };
+  const footSet = new Map(f.footBones.map((b) => [b, boneKey(b.name).toLowerCase().startsWith('left') ? 'left' : 'right']));
+  f.model.traverse((m) => {
+    if (!m.isSkinnedMesh || !m.skeleton || !m.geometry) return;
+    const si = m.geometry.attributes.skinIndex;
+    const sw = m.geometry.attributes.skinWeight;
+    if (!si || !sw) return;
+    const sideOf = m.skeleton.bones.map((b) => footSet.get(b) || null);
+    if (!sideOf.some(Boolean)) return;
+    const hit = { left: [], right: [] };
+    for (let i = 0; i < si.count; i++) {
+      let best = -1; let bw = 0;
+      for (let c = 0; c < 4; c++) {
+        const w = sw.getComponent(i, c);
+        if (w > bw) { bw = w; best = si.getComponent(i, c); }
+      }
+      const side = best >= 0 ? sideOf[best] : null;
+      if (side && bw > 0.5) hit[side].push(i);
+    }
+    for (const side of ['left', 'right']) {
+      const list = hit[side];
+      const stride = Math.max(1, Math.ceil(list.length / 220));
+      const idx = [];
+      for (let j = 0; j < list.length; j += stride) idx.push(list[j]);
+      if (idx.length) f.soleVerts[side].push({ mesh: m, idx });
+    }
+  });
 }
 
 const _footY = new THREE.Vector3();
@@ -568,6 +598,22 @@ function lowestFootY(f) {
   for (const b of bones) {
     b.getWorldPosition(_footY);
     if (_footY.y < minY) minY = _footY.y;
+  }
+  // Real sole/toe-tip vertices (skinned) for the legs still attached.
+  const sv = f.soleVerts;
+  if (sv) {
+    for (const side of ['left', 'right']) {
+      const part = side === 'left' ? f.parts && f.parts.legL : f.parts && f.parts.legR;
+      if (part && part.detached) continue;
+      for (const { mesh, idx } of sv[side]) {
+        if (!mesh.visible) continue;
+        for (const i of idx) {
+          mesh.getVertexPosition(i, _footY);
+          _footY.applyMatrix4(mesh.matrixWorld);
+          if (_footY.y < minY) minY = _footY.y;
+        }
+      }
+    }
   }
   return Number.isFinite(minY) ? minY : null;
 }
@@ -912,6 +958,7 @@ function rawInput() {
   inp.punch = keys.has('j');
   inp.kick = keys.has('k');
   inp.block = keys.has('l');
+  inp.run = keys.has('shift');
 
   const gp = navigator.getGamepads?.()[0];
   if (gp) {
@@ -922,6 +969,7 @@ function rawInput() {
     if (gp.buttons[15]?.pressed) inp.sidestep += 1;
     if (gp.buttons[12]?.pressed) inp.inout += 1;
     if (gp.buttons[13]?.pressed) inp.inout -= 1;
+    if (gp.buttons[10]?.pressed || gp.buttons[6]?.pressed) inp.run = true;
     if (gp.buttons[0]?.pressed) inp.punch = true;
     if (gp.buttons[1]?.pressed) inp.kick = true;
     if (gp.buttons[2]?.pressed || gp.buttons[4]?.pressed || gp.buttons[5]?.pressed || gp.buttons[7]?.pressed) {
@@ -938,7 +986,7 @@ function consumeAttacks(inp) {
   const kick = inp.kick && !held.kick;
   held.punch = inp.punch;
   held.kick = inp.kick;
-  return { sidestep: inp.sidestep, inout: inp.inout, punch, kick, block: inp.block };
+  return { sidestep: inp.sidestep, inout: inp.inout, punch, kick, block: inp.block, run: !!inp.run };
 }
 
 function toward(me, other) {
@@ -1282,6 +1330,10 @@ function stepFighter(f, other, inp, dt) {
   if (f.state === 'punch' || f.state === 'kick' || f.state === 'hit' || f.state === 'ko') return;
 
   const speeds = locoMoveSpeeds(f, f.blocking);
+  if (inp.run && !f.blocking) { // Shift / L3 / LT: faster forward and back
+    speeds.fwd *= COMBAT.runMul || 1.8;
+    speeds.back *= COMBAT.runBackMul || 1.5;
+  }
   const moving = Math.abs(inp.sidestep) + Math.abs(inp.inout) > 0.12;
   if (moving) {
     const actual = moveFighter(f, other, inp.sidestep, inp.inout, dt, speeds);
@@ -1885,7 +1937,9 @@ function onLoad(gltf) {
         bones[b.name] = +v.y.toFixed(4);
         if (v.y < minY) minY = v.y;
       }
-      out[f.id] = { rootY: +f.root.position.y.toFixed(4), groundY: +(f.groundY || 0).toFixed(4), minY: Number.isFinite(minY) ? +minY.toFixed(4) : null, bones };
+      let meshMin = null;
+      try { meshMin = +new THREE.Box3().setFromObject(f.model, true).min.y.toFixed(4); } catch (e) {}
+      out[f.id] = { sole: (f.soleVerts ? f.soleVerts.left.reduce((n, e) => n + e.idx.length, 0) + f.soleVerts.right.reduce((n, e) => n + e.idx.length, 0) : 0), meshMin, rootY: +f.root.position.y.toFixed(4), groundY: +(f.groundY || 0).toFixed(4), minY: Number.isFinite(minY) ? +minY.toFixed(4) : null, bones };
     }
     return out;
   };
