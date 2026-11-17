@@ -49,7 +49,7 @@ export const MODEL = {
   },
 };
 
-export const LOOP_CLIPS = [
+export const LOOP_CLIPS = ['GuardUpper', 
   'FightingIdle', 'InjuredStumbleIdle', 'Idle', 'VictoryIdle',
   'Walking', 'WalkingBackwards', 'JogStrafeLeft', 'JogStrafeRight',
 ];
@@ -75,8 +75,9 @@ export const ARENA = {
 export const COMBAT = {
   maxHealth: 100,
   moveSpeed: 3.4,
-  runMul: 1.8, // Shift: forward speed multiplier
-  runBackMul: 1.5, // Shift: backward speed multiplier
+  runMul: 1.5, // Shift: forward speed multiplier (on top of footworkMul)
+  footworkMul: 1.5, // base forward/back stepping speed vs the clip; walk anim speeds up to match
+  runBackMul: 1.35, // Shift: backward speed multiplier
   blockMoveSpeed: 1.4,
   punch: { damage: 10, range: 1.35, cooldown: 0.55, activeFrac: [0.30, 0.62] },
   kick: { damage: 15, range: 1.7, cooldown: 0.8, activeFrac: [0.38, 0.68] },

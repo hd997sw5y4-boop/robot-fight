@@ -437,6 +437,7 @@ function makeFighter(gltf, color, side) {
   shield.visible = false;
   root.add(shield);
 
+  prepFootworkClips(gltf);
   const mixer = new THREE.AnimationMixer(model);
   const actions = {};
   for (const clip of gltf.animations) {
@@ -507,6 +508,24 @@ function boneKey(name) {
   return String(name || '').replace(/^mixamorig[:._]*/i, '');
 }
 
+const UPPER_BODY = /(spine|neck|head|shoulder|arm|hand)/i;
+// Fighters step in their guard: strip the casual arm swing from the walk clips and build an
+// upper-body-only guard clip from FightingIdle to layer on top while stepping.
+function prepFootworkClips(gltf) {
+  if (gltf.__footworkPrepped) return;
+  gltf.__footworkPrepped = true;
+  const byName = Object.fromEntries(gltf.animations.map((c) => [c.name, c]));
+  for (const name of ['Walking', 'WalkingBackwards']) {
+    const c = byName[name];
+    if (c) c.tracks = c.tracks.filter((t) => !UPPER_BODY.test(t.name.split('.')[0]));
+  }
+  const idle = byName[MODEL.animations.idle || 'FightingIdle'] || byName.FightingIdle;
+  if (idle) {
+    const tracks = idle.tracks.filter((t) => UPPER_BODY.test(t.name.split('.')[0])).map((t) => t.clone());
+    gltf.animations.push(new THREE.AnimationClip('GuardUpper', idle.duration, tracks));
+  }
+}
+
 function cacheFeet(f) {
   f.footBones = [];
   f.ikLegs = { L: {}, R: {} };
@@ -552,7 +571,7 @@ function cacheFeet(f) {
     }
     for (const side of ['left', 'right']) {
       const list = hit[side];
-      const stride = Math.max(1, Math.ceil(list.length / 220));
+      const stride = Math.max(1, Math.ceil(list.length / 90));
       const idx = [];
       for (let j = 0; j < list.length; j += stride) idx.push(list[j]);
       if (idx.length) f.soleVerts[side].push({ mesh: m, idx });
@@ -607,6 +626,9 @@ function lowestFootY(f) {
       if (part && part.detached) continue;
       for (const { mesh, idx } of sv[side]) {
         if (!mesh.visible) continue;
+        // updateWorldMatrix() skips SkinnedMesh's bind refresh; without it the root offset is
+        // counted twice and the robots ratchet upward.
+        if (mesh.bindMode === 'attached') mesh.bindMatrixInverse.copy(mesh.matrixWorld).invert();
         for (const i of idx) {
           mesh.getVertexPosition(i, _footY);
           _footY.applyMatrix4(mesh.matrixWorld);
@@ -1011,8 +1033,8 @@ function locoMoveSpeeds(f, blocking) {
   const mul = limp * blockMul;
   const strafe = 0.5 * (clipWorldSpeed(f, 'JogStrafeLeft') + clipWorldSpeed(f, 'JogStrafeRight'));
   return {
-    fwd: (clipWorldSpeed(f, 'Walking') || COMBAT.moveSpeed * 0.35) * mul,
-    back: (clipWorldSpeed(f, 'WalkingBackwards') || COMBAT.moveSpeed * 0.3) * mul,
+    fwd: (clipWorldSpeed(f, 'Walking') || COMBAT.moveSpeed * 0.35) * mul * (COMBAT.footworkMul || 1),
+    back: (clipWorldSpeed(f, 'WalkingBackwards') || COMBAT.moveSpeed * 0.3) * mul * (COMBAT.footworkMul || 1),
     strafe: (strafe || COMBAT.moveSpeed * 0.7) * mul,
   };
 }
@@ -1399,7 +1421,7 @@ function updateLoco(f, sidestep, inout, dt, actualSpeed, moveSpeeds) {
     for (const k of LOCO_KEYS) s += target[k];
     if (s > 0) for (const k of LOCO_KEYS) target[k] /= s;
   }
-  const k = 1 - Math.pow(0.012, Math.max(dt, 1 / 120));
+  const k = 1 - Math.pow(0.0008, Math.max(dt, 1 / 120)); // snappy footwork blends
   f._locoW = f._locoW || { idle: 1, idleB: 0, injured: 0, walkFwd: 0, walkBack: 0, strafeL: 0, strafeR: 0 };
   let top = 'idle';
   let topW = -1;
@@ -1421,6 +1443,19 @@ function updateLoco(f, sidestep, inout, dt, actualSpeed, moveSpeeds) {
     }
     if (w > topW) { topW = w; top = key; }
   }
+  // Walking clips have their arms stripped; hold the fighting guard on the upper body instead.
+  const guard = f.actions.GuardUpper;
+  if (guard) {
+    const gw = (f._locoW.walkFwd || 0) + (f._locoW.walkBack || 0);
+    if (gw > 0.01) {
+      if (!guard.isRunning()) guard.reset().play();
+      guard.enabled = true;
+      guard.setEffectiveWeight(Math.min(1, gw));
+    } else if (guard.isRunning()) {
+      guard.setEffectiveWeight(0);
+      if (gw < 0.002) guard.stop();
+    }
+  }
   const nameOf = {
     idle: (acts.idle && acts.idle.getClip().name) || MODEL.animations.idle,
     idleB: (acts.idleB && acts.idleB.getClip().name) || MODEL.animations.idle,
@@ -1441,7 +1476,7 @@ function updateLoco(f, sidestep, inout, dt, actualSpeed, moveSpeeds) {
       if (w <= 0.01) continue;
       expected += w * clipWorldSpeed(f, clipFor[key]);
     }
-    const ts = expected > 1e-4 ? Math.max(0.7, Math.min(1.25, actualSpeed / expected)) : 1;
+    const ts = expected > 1e-4 ? Math.max(0.6, Math.min(2.6, actualSpeed / expected)) : 1;
     for (const key of ['walkFwd', 'walkBack', 'strafeL', 'strafeR']) {
       const act = acts[key];
       if (act && act.isRunning()) act.timeScale = ts;
