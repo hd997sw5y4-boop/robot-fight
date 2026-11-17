@@ -18,7 +18,9 @@ export function defaultFighterConfig(side) {
     name: isP1 ? 'BLUE' : 'RED',
     color: isP1 ? 0x2a6bff : 0xd31f1f,
     control: isP1 ? 'player' : 'cpu',
-    ai: { ...AI_PERSONALITIES[isP1 ? 'normal' : 'normal'] },
+    // useSettings: fight uses the Settings CPU difficulty (outside the shell, and any
+    // shell start that does not pass its own `ai` table).
+    ai: { useSettings: true },
   };
 }
 

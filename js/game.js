@@ -336,7 +336,8 @@ function retintFighter(f, color) {
 
 function applyFighterConfig(f, cfg) {
   const base = defaultFighterConfig(f.id);
-  f.config = { ...base, ...cfg, ai: { ...base.ai, ...(cfg && cfg.ai) } };
+  f.config = { ...base, ...cfg };
+  f.config.ai = (cfg && cfg.ai) ? { ...cfg.ai } : { useSettings: true };
   if (f.config.color != null) retintFighter(f, f.config.color);
   const el = document.getElementById(f.id === 'p1' ? 'n1' : 'n2');
   if (el) el.textContent = f.config.name;
@@ -1095,9 +1096,11 @@ const ai = { t: 0, sidestep: 0, inout: 0, block: false, punch: false, kick: fals
 
 function aiProfile() {
   const custom = p2 && p2.config && p2.config.ai;
-  if (custom && custom.think) return custom;
-  const d = (custom && custom.personality) || getSettings().cpu || 'normal';
-  return { ...(AI_PERSONALITIES[d] || AI_PERSONALITIES.normal) };
+  const fromSettings = getSettings().cpu || 'normal';
+  // A shell-provided think table (arcade opponents, explicit personalities) wins.
+  // Default / unspecialized configs follow the Settings CPU difficulty.
+  if (custom && custom.think && custom.useSettings !== true) return custom;
+  return { ...(AI_PERSONALITIES[fromSettings] || AI_PERSONALITIES.normal) };
 }
 
 function updateAI(cpu, player, dt) {

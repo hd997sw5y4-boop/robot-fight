@@ -88,12 +88,14 @@
       <p class="rfs-lead"><b>Robot Fight</b> — a Window Workshop Games production.</p>
       <ul>
         <li><b>Robot fighter model:</b> “Robot character” by assetfactory on Sketchfab, Sketchfab Free Standard license (recolored in-game).</li>
-        <li><b>Animations:</b> Mixamo (Adobe) — fighting idle, walks, strafes, punches, kicks, blocks, hits, knockouts, get-ups.</li>
+        <li><b>Animations:</b> Mixamo (Adobe) — fighting idle, walks, strafes, punches, kicks, blocks, hits, knockouts, get-ups, dodges, flips, and victory/taunt clips.</li>
         <li><b>Arena metal textures:</b> Metal009 from ambientCG, CC0 1.0.</li>
         <li><b>3D engine:</b> three.js r187, MIT license.</li>
+        <li><b>Physics:</b> cannon-es, MIT license.</li>
+        <li><b>Sound effects:</b> CC0 and royalty-free clips (no credit required). Impacts, footsteps, servos, UI, and bells from Kenney (Impact, Sci-fi, and Interface packs); electrical sparks and buzz from Brian MacIntosh / BMacZero; crowd ambience and reactions from Mixkit. Sources and licenses are listed in CREDITS/LICENSES.md.</li>
         <li><b>Settings panel look and volume taper:</b> adapted from Window Workshop Games UI.</li>
       </ul>
-      <p class="rfs-note">CPU fighters, names, and paint schemes are original to this game. Full license notes are in README.md and models/CREDITS.md.</p>
+      <p class="rfs-note">CPU fighters, names, and paint schemes are original to this game. Full license notes are in README.md, models/CREDITS.md, and CREDITS/LICENSES.md.</p>
       <button type="button" class="rfs-f rfs-btn rfs-small" data-act="back">Back</button>
     </div>`, 'rfs-center rfs-dim');
 
