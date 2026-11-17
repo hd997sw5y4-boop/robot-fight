@@ -294,9 +294,10 @@ function tint(root, color) {
     const mats = [].concat(o.material);
     o.material = mats.length === 1 ? mats[0].clone() : mats.map((m) => m.clone());
     for (const m of [].concat(o.material)) {
-      if (!m.color) continue;
-      m.color.lerp(c, 0.58);
-      if (m.metalness != null) m.metalness = Math.min(1, Math.max(0.35, m.metalness));
+      if (m && m.color) m.color.lerp(c, 0.38);
+      if (m && m.aoMap && o.geometry && o.geometry.attributes.uv && !o.geometry.attributes.uv2) {
+        o.geometry.setAttribute('uv2', o.geometry.attributes.uv);
+      }
     }
     o.castShadow = true;
     o.receiveShadow = true;
@@ -321,7 +322,7 @@ function makeFighter(gltf, color, side) {
   const model = cloneSkinned(gltf.scene);
   const box = meshBox(model);
   const height = box ? box.getSize(new THREE.Vector3()).y : 0;
-  const scale = (height > 0.2 && height < 20) ? (MODEL.targetHeight / height) : (MODEL.scale || 1);
+  const scale = height > 0.001 ? (MODEL.targetHeight / height) : (MODEL.scale || 1);
   model.scale.setScalar(scale);
   const box2 = meshBox(model);
   if (box2) model.position.y = -box2.min.y + MODEL.footOffset;
@@ -347,21 +348,30 @@ function makeFighter(gltf, color, side) {
 
   const mixer = new THREE.AnimationMixer(model);
   const actions = {};
-  for (const [key, clipName] of Object.entries(MODEL.animations)) {
-    const clip = findClip(gltf.animations, clipName);
-    if (!clip) continue;
+  for (const clip of gltf.animations) {
     const act = mixer.clipAction(clip);
-    if (key === 'idle' || key === 'walk' || key === 'run') act.loop = THREE.LoopRepeat;
-    else {
-      act.loop = THREE.LoopOnce;
-      act.clampWhenFinished = true;
-    }
-    actions[key] = act;
+    const loop = clip.name === 'Idle';
+    act.loop = loop ? THREE.LoopRepeat : THREE.LoopOnce;
+    if (!loop) act.clampWhenFinished = true;
+    actions[clip.name] = act;
   }
-  if (actions.idle) actions.idle.play();
+  for (const [key, val] of Object.entries(MODEL.animations)) {
+    if (typeof val === 'string' && actions[val]) actions[key] = actions[val];
+  }
+  if (actions.Idle) actions.Idle.play();
+  mixer.update(0);
+  const box3 = meshBox(model);
+  if (box3) model.position.y = -box3.min.y + MODEL.footOffset;
 
   const startX = side === 'p1' ? -2.15 : 2.15;
   root.position.set(startX, 0, 0);
+
+  let hips = null;
+  let spine = null;
+  model.traverse((o) => {
+    if (o.name === 'mixamorig:Hips') hips = o;
+    if (o.name === 'mixamorig:Spine' || o.name === 'mixamorig:Spine1') spine = spine || o;
+  });
 
   const f = {
     id: side,
@@ -370,7 +380,7 @@ function makeFighter(gltf, color, side) {
     shield,
     mixer,
     actions,
-    current: 'idle',
+    current: 'Idle',
     health: COMBAT.maxHealth,
     state: 'idle',
     stateT: 0,
@@ -380,27 +390,44 @@ function makeFighter(gltf, color, side) {
     hitThisAttack: false,
     startX,
     baseY: model.position.y,
+    hips,
+    spine,
+    hipsBind: hips ? hips.position.clone() : null,
   };
 
-  mixer.addEventListener('finished', (e) => {
+  mixer.addEventListener('finished', () => {
     if (f.state === 'ko') return;
-    const act = e.action;
-    if (act === f.actions.punch || act === f.actions.kick || act === f.actions.hit) {
-      if (f.health > 0 && (f.state === 'punch' || f.state === 'kick' || f.state === 'hit')) {
-        f.state = 'idle';
-        setAnim(f, 'idle', 0.15);
-      }
+    if (f.health > 0 && (f.state === 'punch' || f.state === 'kick' || f.state === 'hit')) {
+      f.state = 'idle';
+      setAnim(f, 'idle', 0.15);
     }
   });
   prepareFighterDamage(f);
   return f;
 }
 
+function resolveClip(f, name) {
+  if (name && f.actions[name]) return name;
+  const mapped = MODEL.animations[name];
+  if (typeof mapped === 'string' && f.actions[mapped]) return mapped;
+  if (Array.isArray(mapped)) {
+    const found = mapped.find((n) => f.actions[n]);
+    if (found) return found;
+  }
+  return null;
+}
+
 function setAnim(f, name, fade = 0.12) {
-  const next = f.actions[name];
-  if (!next) return;
-  if (f.current === name) {
-    if (name === 'punch' || name === 'kick' || name === 'hit' || name === 'ko') next.reset().play();
+  const clipName = resolveClip(f, name);
+  if (!clipName) return;
+  const next = f.actions[clipName];
+  const oneshot = ['punch', 'kick', 'hit', 'ko', 'getUp', 'GettingUp', 'KnockedOut'].includes(name)
+    || (MODEL.animations.punchVariants || []).includes(clipName)
+    || (MODEL.animations.kickVariants || []).includes(clipName)
+    || (MODEL.animations.kickSpecial || []).includes(clipName)
+    || clipName === 'KnockedOut' || clipName === 'GettingUp';
+  if (f.current === clipName) {
+    if (oneshot) next.reset().play();
     return;
   }
   const prev = f.actions[f.current];
@@ -409,7 +436,17 @@ function setAnim(f, name, fade = 0.12) {
   if (prev) prev.crossFadeTo(next, fade, false);
   else next.fadeIn(fade);
   next.play();
-  f.current = name;
+  f.current = clipName;
+}
+
+function pickClip(list, fallback) {
+  if (list && list.length) return list[Math.floor(Math.random() * list.length)];
+  return fallback;
+}
+
+function hitClipFor(partId) {
+  const map = MODEL.animations.hitByPart || {};
+  return pickClip(map[partId] || map.torso, MODEL.animations.hit || 'Stunned');
 }
 
 window.addEventListener('keydown', (e) => {
@@ -508,22 +545,30 @@ function faceEachOther(a, b) {
   if (b.state !== 'ko') b.root.lookAt(a.root.position.x, b.root.position.y, a.root.position.z);
 }
 
-function tryAttack(f, kind) {
+function tryAttack(f, kind, clipName) {
   if (f.state === 'ko' || f.state === 'hit' || f.state === 'punch' || f.state === 'kick') return;
   if (f.cooldown > 0) return;
   if (kind === 'punch' && !canPunch(f)) return;
   if (kind === 'kick' && !canKick(f)) return;
   const spec = COMBAT[kind];
   const mods = attackMods(f, kind);
+  const clip = clipName || MODEL.animations[kind];
   f.state = kind;
   f.stateT = 0;
   f.hitThisAttack = false;
-  f.cooldown = spec.cooldown * mods.cooldownMul;
   f.atkMods = mods;
+  f.attackClip = clip;
   f.blocking = false;
   f.shield.visible = false;
-  setAnim(f, kind, 0.08);
-  if (f.actions[kind]) f.actions[kind].timeScale = mods.timeScale;
+  setAnim(f, clip, 0.08);
+  const action = f.actions[clip] || f.actions[kind];
+  if (action) {
+    action.timeScale = mods.timeScale;
+    const dur = action.getClip().duration / Math.max(0.2, mods.timeScale);
+    f.cooldown = Math.max(spec.cooldown, dur * 0.55) * mods.cooldownMul;
+  } else {
+    f.cooldown = spec.cooldown * mods.cooldownMul;
+  }
 }
 
 function tryBlock(f, heldBlock) {
@@ -535,8 +580,12 @@ function tryBlock(f, heldBlock) {
   heldBlock = heldBlock && canBlock(f);
   f.blocking = heldBlock;
   f.shield.visible = heldBlock;
-  if (heldBlock) f.state = 'block';
-  else if (f.state === 'block') f.state = 'idle';
+  if (heldBlock) {
+    if (f.state !== 'block') {
+      f.state = 'block';
+      setAnim(f, f.blockClip || MODEL.animations.block, 0.1);
+    }
+  } else if (f.state === 'block') f.state = 'idle';
 }
 
 function attackHits(atk, def, spec) {
@@ -572,7 +621,7 @@ function applyHit(atk, def, spec, kind) {
     def.invuln = COMBAT.hitInvuln;
     def.blocking = false;
     def.shield.visible = false;
-    setAnim(def, 'hit', 0.06);
+    setAnim(def, hitClipFor(hit.partId), 0.06);
   }
 }
 
@@ -594,6 +643,8 @@ const ai = { t: 0, sidestep: 0, inout: 0, block: false, punch: false, kick: fals
 function updateAI(cpu, player, dt) {
   ai.punch = false;
   ai.kick = false;
+  ai.punchClip = null;
+  ai.kickClip = null;
   ai.t -= dt;
   if (cpu.state === 'ko' || cpu.state === 'hit' || cpu.state === 'punch' || cpu.state === 'kick') {
     ai.block = false;
@@ -617,9 +668,18 @@ function updateAI(cpu, player, dt) {
       ai.inout = 0;
       ai.sidestep = (Math.random() - 0.5) * 1.2;
       const r = Math.random();
-      if (r < 0.5) ai.punch = true;
-      else if (r < 0.75) ai.kick = true;
-      else if (r < 0.88) ai.block = true;
+      if (r < 0.5) {
+        ai.punch = true;
+        ai.punchClip = pickClip(MODEL.animations.punchVariants, MODEL.animations.punch);
+      } else if (r < 0.75) {
+        ai.kick = true;
+        ai.kickClip = Math.random() < 0.22
+          ? pickClip(MODEL.animations.kickSpecial, MODEL.animations.kick)
+          : pickClip(MODEL.animations.kickVariants, MODEL.animations.kick);
+      } else if (r < 0.88) {
+        ai.block = true;
+        ai.blockClip = pickClip(MODEL.animations.blockVariants, MODEL.animations.block);
+      }
     }
   }
   return ai;
@@ -641,8 +701,11 @@ function stepFighter(f, other, inp, dt) {
 
   if (f.state === 'punch' || f.state === 'kick') {
     const spec = COMBAT[f.state];
-    const dur = f.actions[f.state] ? f.actions[f.state].getClip().duration : 0.7;
-    if (!f.hitThisAttack && f.stateT >= spec.active[0] && f.stateT <= spec.active[1] && attackHits(f, other, spec)) {
+    const action = f.actions[f.attackClip] || f.actions[f.state] || f.actions[resolveClip(f, f.state)];
+    const dur = action ? action.getClip().duration : 0.7;
+    const a0 = (spec.activeFrac ? spec.activeFrac[0] * dur : spec.active[0]);
+    const a1 = (spec.activeFrac ? spec.activeFrac[1] * dur : spec.active[1]);
+    if (!f.hitThisAttack && f.stateT >= a0 && f.stateT <= a1 && attackHits(f, other, spec)) {
       f.hitThisAttack = true;
       applyHit(f, other, spec, f.state);
     }
@@ -653,19 +716,22 @@ function stepFighter(f, other, inp, dt) {
     return;
   }
 
+  f.blockClip = inp.blockClip || null;
   tryBlock(f, inp.block);
-  if (inp.punch) tryAttack(f, 'punch');
-  else if (inp.kick) tryAttack(f, 'kick');
+  if (inp.punch) tryAttack(f, 'punch', inp.punchClip);
+  else if (inp.kick) tryAttack(f, 'kick', inp.kickClip);
   if (f.state === 'punch' || f.state === 'kick' || f.state === 'hit' || f.state === 'ko') return;
 
   const speed = (f.blocking ? COMBAT.blockMoveSpeed : COMBAT.moveSpeed) * moveSpeedMul(f);
   const moving = Math.abs(inp.sidestep) + Math.abs(inp.inout) > 0.12;
   if (moving) {
     moveFighter(f, other, inp.sidestep, inp.inout, dt, speed);
-    if (!f.blocking && f.current !== 'walk') setAnim(f, 'walk', 0.12);
-    if (!f.blocking) f.state = 'walk';
+    if (!f.blocking) {
+      f.state = 'walk';
+      if (f.current !== 'Idle' && f.current !== 'idle') setAnim(f, 'idle', 0.15);
+    }
   } else if (!f.blocking) {
-    if (f.current !== 'idle') setAnim(f, 'idle', 0.15);
+    if (f.current !== 'Idle' && f.current !== 'idle') setAnim(f, 'idle', 0.15);
     f.state = 'idle';
   }
 }
@@ -695,6 +761,23 @@ let p2;
 const match = { phase: 'intro', introT: 0, over: false, winner: null };
 const clock = new THREE.Clock();
 
+function poseAfterMixer(f, dt) {
+  if (f.hips && f.hipsBind) {
+    f.hips.position.x = f.hipsBind.x;
+    f.hips.position.z = f.hipsBind.z;
+  }
+  if (f.state === 'ko' || f.state === 'hit' || f.state === 'punch' || f.state === 'kick' || f.state === 'getup') return;
+  f.swayT = (f.swayT || 0) + dt;
+  const walk = f.state === 'walk';
+  const bob = walk ? 0.045 : 0.012;
+  const rate = walk ? 8.5 : 1.7;
+  f.model.position.y = f.baseY + Math.sin(f.swayT * rate) * bob;
+  if (f.spine) {
+    f.spine.rotation.z += Math.sin(f.swayT * rate) * (walk ? 0.07 : 0.028);
+    f.spine.rotation.x += Math.sin(f.swayT * 1.35) * 0.014;
+  }
+}
+
 function resetMatch() {
   for (const f of [p1, p2]) {
     f.health = COMBAT.maxHealth;
@@ -708,26 +791,40 @@ function resetMatch() {
     f.root.position.set(f.startX, 0, 0);
     f.root.scale.set(1, 1, 1);
     f.atkMods = null;
-    setAnim(f, 'idle', 0.01);
     resetFighterDamage(f, scene);
+    setAnim(f, MODEL.animations.getUp || 'idle', 0.08);
+    f.state = 'getup';
   }
   clearAllDebris(scene);
   document.getElementById('overlay').classList.add('hidden');
   match.over = false;
   match.winner = null;
-  match.phase = 'intro';
-  match.introT = 0;
+  match.phase = 'getup';
+  match.getupT = 0;
   match.camLock = false;
   const banner = document.getElementById('banner');
   banner.style.opacity = '';
-  banner.classList.add('show');
+  banner.classList.remove('show');
   faceEachOther(p1, p2);
   syncHud();
 }
 
 function tick() {
   const dt = Math.min(0.05, clock.getDelta());
-  if (match.phase === 'intro') {
+  if (match.phase === 'getup') {
+    match.getupT = (match.getupT || 0) + dt;
+    const getup = (p1.actions.GettingUp || p1.actions.getUp);
+    const dur = getup ? getup.getClip().duration : 2.3;
+    if (match.getupT > dur * 0.95) {
+      match.phase = 'intro';
+      match.introT = 0;
+      setAnim(p1, 'idle', 0.2);
+      setAnim(p2, 'idle', 0.2);
+      p1.state = 'idle';
+      p2.state = 'idle';
+      document.getElementById('banner').classList.add('show');
+    }
+  } else if (match.phase === 'intro') {
     match.introT += dt;
     if (match.introT > 1.05) {
       match.phase = 'fight';
@@ -746,6 +843,8 @@ function tick() {
   p2.mixer.update(dt);
   p1.root.position.y = 0;
   p2.root.position.y = 0;
+  poseAfterMixer(p1, dt);
+  poseAfterMixer(p2, dt);
   applyMalfunctions(p1, dt);
   applyMalfunctions(p2, dt);
   stepDamage(scene, dt);

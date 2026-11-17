@@ -1,19 +1,33 @@
-// Fighter model + animation map. Swap `url`, `animations`, and DAMAGE.bind
-// later for a Mixamo-rigged Sketchfab "Robot character" (assetfactory, Free Standard).
+// Mixamo-rigged Sketchfab "Robot character" (assetfactory, Free Standard).
+// Animations from Mixamo. Idle is a held Punching frame; walk is procedural.
 export const MODEL = {
-  url: './models/RobotExpressive.glb',
-  source: 'RobotExpressive by Tomás Laulhé, CC0 1.0 (three.js examples)',
+  url: './models/RobotFighter.glb',
+  source: "Robot character by assetfactory (Sketchfab Free Standard); animations from Mixamo",
   scale: 1,
   targetHeight: 2.45,
   footOffset: 0,
   animations: {
     idle: 'Idle',
-    walk: 'Walking',
-    run: 'Running',
-    punch: 'Punch',
-    kick: 'Jump', // stand-in until a Mixamo kick is available
-    hit: 'No',
-    ko: 'Death',
+    walk: null,
+    punch: 'Punching',
+    punchVariants: ['Punching', 'PunchCombo', 'ElbowPunching'],
+    kick: 'Kicking',
+    kickVariants: ['Kicking', 'MmaKick'],
+    kickSpecial: ['FlipKick', 'ChapaGiratoria'],
+    block: 'CenterBlock',
+    blockVariants: ['CenterBlock', 'BodyBlock', 'LeftBlock', 'RightBlock'],
+    hit: 'Stunned',
+    hitByPart: {
+      head: ['HeadHit', 'HitOnSideOfHead'],
+      torso: ['HitToBody', 'BigStomachHit'],
+      armL: ['HitToBody', 'Stunned'],
+      armR: ['HitToBody', 'Stunned'],
+      legL: ['HitOnLegs'],
+      legR: ['HitOnLegs'],
+    },
+    stunned: 'Stunned',
+    ko: 'KnockedOut',
+    getUp: 'GettingUp',
   },
   colors: {
     p1: 0x2f74ff,
@@ -32,10 +46,10 @@ export const COMBAT = {
   maxHealth: 100,
   moveSpeed: 3.4,
   blockMoveSpeed: 1.4,
-  punch: { damage: 10, range: 1.35, cooldown: 0.55, active: [0.22, 0.48] },
-  kick: { damage: 15, range: 1.6, cooldown: 0.75, active: [0.28, 0.55] },
+  punch: { damage: 10, range: 1.35, cooldown: 0.55, activeFrac: [0.30, 0.62] },
+  kick: { damage: 15, range: 1.7, cooldown: 0.8, activeFrac: [0.38, 0.68] },
   blockReduction: 0.82,
-  hitStun: 0.42,
+  hitStun: 0.62,
   hitInvuln: 0.28,
   knockback: 1.6,
   separate: 0.85,
@@ -47,8 +61,8 @@ export const GFX_PRESETS = {
 };
 
 // Per-part wrecking. Names in `bind` are normalized (lowercase, no "mixamorig",
-// dots, colons, or underscores) so the same map covers RobotExpressive now and
-// a Mixamo-rigged character later. Torso can be crushed but stays attached.
+// dots, colons, or underscores) so Mixamo bones like mixamorig:Head / LeftArm match.
+// Torso can be crushed but stays attached.
 export const DAMAGE = {
   parts: {
     head: { hp: 32, label: 'Head', detach: true },
