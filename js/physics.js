@@ -19,14 +19,29 @@ const matSoft = new CANNON.Material('soft');
 const matDebris = new CANNON.Material('debris');
 const matCage = new CANNON.Material('cage');
 world.addContactMaterial(new CANNON.ContactMaterial(matFloor, matFighter, { friction: 0.28, restitution: 0.0 }));
-world.addContactMaterial(new CANNON.ContactMaterial(matFloor, matSoft, { friction: 0.48, restitution: 0.12 }));
+// Ragdoll limbs on the mat: no bounce, high friction, so a knocked-down robot lands heavy and stays.
+world.addContactMaterial(new CANNON.ContactMaterial(matFloor, matSoft, { friction: 0.9, restitution: 0.0 }));
 world.addContactMaterial(new CANNON.ContactMaterial(matFloor, matDebris, { friction: 0.38, restitution: 0.58 }));
 world.addContactMaterial(new CANNON.ContactMaterial(matCage, matDebris, { friction: 0.22, restitution: 0.68 }));
-world.addContactMaterial(new CANNON.ContactMaterial(matCage, matSoft, { friction: 0.28, restitution: 0.2 }));
+world.addContactMaterial(new CANNON.ContactMaterial(matCage, matSoft, { friction: 0.4, restitution: 0.0 }));
 world.addContactMaterial(new CANNON.ContactMaterial(matCage, matFighter, { friction: 0.2, restitution: 0.05 }));
 world.addContactMaterial(new CANNON.ContactMaterial(matFighter, matFighter, { friction: 0.12, restitution: 0.0 }));
 world.addContactMaterial(new CANNON.ContactMaterial(matDebris, matDebris, { friction: 0.36, restitution: 0.4 }));
-world.addContactMaterial(new CANNON.ContactMaterial(matSoft, matFighter, { friction: 0.2, restitution: 0.05 }));
+world.addContactMaterial(new CANNON.ContactMaterial(matSoft, matFighter, { friction: 0.2, restitution: 0.0 }));
+world.addContactMaterial(new CANNON.ContactMaterial(matSoft, matSoft, { friction: 0.6, restitution: 0.0 }));
+
+// Knockdowns read heavy: ragdoll bodies get extra gravity on top of the world's (about 2x in total).
+const RAGDOLL_GRAVITY_MUL = 2.0;
+world.addEventListener('preStep', () => {
+  const extra = world.gravity.y * (RAGDOLL_GRAVITY_MUL - 1);
+  for (const f of fighters) {
+    if (!isRagdoll(f)) continue;
+    for (const e of f.phys.ragdoll.entries) {
+      if (e.body.sleepState === CANNON.Body.SLEEPING) continue;
+      e.body.force.y += e.body.mass * extra;
+    }
+  }
+});
 world.addContactMaterial(new CANNON.ContactMaterial(matDebris, matFighter, { friction: 0.22, restitution: 0.48 }));
 world.addContactMaterial(new CANNON.ContactMaterial(matDebris, matSoft, { friction: 0.28, restitution: 0.4 }));
 
@@ -202,13 +217,23 @@ const RAGDOLL_SPEC = [
   limbSpec('legR', (n) => n === 'RightLeg', 3.6, 0.075, 'upLegR'),
 ];
 
-function boneLength(bone) {
-  let best = 0;
+function boneChildDir(bone) {
+  // Local direction and length to the farthest child joint (the limb segment this bone drives).
+  let best = null;
   for (const ch of bone.children) {
-    if (ch.isBone || ch.type === 'Bone') best = Math.max(best, ch.position.length());
+    if (!(ch.isBone || ch.type === 'Bone')) continue;
+    if (!best || ch.position.lengthSq() > best.lengthSq()) best = ch.position;
   }
-  return best;
+  return best ? best.clone() : null;
 }
+
+const _yAxis = new THREE.Vector3(0, 1, 0);
+const END_CHAIN = {
+  legL: ['LeftFoot', 'LeftToeBase', 'LeftToe_End'],
+  legR: ['RightFoot', 'RightToeBase', 'RightToe_End'],
+  foreL: ['LeftHand', 'LeftHandMiddle2'],
+  foreR: ['RightHand', 'RightHandMiddle2'],
+};
 
 export function enableRagdoll(f, impulse, opts = {}) {
   if (!f || !f.model) return;
@@ -217,9 +242,9 @@ export function enableRagdoll(f, impulse, opts = {}) {
     const hips = f.phys.ragdoll.entries.find((e) => e.id === 'hips');
     if (hips && impulse) {
       const ix = Math.max(-5, Math.min(5, impulse.x));
-      const iy = Math.max(0.3, Math.min(3.2, impulse.y || 1.2));
       const iz = Math.max(-5, Math.min(5, impulse.z));
-      hips.body.applyImpulse(new CANNON.Vec3(ix, iy, iz), hips.body.position);
+      hips.body.wakeUp();
+      hips.body.applyImpulse(new CANNON.Vec3(ix * 3, 2, iz * 3), hips.body.position);
     }
     if (opts.until != null) f.phys.ragdoll.until = opts.until;
     return;
@@ -233,27 +258,53 @@ export function enableRagdoll(f, impulse, opts = {}) {
     if (!bone) continue;
     bone.updateWorldMatrix(true, false);
     bone.matrixWorld.decompose(_p, _q, _s);
-    const len = Math.max(0.18, boneLength(bone) * (bone.getWorldScale(_v).y || 1) || 0.22);
-    const radius = spec.radius;
+    // The body sits on the joint (so applyRagdoll can drive the bone directly) and its shape is
+    // offset half a segment toward the child joint, so the collider covers the visible limb and
+    // rests on the mat where the mesh does instead of floating on a joint-centred blob.
+    const local = boneChildDir(bone);
+    const ws = _s.y || 1;
+    const dir = local && local.lengthSq() > 1e-10 ? local.multiplyScalar(ws) : new THREE.Vector3(0, 0.22, 0);
+    const len = Math.max(0.12, dir.length());
+    dir.normalize();
+    const fit = (f.ragFit && f.ragFit[spec.id]) || {};
+    const radius = fit.r ? Math.max(spec.radius * 0.8, Math.min(spec.radius * 2.8, fit.r)) : spec.radius;
     const body = new CANNON.Body({
       mass: spec.mass,
       material: matSoft,
-      linearDamping: 0.32,
-      angularDamping: 0.55,
+      linearDamping: 0.04,
+      angularDamping: 0.3,
       allowSleep: true,
-      sleepSpeedLimit: 0.22,
+      sleepSpeedLimit: 0.3,
+      sleepTimeLimit: 0.35,
     });
-    if (spec.id === 'head' || spec.id === 'hips') {
-      body.addShape(new CANNON.Sphere(spec.id === 'head' ? 0.15 : 0.17));
+    const align = new THREE.Quaternion().setFromUnitVectors(_yAxis, dir);
+    const shapeQ = new CANNON.Quaternion(align.x, align.y, align.z, align.w);
+    if (spec.id === 'hips') {
+      body.addShape(new CANNON.Sphere(Math.min(0.3, Math.max(0.17, radius))));
+    } else if (spec.id === 'head') {
+      body.addShape(new CANNON.Sphere(Math.min(0.26, Math.max(0.15, radius))), new CANNON.Vec3(dir.x * 0.1, dir.y * 0.1, dir.z * 0.1));
     } else if (spec.id === 'spine') {
-      body.addShape(new CANNON.Box(new CANNON.Vec3(0.16, Math.max(0.12, len * 0.35), 0.12)));
+      const hy = Math.max(0.14, len * 0.5);
+      const hz = Math.min(0.3, Math.max(0.13, radius * 0.85));
+      body.addShape(new CANNON.Box(new CANNON.Vec3(Math.max(0.2, hz * 1.4), hy, hz)), new CANNON.Vec3(dir.x * hy, dir.y * hy, dir.z * hy), shapeQ);
     } else {
-      const half = Math.max(0.1, len * 0.42);
-      const cyl = new CANNON.Cylinder(radius, radius, half * 2, 6);
-      // Cylinder is Y-aligned; Mixamo limbs mostly hang along bone +Y in bind, but world orientation is on the body quaternion.
-      body.addShape(cyl);
+      const half = Math.max(0.08, len * 0.5);
+      body.addShape(new CANNON.Cylinder(radius, radius, half * 2, 8), new CANNON.Vec3(dir.x * half, dir.y * half, dir.z * half), shapeQ);
+      // Hand / foot: spheres along the hand or foot (ankle -> toe tip) in their frozen pose, so
+      // they rest on the mat too instead of sinking through it.
+      const chain = END_CHAIN[spec.id];
+      if (chain) {
+        const er = Math.max(0.05, Math.min(0.2, fit.endR || radius));
+        _inv.compose(_p, _q, _one).invert();
+        chain.forEach((name, i) => {
+          const b = findBone(f.model, (n) => n === name);
+          if (!b) return;
+          b.getWorldPosition(_v).applyMatrix4(_inv);
+          body.addShape(new CANNON.Sphere(i === 0 ? er : Math.max(0.05, er * 0.6)), new CANNON.Vec3(_v.x, _v.y, _v.z));
+        });
+      }
     }
-    body.position.set(_p.x, Math.max(0.12, _p.y), _p.z);
+    body.position.set(_p.x, _p.y, _p.z);
     body.quaternion.set(_q.x, _q.y, _q.z, _q.w);
     body.collisionFilterGroup = G.RAGDOLL;
     body.collisionFilterMask = G.ARENA | G.FIGHTER | G.RAGDOLL | G.DEBRIS;
@@ -288,13 +339,16 @@ export function enableRagdoll(f, impulse, opts = {}) {
     f.phys.body.type = CANNON.Body.STATIC;
   }
   if (impulse) {
-    const hips = byId.hips || entries[0];
-    const spine = byId.spine || hips;
-    const ix = Math.max(-6.5, Math.min(6.5, impulse.x));
+    // A real blow: the upper body is thrown back faster than the hips and the feet stay put, so
+    // the robot tips over from the impact instead of slowly toppling from balance.
+    const ix = Math.max(-9, Math.min(9, impulse.x));
     const iy = Math.max(0.4, Math.min(4.2, impulse.y || 1.4));
-    const iz = Math.max(-6.5, Math.min(6.5, impulse.z));
-    if (hips) hips.body.applyImpulse(new CANNON.Vec3(ix * 0.7, iy, iz * 0.7), hips.body.position);
-    if (spine && spine !== hips) spine.body.applyImpulse(new CANNON.Vec3(ix * 0.45, iy * 0.7, iz * 0.45), spine.body.position);
+    const iz = Math.max(-9, Math.min(9, impulse.z));
+    const UPPER = { spine: 0.6, head: 0.68, armL: 0.6, armR: 0.6, foreL: 0.62, foreR: 0.62 };
+    for (const e of entries) {
+      const k = UPPER[e.id] != null ? UPPER[e.id] : (e.id === 'hips' ? 0.34 : (e.id.startsWith('up') ? 0.18 : 0.06));
+      e.body.velocity.set(ix * k, iy * (k > 0.3 ? 0.18 : 0.05), iz * k);
+    }
   }
   f.phys.ragdoll = {
     active: true,
@@ -302,17 +356,19 @@ export function enableRagdoll(f, impulse, opts = {}) {
     constraints,
     until: opts.until == null ? Infinity : opts.until,
     kind: opts.kind || 'ko',
+    visualY: 0,
   };
 }
 
 function applyRagdoll(f) {
   const rd = f.phys && f.phys.ragdoll;
   if (!rd || !rd.active) return;
+  const vy = rd.visualY || 0; // mesh-to-mat contact correction (set by the game from the skinned mesh)
   for (const e of rd.entries) {
     const bone = e.bone;
     const parent = bone.parent;
     _bodyM.compose(
-      _p.set(e.body.position.x, e.body.position.y, e.body.position.z),
+      _p.set(e.body.position.x, e.body.position.y + vy, e.body.position.z),
       _q.set(e.body.quaternion.x, e.body.quaternion.y, e.body.quaternion.z, e.body.quaternion.w),
       _one,
     );
@@ -440,13 +496,13 @@ function clampRagdollSpeeds() {
     for (const e of f.phys.ragdoll.entries) {
       const v = e.body.velocity;
       const sp = v.length();
-      if (sp > 7.5) v.scale(7.5 / sp);
+      // Generous caps: a low cap acted like terminal velocity and made falls look slow-motion.
+      if (sp > 16) v.scale(16 / sp);
       const w = e.body.angularVelocity;
       const wp = w.length();
-      if (wp > 12) w.scale(12 / wp);
-      if (e.body.position.y < (ARENA.matTop || 0) + 0.05) {
-        e.body.position.y = Math.max(e.body.position.y, (ARENA.matTop || 0) + 0.05);
-      }
+      if (wp > 18) w.scale(18 / wp);
+      // Tunnelling guard only (joint origins always sit inside the mesh, above the mat).
+      if (e.body.position.y < (ARENA.matTop || 0) + 0.02) e.body.position.y = (ARENA.matTop || 0) + 0.02;
     }
   }
 }
@@ -457,7 +513,7 @@ export function isRagdollSettled(f) {
   for (const e of f.phys.ragdoll.entries) {
     maxV = Math.max(maxV, e.body.velocity.length(), e.body.angularVelocity.length() * 0.25);
   }
-  return maxV < 0.55;
+  return maxV < 0.45;
 }
 
 export function resetFighterPhysics(f, x, z) {

@@ -79,18 +79,27 @@ export const COMBAT = {
   footworkMul: 1.5, // base forward/back stepping speed vs the clip; walk anim speeds up to match
   runBackMul: 1.35, // Shift: backward speed multiplier
   blockMoveSpeed: 1.4,
-  punch: { damage: 10, range: 1.5, cooldown: 0.55, activeFrac: [0.30, 0.62] },
-  kick: { damage: 15, range: 1.85, cooldown: 0.8, activeFrac: [0.38, 0.68] },
-  punchLunge: 0.32, // metres a punch steps in (only when not already in close)
-  kickLunge: 0.26,
-  lungeMinGap: 0.85,
+  // reach: root-to-root distance where the strike visibly lands (the AI fights from here).
+  // range: outer gate; the hit itself needs the fist/foot to touch the body (see strikeContact).
+  // recover: idle time after the attack ends (x whiffMul when it missed).
+  punch: { damage: 10, reach: 1.3, range: 1.75, cooldown: 0.55, recover: 0.22, activeFrac: [0.2, 0.78] },
+  kick: { damage: 15, reach: 1.55, range: 2.05, cooldown: 0.8, recover: 0.36, activeFrac: [0.26, 0.8] },
+  whiffMul: 2.2,
+  punchLunge: 0.12, // metres a strike steps in when slightly out of reach (small enough to hide)
+  kickLunge: 0.1,
+  strikeGap: 1.2,   // no lunge inside this gap; it would drive the body into the opponent
+  bodyRadius: 0.36, // defender body capsule used for fist/foot contact
   blockReduction: 0.82,
-  hitStun: 0.62,
-  hitInvuln: 0.28,
-  hitRock: 0.07,       // metres a light hit rocks a robot back (inside the hit clip)
+  hitStun: 0.5,
+  hitInvuln: 0.22,
+  hitRock: 0.1,        // metres a light hit rocks a robot back (inside the hit clip)
   stumbleForce: 3.8,   // impact force that turns a hit into a stepped stumble-back
   stumbleDist: 0.75,   // metres travelled over the StumbleBackwards steps
-  separate: 0.85,
+  separate: 1.05,      // soft spacing: closer than this, the robot steps back (with its walk)
+  separateHard: 0.8,   // emergency push-apart only (physics capsules normally keep this)
+  downMin: 1.5,        // seconds a knocked-down robot stays on the mat at least
+  downRest: 0.7,       // ...and lies still this long after settling before getting up
+  downMax: 2.8,
 };
 
 export const GFX_PRESETS = {
