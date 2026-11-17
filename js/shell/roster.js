@@ -137,6 +137,7 @@
       p2Held.kick = inp.kick;
       return out;
     }
+    if (m.mode === 'watch') return null; // both robots run on the CPU brain
     if (m.mode === 'training' && side === 'p2') {
       return Object.assign(idle(), { block: !!S.match.dummyBlock });
     }

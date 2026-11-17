@@ -205,10 +205,10 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
   const r = a / Math.cos(Math.PI / 8);
 
   const floorMat = new THREE.MeshPhysicalMaterial({
-    color: 0xd8dde3,
-    metalness: 0.94,
-    roughness: 0.18,
-    envMapIntensity: 1.35,
+    color: 0xc8ced6,
+    metalness: 0.93,
+    roughness: 0.24,
+    envMapIntensity: 1.15,
     clearcoat: 0.28,
     clearcoatRoughness: 0.22,
   });
@@ -235,7 +235,7 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
     }),
   );
   logo.rotation.x = -Math.PI / 2;
-  logo.position.y = 0.01;
+  logo.position.y = 0.002;
   logo.receiveShadow = true;
   group.add(logo);
 
@@ -249,14 +249,16 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
   const inner = new THREE.Mesh(new THREE.RingGeometry(a - 0.2, a - 0.04, 8), ringMat);
   inner.rotation.x = -Math.PI / 2;
   inner.rotation.z = Math.PI / 8;
-  inner.position.y = 0.012;
+  inner.position.y = 0.003;
   group.add(inner);
 
   const edge = new THREE.Mesh(
     new THREE.CylinderGeometry(r + 0.07, r + 0.07, 0.14, 8),
     new THREE.MeshPhysicalMaterial({ color: 0xb7bec6, metalness: 0.92, roughness: 0.22, envMapIntensity: 1.2 }),
   );
-  edge.position.y = 0.02;
+  // Solid trim cylinder: keep its top just under the mat top (y=0). At 0.02 its lid sat at
+  // y=0.09 over the whole floor and the robots' feet sank into it.
+  edge.position.y = -0.07 - 0.001;
   edge.rotation.y = Math.PI / 8;
   edge.receiveShadow = true;
   edge.castShadow = true;

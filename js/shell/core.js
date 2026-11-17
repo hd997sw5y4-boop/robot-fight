@@ -35,6 +35,7 @@
   window.RFShellHook = {
     onReady(h) { handle = h; tryReady(); },
     input(side) { return S.inputFor ? S.inputFor(side) : null; },
+    cpuControls(side) { return !!(S.match && S.match.cfg && S.match.cfg.mode === 'watch' && side === 'p1'); },
   };
   const modUrl = (p) => new URL(p, document.baseURI).href;
   Promise.all([import(modUrl('js/api.js')), import(modUrl('js/audio.js'))]).then(([fight, audio]) => {

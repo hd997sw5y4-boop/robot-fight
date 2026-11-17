@@ -5,7 +5,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { HDRLoader as RGBELoader } from 'three/addons/loaders/HDRLoader.js';
 import { MODEL, ARENA, COMBAT, GFX_PRESETS, LOOP_CLIPS } from './config.js';
 import { CLIP_SPEEDS } from './clip-speeds.js';
-import { getSettings, isSettingsOpen, initSettings, updateFps, setFov } from './settings.js';
+import { getSettings, isSettingsOpen, initSettings, updateFps } from './settings.js';
 import { unlockAudio, playSfx, playHit, setBuzz, startCrowd } from './audio.js';
 import { buildArena as buildArenaVisual, addArenaLights } from './arena.js';
 import {
@@ -104,9 +104,29 @@ window.addEventListener('wheel', (e) => {
   const el = e.target;
   if (el && el.closest && el.closest('#setp, #overlay, input, select, textarea, button, a, label')) return;
   e.preventDefault();
-  const step = Math.sign(e.deltaY) * Math.min(5.5, 1.15 + Math.abs(e.deltaY) * 0.035);
-  setFov(clampFov(fovTarget + step), true);
+  // Wheel zooms the orbit camera in and out (FOV stays on the Settings slider).
+  const f = Math.exp(Math.sign(e.deltaY) * Math.min(0.35, 0.08 + Math.abs(e.deltaY) * 0.0012));
+  orbit.zoom = Math.max(0.08, Math.min(2.2, orbit.zoom * f));
 }, { passive: false });
+
+// Mouse orbit like Window Workshop 3D: drag (left or right button) to spin 360° and tilt;
+// double-click to reset the view.
+const orbit = { yaw: 0, pitch: 0.26, zoom: 1, drag: false };
+canvas.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 && e.button !== 2) return;
+  orbit.drag = true;
+  canvas.setPointerCapture?.(e.pointerId);
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!orbit.drag) return;
+  orbit.yaw -= e.movementX * 0.0065;
+  orbit.pitch = Math.max(0.02, Math.min(1.4, orbit.pitch + e.movementY * 0.005));
+});
+const endDrag = (e) => { orbit.drag = false; canvas.releasePointerCapture?.(e.pointerId); };
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+canvas.addEventListener('dblclick', () => { orbit.yaw = 0; orbit.pitch = 0.26; orbit.zoom = 1; });
 
 const hitLight = new THREE.PointLight(0xffb44a, 0, 6);
 hitLight.decay = 2;
@@ -524,6 +544,64 @@ function prepFootworkClips(gltf) {
     const tracks = idle.tracks.filter((t) => UPPER_BODY.test(t.name.split('.')[0])).map((t) => t.clone());
     gltf.animations.push(new THREE.AnimationClip('GuardUpper', idle.duration, tracks));
   }
+}
+
+// Soft contact shadows. The chrome mat is metal, so real shadow maps barely darken it; these
+// dark blobs under the body and each foot show where the robot actually touches the mat.
+let _blobTex = null;
+function blobTexture() {
+  if (_blobTex) return _blobTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, 'rgba(0,0,0,1)');
+  grad.addColorStop(0.45, 'rgba(0,0,0,0.6)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  _blobTex = new THREE.CanvasTexture(c);
+  return _blobTex;
+}
+function makeBlob(size, opacity) {
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(size, size),
+    new THREE.MeshBasicMaterial({ map: blobTexture(), transparent: true, depthWrite: false, opacity, toneMapped: false }),
+  );
+  m.rotation.x = -Math.PI / 2;
+  m.renderOrder = 2;
+  m.userData.baseOpacity = opacity;
+  scene.add(m);
+  return m;
+}
+const _blobP = new THREE.Vector3();
+function updateContactShadows(f) {
+  if (!f || !f.model) return;
+  if (!f.blobs) f.blobs = { body: makeBlob(1.25, 0.5), left: makeBlob(0.42, 0.75), right: makeBlob(0.42, 0.75) };
+  const top = matTopY() + 0.005; // above the logo decal
+  const hips = f.hipsBone || (f.hipsBone = findHips(f));
+  (hips || f.root).getWorldPosition(_blobP);
+  f.blobs.body.position.set(_blobP.x, top, _blobP.z);
+  f.blobs.body.material.opacity = f.blobs.body.userData.baseOpacity * Math.max(0, 1 - Math.max(0, _blobP.y - 1.2) / 1.5);
+  for (const side of ['left', 'right']) {
+    const blob = f.blobs[side];
+    const part = side === 'left' ? f.parts && f.parts.legL : f.parts && f.parts.legR;
+    const foot = f.ikLegs && f.ikLegs[side === 'left' ? 'L' : 'R'];
+    const bone = foot && (foot.toe || foot.foot);
+    if (!bone || (part && part.detached)) { blob.visible = false; continue; }
+    blob.visible = true;
+    bone.getWorldPosition(_blobP);
+    blob.position.set(_blobP.x, top, _blobP.z);
+    const h = Math.max(0, _blobP.y - top);
+    blob.material.opacity = blob.userData.baseOpacity * Math.max(0, 1 - h / 0.35);
+    const sc = 1 + h * 1.5;
+    blob.scale.set(sc, sc, 1);
+  }
+}
+function findHips(f) {
+  let hips = null;
+  f.model.traverse((o) => { if (!hips && (o.isBone || o.type === 'Bone') && boneKey(o.name) === 'Hips') hips = o; });
+  return hips;
 }
 
 function cacheFeet(f) {
@@ -1238,10 +1316,9 @@ function showKoOverlay() {
   match.overlayAt = 0;
 }
 
-const ai = { t: 0, sidestep: 0, inout: 0, block: false, punch: false, kick: false };
-
-function aiProfile() {
-  const custom = p2 && p2.config && p2.config.ai;
+function aiProfile(cpu) {
+  const who = cpu || p2;
+  const custom = who && who.config && who.config.ai;
   const fromSettings = getSettings().cpu || 'normal';
   // A shell-provided think table (arcade opponents, explicit personalities) wins.
   // Default / unspecialized configs follow the Settings CPU difficulty.
@@ -1250,8 +1327,12 @@ function aiProfile() {
 }
 
 function updateAI(cpu, player, dt) {
-  const shellAi = shellCall('input', 'p2'); // [game-shell hook] versus P2 / training dummy / menu idle
-  if (shellAi) return shellAi;
+  if (cpu === p2) {
+    const shellAi = shellCall('input', 'p2'); // [game-shell hook] versus P2 / training dummy / menu idle
+    if (shellAi) return shellAi;
+  }
+  // Each CPU keeps its own think state (Bot vs Bot runs two).
+  const ai = cpu._ai || (cpu._ai = { t: 0, sidestep: 0, inout: 0, block: false, punch: false, kick: false });
   ai.punch = false;
   ai.kick = false;
   ai.punchClip = null;
@@ -1263,7 +1344,7 @@ function updateAI(cpu, player, dt) {
   }
   const d = cpu.root.position.distanceTo(player.root.position);
   if (ai.t <= 0) {
-    const prof = aiProfile();
+    const prof = aiProfile(cpu);
     ai.t = prof.think[0] + Math.random() * prof.think[1];
     ai.block = false;
     if ((player.state === 'punch' || player.state === 'kick') && d < 1.8 && Math.random() < prof.react) {
@@ -1567,8 +1648,16 @@ function updateCamera(dt) {
     return;
   }
   const dist = a.distanceTo(b);
-  camT.set(lookT.x, 3.45, lookT.z + 8.6 + dist * 0.3);
-  camera.position.lerp(camT, dt <= 0 ? 0 : 1 - Math.pow(0.001, dt));
+  const r = Math.max(0.7, Math.hypot(2.3, 8.6 + dist * 0.3) * orbit.zoom);
+  // Zoomed in close, aim a little lower so the feet and mat stay in frame.
+  lookT.y = midY - (1 - Math.min(1, orbit.zoom)) * 0.45;
+  const cp = Math.cos(orbit.pitch);
+  camT.set(
+    lookT.x + Math.sin(orbit.yaw) * cp * r,
+    Math.max(0.08, lookT.y + Math.sin(orbit.pitch) * r),
+    lookT.z + Math.cos(orbit.yaw) * cp * r,
+  );
+  camera.position.lerp(camT, dt <= 0 ? 1 : 1 - Math.pow(orbit.drag ? 1e-6 : 0.001, dt));
   camera.lookAt(lookT);
   if (shakeAmp > 0) {
     camera.position.x += (Math.random() - 0.5) * shakeAmp;
@@ -1767,7 +1856,8 @@ function tick() {
   }
   if (match.phase === 'fight' && !match.over) stepRound(dt);
   const canAct = match.phase === 'fight' && !match.over && !isSettingsOpen();
-  const pin = canAct ? consumeAttacks(rawInput()) : consumeAttacks({ sidestep: 0, inout: 0, punch: false, kick: false, block: false });
+  const watch = !!shellCall('cpuControls', 'p1'); // Bot vs Bot: P1 is a CPU too
+  const pin = canAct ? (watch ? updateAI(p1, p2, dt) : consumeAttacks(rawInput())) : consumeAttacks({ sidestep: 0, inout: 0, punch: false, kick: false, block: false });
   const ain = canAct ? updateAI(p2, p1, dt) : { sidestep: 0, inout: 0, punch: false, kick: false, block: false };
 
   for (const f of [p1, p2]) {
@@ -1795,6 +1885,8 @@ function tick() {
   }
   if (isRagdoll(p1)) applyMalfunctions(p1, dt);
   if (isRagdoll(p2)) applyMalfunctions(p2, dt);
+  updateContactShadows(p1);
+  updateContactShadows(p2);
   stepDamage(scene, dt);
   if (!match.over && match.phase === 'fight') {
     if (isCatastrophic(p1) && p1.state !== 'ko') ko(p1, p2, { reason: p1.parts.head && p1.parts.head.detached ? 'head' : 'legs' });
@@ -1959,6 +2051,7 @@ function onLoad(gltf) {
     document.getElementById('fps').classList.add('hidden');
   };
 
+  window.__rfDebugBlobs = () => [p1, p2].map((f) => f.blobs ? Object.fromEntries(Object.entries(f.blobs).map(([k, b]) => [k, [b.visible, +b.material.opacity.toFixed(2), +b.position.x.toFixed(2), +b.position.z.toFixed(2)]])) : null);
   window.__rfMeasureFeet = () => {
     const top = matTopY();
     const out = { matTop: top };

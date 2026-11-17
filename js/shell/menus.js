@@ -32,7 +32,8 @@
     <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows <span>move</span></li>
     <li><kbd>J</kbd> <span>punch</span> <kbd>K</kbd> <span>kick</span> <kbd>L</kbd> <span>block</span></li>
     <li>Hold <kbd>Shift</kbd> <span>run forward / back</span></li>
-    <li><kbd>Esc</kbd> / <kbd>P</kbd> <span>pause</span></li>`;
+    <li><kbd>Esc</kbd> / <kbd>P</kbd> <span>pause</span></li>
+    <li>Mouse drag <span>spin camera</span> · wheel <span>zoom</span> · double-click <span>reset view</span></li>`;
   const KEYS_P1 = '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>F</kbd> punch · <kbd>G</kbd> kick · <kbd>H</kbd> block · hold <kbd>Left Shift</kbd> run';
   const KEYS_P2 = '<kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> move · <kbd>.</kbd> punch · <kbd>/</kbd> kick · <kbd>Right Shift</kbd> block · hold <kbd>Right Ctrl</kbd> run';
   const PAD = '<li><span>Stick / D-pad</span> move · <kbd>A</kbd> punch · <kbd>B</kbd> kick · <kbd>X</kbd>/shoulder block · hold <kbd>LT</kbd>/<kbd>L3</kbd> run · <kbd>Start</kbd> pause</li>';
@@ -65,6 +66,7 @@
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="arcade"><b>Arcade</b><small>Climb the six-robot ladder</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="versus"><b>Versus</b><small>Two players, one keyboard or two gamepads</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="training"><b>Training</b><small>Practice on a dummy, no timer</small></button>
+          <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="watch"><b>Bot vs Bot</b><small>Sit back and watch two CPUs fight</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="settings"><b>Settings</b><small>Graphics, sound, CPU difficulty, round time</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="credits"><b>Credits</b></button>
         </nav>
@@ -243,13 +245,14 @@
     arcade: ['Arcade', 'Six opponents · rising difficulty'],
     versus: ['Versus', 'Local two-player · best of 3'],
     training: ['Training', 'Dummy · no timer'],
+    watch: ['Bot vs Bot', 'Watch two CPUs · best of 3'],
   };
   function openSelect(mode) {
     S.state.mode = mode;
     const [title, sub] = MODE_INFO[mode];
     let right = '';
     if (mode === 'versus') right = paintPanel('p2', 'Player 2');
-    else if (mode === 'fight') {
+    else if (mode === 'fight' || mode === 'watch') {
       right = `<section class="rfs-card rfs-panel rfs-opps"><header><small>Opponent</small><b>Choose a CPU</b></header>
         <div class="rfs-opplist">
           <button type="button" class="rfs-f rfs-opp" data-act="opp" data-opp="random"><i style="--a:#9aabff;--b:#4a505c"></i><span><b>Random</b><small>Any of the six</small></span></button>
@@ -267,7 +270,7 @@
     }
     S.$('.rfs-selwrap', selEl).innerHTML = `
       <header class="rfs-selhead"><small>${sub}</small><b>${title}</b></header>
-      <div class="rfs-left">${paintPanel('p1', mode === 'versus' ? 'Player 1' : 'Your robot')}</div>
+      <div class="rfs-left">${paintPanel('p1', mode === 'versus' ? 'Player 1' : mode === 'watch' ? 'Blue corner CPU' : 'Your robot')}</div>
       <div class="rfs-right">${right}</div>
       <div class="rfs-selfoot">
         ${mode === 'versus' ? '<div class="rfs-pads"><span class="rfs-padtxt"></span><button type="button" class="rfs-f rfs-btn rfs-small" data-act="swap">Swap gamepads</button></div>' : ''}
@@ -310,7 +313,7 @@
     previewSelect();
   }
   function previewOpponent() {
-    if (S.state.mode !== 'fight' || !S.api) return;
+    if ((S.state.mode !== 'fight' && S.state.mode !== 'watch') || !S.api) return;
     const o = sel.opp === 'random' ? { primary: '#4a505c', accent: '#9aabff' } : S.opponent(sel.opp);
     S.paint(S.api.p2, o.primary, o.accent);
   }
@@ -319,7 +322,7 @@
     const m = S.state.mode;
     S.paint(S.api.p1, sel.p1.primary, sel.p1.accent);
     if (m === 'versus') S.paint(S.api.p2, sel.p2.primary, sel.p2.accent);
-    else if (m === 'fight') previewOpponent();
+    else if (m === 'fight' || m === 'watch') previewOpponent();
     else if (m === 'training') S.paint(S.api.p2, '#4a505c', '#9aabff');
     else S.paint(S.api.p2, S.ROSTER[0].primary, S.ROSTER[0].accent);
   }
@@ -341,6 +344,9 @@
     if (mode === 'fight') {
       const o = sel.opp === 'random' ? S.ROSTER[Math.floor(Math.random() * S.ROSTER.length)] : S.opponent(sel.opp);
       S.startMatch({ mode, p1: p1Cfg(false), p2: oppCfg(o), opp: o });
+    } else if (mode === 'watch') {
+      const o = sel.opp === 'random' ? S.ROSTER[Math.floor(Math.random() * S.ROSTER.length)] : S.opponent(sel.opp);
+      S.startMatch({ mode, p1: { name: 'Blue CPU', label: 'CPU · ' + paintName(sel.p1), paint: { primary: sel.p1.primary, accent: sel.p1.accent } }, p2: oppCfg(o), opp: o });
     } else if (mode === 'versus') {
       S.startMatch({ mode, p1: p1Cfg(true), p2: { name: 'Player 2', label: 'P2 · ' + paintName(sel.p2), paint: { primary: sel.p2.primary, accent: sel.p2.accent } } });
     } else {
@@ -395,7 +401,7 @@
     const cfg = M.cfg;
     const mode = cfg.mode;
     const winner = w == null ? null : (w === 0 ? cfg.p1 : cfg.p2);
-    const title = w == null ? 'Match drawn' : (mode !== 'versus' && w === 0 ? 'You win' : winner.name + ' wins');
+    const title = w == null ? 'Match drawn' : (mode !== 'versus' && mode !== 'watch' && w === 0 ? 'You win' : winner.name + ' wins');
     const last = M.rounds[M.rounds.length - 1];
     const sub = w == null ? 'Even on rounds and damage.' : `${M.wins[w]}–${M.wins[1 - w]} · final round by ${METHOD[last.method]}`;
     let buttons = '';
