@@ -64,6 +64,11 @@ export const ARENA = {
   // Visible fence/posts/rails. Physics ring walls stay on either way so fighters and debris stay in.
   // Set true later to bring the cage back.
   cage: false,
+  // HDRI environment (Poly Haven wrestling_gym, CC0). Off by default; toggle in Settings.
+  // When on, the HDRI is used as scene.environment (PMREM) and as a dim, blurred backdrop.
+  // Arena lights stay on either way.
+  hdri: false,
+  hdriUrl: './hdris/wrestling_gym_2k.hdr',
 };
 
 export const COMBAT = {

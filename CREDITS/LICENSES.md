@@ -43,3 +43,7 @@ License text: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
 | Crowd at the stadium | 2111 | `crowd_stadium_short.ogg` |
 
 Full-quality WAV masters were downloaded from Mixkit and recompressed to mono OGG for the game.
+
+## Poly Haven — CC0 1.0
+
+[Wrestling Gym](https://polyhaven.com/a/wrestling_gym) 2K HDRI, used as an optional environment / backdrop when HDRI is enabled (`hdris/wrestling_gym_2k.hdr`). License: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/). Credit is optional.

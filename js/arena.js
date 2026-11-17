@@ -160,6 +160,8 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
     new THREE.MeshStandardMaterial({ color: 0x07080b, roughness: 1, metalness: 0, side: THREE.BackSide }),
   );
   wall.position.y = 5.5;
+  wall.name = 'arenaVoidWall';
+  wall.userData.voidWall = true;
   group.add(wall);
 
   const postMat = new THREE.MeshStandardMaterial({
