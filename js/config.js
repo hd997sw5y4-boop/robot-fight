@@ -79,8 +79,11 @@ export const COMBAT = {
   footworkMul: 1.5, // base forward/back stepping speed vs the clip; walk anim speeds up to match
   runBackMul: 1.35, // Shift: backward speed multiplier
   blockMoveSpeed: 1.4,
-  punch: { damage: 10, range: 1.35, cooldown: 0.55, activeFrac: [0.30, 0.62] },
-  kick: { damage: 15, range: 1.7, cooldown: 0.8, activeFrac: [0.38, 0.68] },
+  punch: { damage: 10, range: 1.5, cooldown: 0.55, activeFrac: [0.30, 0.62] },
+  kick: { damage: 15, range: 1.85, cooldown: 0.8, activeFrac: [0.38, 0.68] },
+  punchLunge: 0.32, // metres a punch steps in (only when not already in close)
+  kickLunge: 0.26,
+  lungeMinGap: 0.85,
   blockReduction: 0.82,
   hitStun: 0.62,
   hitInvuln: 0.28,

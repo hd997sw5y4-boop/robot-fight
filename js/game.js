@@ -1169,7 +1169,7 @@ function tryAttack(f, kind, clipName) {
   f.attackClip = clip;
   f.blocking = false;
   f.shield.visible = false;
-  setAnim(f, clip, 0.16);
+  setAnim(f, clip, 0.1);
   playSfx('whoosh');
   const action = f.actions[clip] || f.actions[kind];
   if (action) {
@@ -1415,13 +1415,21 @@ function stepFighter(f, other, inp, dt) {
     const dur = action ? action.getClip().duration : 0.7;
     const a0 = (spec.activeFrac ? spec.activeFrac[0] * dur : spec.active[0]);
     const a1 = (spec.activeFrac ? spec.activeFrac[1] * dur : spec.active[1]);
+    // Step into the strike: a short drive toward the opponent through the wind-up and impact.
+    const gap = f.root.position.distanceTo(other.root.position);
+    if (f.stateT < a1 && gap > (COMBAT.lungeMinGap || 0.85)) {
+      const lunge = (f.state === 'kick' ? COMBAT.kickLunge : COMBAT.punchLunge) || 0;
+      const fwd = toward(f, other);
+      const v = lunge / Math.max(0.1, a1) * ((f.atkMods && f.atkMods.timeScale) || 1);
+      setFighterMove(f, fwd.x * v, fwd.z * v);
+    } else if (f.stateT >= a1) setFighterMove(f, 0, 0);
     if (!f.hitThisAttack && f.stateT >= a0 && f.stateT <= a1 && attackHits(f, other, spec)) {
       f.hitThisAttack = true;
       applyHit(f, other, spec, f.state);
     }
     if (f.stateT > dur + 0.05 && f.state !== 'ko') {
       f.state = 'idle';
-      setAnim(f, idleClipFor(f), 0.16);
+      setAnim(f, idleClipFor(f), 0.28);
     }
     return;
   }
@@ -1768,12 +1776,17 @@ function applyGetupBlend(f, dt) {
   }
 }
 
-function poseAfterMixer(f) {
+function poseAfterMixer(f, dt = 1 / 60) {
   if (isRagdoll(f)) return;
-  // Keep the game's movement in charge: pin hips X/Z, leave Y for clip bounce.
+  // Keep the game's movement in charge: pin hips X/Z, leave Y for clip bounce. During punches
+  // and kicks the pin eases off so the clip's lunge, hip turn and weight shift come through.
   if (f.hips && f.hipsBind) {
-    f.hips.position.x = f.hipsBind.x;
-    f.hips.position.z = f.hipsBind.z;
+    const attacking = f.state === 'punch' || f.state === 'kick';
+    const k = 1 - Math.pow(attacking ? 0.0005 : 0.002, Math.max(dt, 1 / 120));
+    f.hipFree = (f.hipFree || 0) + ((attacking ? 1 : 0) - (f.hipFree || 0)) * k;
+    const w = 1 - f.hipFree;
+    f.hips.position.x += (f.hipsBind.x - f.hips.position.x) * w;
+    f.hips.position.z += (f.hipsBind.z - f.hips.position.z) * w;
   }
   f.model.position.y = f.baseY;
 }
@@ -1878,7 +1891,7 @@ function tick() {
     f.mixer.update(dt);
     applyGetupBlend(f, dt);
     f.root.position.y = 0;
-    poseAfterMixer(f);
+    poseAfterMixer(f, dt);
     applyMalfunctions(f, dt);
     groundFeet(f, dt);
     stepFootSounds(f, dt);
