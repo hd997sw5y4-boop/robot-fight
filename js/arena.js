@@ -55,6 +55,38 @@ function logoTexture() {
   return t;
 }
 
+export const FENCE_TOP = 2.82;
+let cageFadeList = [];
+const _camXZ = new THREE.Vector3();
+const _posXZ = new THREE.Vector3();
+
+export function updateCageFade(camera, focus, dt) {
+  if (!cageFadeList.length || !camera) return;
+  _camXZ.set(camera.position.x, 0, camera.position.z);
+  const origin = focus ? _posXZ.set(focus.x, 0, focus.z) : _posXZ.set(0, 0, 0);
+  const camDir = _camXZ.clone().sub(origin);
+  if (camDir.lengthSq() < 1e-6) return;
+  camDir.normalize();
+  const k = dt <= 0 ? 1 : 1 - Math.pow(0.0008, dt);
+  for (const piece of cageFadeList) {
+    const outward = piece.pos.clone().setY(0).sub(origin);
+    if (outward.lengthSq() < 1e-8) continue;
+    outward.normalize();
+    // 1 = piece sits on the camera side of the ring (between camera and fighters).
+    const facing = outward.dot(camDir);
+    const t = Math.max(0, Math.min(1, (facing - 0.08) / 0.62));
+    const target = 1 - t * (1 - 0.12);
+    for (const mesh of piece.meshes) {
+      const mat = mesh.material;
+      if (!mat) continue;
+      mat.opacity = mat.opacity + (target - (mat.opacity ?? 1)) * k;
+      mat.transparent = true;
+      mat.depthWrite = mat.opacity > 0.92 && piece.kind === 'post';
+      mesh.castShadow = mat.opacity > 0.55;
+    }
+  }
+}
+
 export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal }) {
   const group = new THREE.Group();
   const a = ARENA.apothem;
@@ -154,24 +186,30 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
 
   const postH = 3.2;
   const corners = [];
+  const cageFade = [];
   for (let i = 0; i < 8; i++) {
     const ang = i * Math.PI / 4 + Math.PI / 8;
     const x = Math.cos(ang) * r;
     const z = Math.sin(ang) * r;
     corners.push(new THREE.Vector3(x, 0, z));
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.11, postH, 12), postMat);
-    post.position.set(x, postH / 2, z);
-    post.castShadow = true;
-    post.receiveShadow = true;
-    group.add(post);
-    const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 2.4, 12), padMat);
-    pad.position.set(x, 1.35, z);
-    pad.castShadow = true;
-    group.add(pad);
+    if (ARENA.cage) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.11, postH, 12), postMat.clone());
+      post.position.set(x, postH / 2, z);
+      post.castShadow = true;
+      post.receiveShadow = true;
+      post.material.transparent = true;
+      group.add(post);
+      const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 2.4, 12), padMat.clone());
+      pad.position.set(x, 1.35, z);
+      pad.castShadow = true;
+      pad.material.transparent = true;
+      group.add(pad);
+      cageFade.push({ kind: 'post', meshes: [post, pad], pos: new THREE.Vector3(x, 1.2, z) });
+    }
   }
 
   const railHeights = [0.62, 1.45, 2.28];
-  const xAxis = new THREE.Vector3(1, 0, 0);
+  const yAxis = new THREE.Vector3(0, 1, 0);
   const linkTex = chainlinkTexture();
   const linkMat = new THREE.MeshStandardMaterial({
     map: linkTex,
@@ -180,32 +218,38 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
     color: 0x9aa0a8,
     metalness: 0.7,
     roughness: 0.35,
-    alphaTest: 0.15,
+    // No alphaTest: we fade near-side panels to ~12% and alphaTest would discard the wires.
     depthWrite: false,
   });
   linkTex.repeat.set(6, 3);
 
-  for (let i = 0; i < 8; i++) {
+  if (ARENA.cage) for (let i = 0; i < 8; i++) {
     const apos = corners[i];
     const bpos = corners[(i + 1) % 8];
     const dir = new THREE.Vector3().subVectors(bpos, apos);
     const len = dir.length();
     const mid = new THREE.Vector3().addVectors(apos, bpos).multiplyScalar(0.5);
-    const quat = new THREE.Quaternion().setFromUnitVectors(xAxis, dir.clone().normalize());
+    const along = dir.clone().normalize();
+    // Cylinders are Y-up; mapping +Y onto the side direction is never a 180° singularity.
+    const railQ = new THREE.Quaternion().setFromUnitVectors(yAxis, along);
+    const sideMeshes = [];
     for (const h of railHeights) {
-      const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, len, 8), railMat);
-      rail.geometry.rotateZ(Math.PI / 2);
-      rail.quaternion.copy(quat);
+      const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, len, 8), railMat.clone());
+      rail.quaternion.copy(railQ);
       rail.position.set(mid.x, h, mid.z);
       rail.castShadow = true;
+      rail.material.transparent = true;
       group.add(rail);
+      sideMeshes.push(rail);
     }
-    const fence = new THREE.Mesh(new THREE.PlaneGeometry(len, 2.55), linkMat);
-    fence.quaternion.copy(quat);
-    fence.rotateY(Math.PI / 2);
+    // PlaneGeometry faces +Z. Yaw so +Z points outward (center -> side midpoint).
+    const fence = new THREE.Mesh(new THREE.PlaneGeometry(len, 2.55), linkMat.clone());
+    fence.rotation.set(0, Math.atan2(mid.x, mid.z), 0);
     fence.position.set(mid.x, 1.48, mid.z);
     fence.castShadow = true;
     group.add(fence);
+    sideMeshes.push(fence);
+    cageFade.push({ kind: 'side', meshes: sideMeshes, pos: mid.clone() });
   }
 
   // Overhead spots (visual fixtures + actual lights added by caller via exported positions).
@@ -226,7 +270,8 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
 
   addCrowd(group, r);
   scene.add(group);
-  return { group, fixturePos };
+  cageFadeList = ARENA.cage ? cageFade : [];
+  return { group, fixturePos, fenceTop: FENCE_TOP };
 }
 
 function addCrowd(group, cageR) {
@@ -262,11 +307,12 @@ function addCrowd(group, cageR) {
 }
 
 export function addArenaLights(scene, fixturePos) {
-  const hemi = new THREE.HemisphereLight(0x9eb6d8, 0x0a0806, 0.22);
+  const hemi = new THREE.HemisphereLight(0xc5d6ee, 0x1a120c, 0.48);
   scene.add(hemi);
   const spots = [];
   for (const p of fixturePos) {
-    const s = new THREE.SpotLight(0xfff1d0, 18, 18, Math.PI / 6.5, 0.45, 1.15);
+    // Spots stay punchy for overhead drama; ambient/fill carry the visibility lift.
+    const s = new THREE.SpotLight(0xfff1d0, 20, 20, Math.PI / 6.2, 0.5, 1.05);
     s.position.copy(p);
     s.target.position.set(0, 0.4, 0);
     s.userData.wantsShadow = spots.length === 0;
@@ -275,14 +321,30 @@ export function addArenaLights(scene, fixturePos) {
     s.shadow.bias = -0.0003;
     s.shadow.camera.near = 1;
     s.shadow.camera.far = 22;
+    s.userData.baseIntensity = s.intensity;
     scene.add(s, s.target);
     spots.push(s);
   }
-  const fill = new THREE.DirectionalLight(0x4d6490, 0.18);
-  fill.position.set(-6, 5, -4);
+  hemi.userData.baseIntensity = hemi.intensity;
+  const fill = new THREE.DirectionalLight(0x8ea4c4, 0.42);
+  fill.position.set(-6, 6, 8);
+  fill.userData.baseIntensity = fill.intensity;
   scene.add(fill);
-  const rim = new THREE.DirectionalLight(0x7ea0c8, 0.22);
-  rim.position.set(0, 4, -10);
+  const fill2 = new THREE.DirectionalLight(0x6d7c92, 0.22);
+  fill2.position.set(5, 4, 3);
+  fill2.userData.baseIntensity = fill2.intensity;
+  scene.add(fill2);
+  const rim = new THREE.DirectionalLight(0xcfe2ff, 0.55);
+  rim.position.set(0, 4.2, -11);
+  rim.userData.baseIntensity = rim.intensity;
   scene.add(rim);
-  return { hemi, spots, fill, rim };
+  const rimL = new THREE.DirectionalLight(0xb7d4ff, 0.4);
+  rimL.position.set(-8, 3.6, -8);
+  rimL.userData.baseIntensity = rimL.intensity;
+  scene.add(rimL);
+  const rimR = new THREE.DirectionalLight(0xffe1c2, 0.32);
+  rimR.position.set(8, 3.4, -7);
+  rimR.userData.baseIntensity = rimR.intensity;
+  scene.add(rimR);
+  return { hemi, spots, fill, fill2, rim, rimL, rimR };
 }

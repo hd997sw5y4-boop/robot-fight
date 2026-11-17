@@ -15,6 +15,8 @@ const KEYS = {
   round: 'rf_round',
   controls: 'rf_controls',
   fps: 'rf_fps',
+  fov: 'rf_fov',
+  light: 'rf_light',
 };
 
 const defaults = {
@@ -27,6 +29,8 @@ const defaults = {
   round: 0,
   controls: true,
   fps: false,
+  fov: 50,
+  light: 1,
 };
 
 function read() {
@@ -50,6 +54,10 @@ function read() {
     if (c != null) s.controls = c !== '0';
     const f = localStorage.getItem(KEYS.fps);
     if (f != null) s.fps = f === '1';
+    const fov = localStorage.getItem(KEYS.fov);
+    if (fov != null && isFinite(+fov)) s.fov = Math.max(45, Math.min(90, +fov));
+    const light = localStorage.getItem(KEYS.light);
+    if (light != null && isFinite(+light)) s.light = Math.max(0.5, Math.min(2, +light));
   } catch (_) {}
   return s;
 }
@@ -65,6 +73,8 @@ function write(s) {
     localStorage.setItem(KEYS.round, String(s.round));
     localStorage.setItem(KEYS.controls, s.controls ? '1' : '0');
     localStorage.setItem(KEYS.fps, s.fps ? '1' : '0');
+    localStorage.setItem(KEYS.fov, String(s.fov));
+    localStorage.setItem(KEYS.light, String(s.light));
   } catch (_) {}
 }
 
@@ -106,6 +116,14 @@ function paint() {
   if (round) round.value = String(settings.round);
   const controls = $('setControls');
   if (controls) controls.checked = settings.controls;
+  const fov = $('setFov');
+  const fovV = $('setFovV');
+  if (fov && document.activeElement !== fov) fov.value = String(Math.round(settings.fov));
+  if (fovV) fovV.textContent = Math.round(settings.fov) + '°';
+  const light = $('setLight');
+  const lightV = $('setLightV');
+  if (light && document.activeElement !== light) light.value = String(settings.light);
+  if (lightV) lightV.textContent = Math.round(settings.light * 100) + '%';
   applyChrome();
 }
 
@@ -228,6 +246,58 @@ export function initSettings(nextHooks) {
   bindSlider('setMaster', 'master');
   bindSlider('setSfx', 'sfx');
   bindSlider('setCrowd', 'crowd');
+  bindFov();
+  bindLight();
+}
+
+function clampFov(v) {
+  return Math.max(45, Math.min(90, +v || 50));
+}
+
+export function setFov(v, persistIt) {
+  settings.fov = clampFov(v);
+  if (persistIt !== false) persist();
+  else if (hooks.onChange) hooks.onChange(settings);
+  if (hooks.applyFov) hooks.applyFov(settings.fov);
+  const fov = document.getElementById('setFov');
+  const fovV = document.getElementById('setFovV');
+  if (fov && document.activeElement !== fov) fov.value = String(Math.round(settings.fov));
+  if (fovV) fovV.textContent = Math.round(settings.fov) + '°';
+  return settings.fov;
+}
+
+function bindFov() {
+  const el = document.getElementById('setFov');
+  if (!el) return;
+  el.addEventListener('pointerdown', () => unlockAudio());
+  el.addEventListener('input', () => setFov(el.value, true));
+  el.addEventListener('change', () => { setFov(el.value, true); playSfx('click'); });
+  el.addEventListener('dblclick', () => { setFov(50, true); playSfx('click'); paint(); });
+}
+
+function clampLight(v) {
+  return Math.max(0.5, Math.min(2, +v || 1));
+}
+
+export function setLight(v, persistIt) {
+  settings.light = clampLight(v);
+  if (persistIt !== false) persist();
+  else if (hooks.onChange) hooks.onChange(settings);
+  if (hooks.applyLight) hooks.applyLight(settings.light);
+  const el = document.getElementById('setLight');
+  const lab = document.getElementById('setLightV');
+  if (el && document.activeElement !== el) el.value = String(settings.light);
+  if (lab) lab.textContent = Math.round(settings.light * 100) + '%';
+  return settings.light;
+}
+
+function bindLight() {
+  const el = document.getElementById('setLight');
+  if (!el) return;
+  el.addEventListener('pointerdown', () => unlockAudio());
+  el.addEventListener('input', () => setLight(el.value, true));
+  el.addEventListener('change', () => { setLight(el.value, true); playSfx('click'); });
+  el.addEventListener('dblclick', () => { setLight(1, true); playSfx('click'); paint(); });
 }
 
 export function updateFps(dt) {

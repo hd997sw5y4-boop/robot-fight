@@ -8,31 +8,35 @@ export const MODEL = {
   footOffset: 0,
   animations: {
     idle: 'FightingIdle',
+    idleVariants: ['FightingIdle', 'Idle'],
     idleInjured: 'InjuredStumbleIdle',
     walkForward: 'Walking',
     walkBack: 'WalkingBackwards',
     strafeLeft: 'JogStrafeLeft',
     strafeRight: 'JogStrafeRight',
     punch: 'Punching',
-    punchVariants: ['Punching', 'PunchCombo', 'ElbowPunching'],
+    punchVariants: ['Punching', 'PunchCombo', 'ElbowPunching', 'LeadJab', 'RightHook', 'Uppercut'],
+    punchRight: ['Punching', 'PunchCombo', 'ElbowPunching', 'LeadJab', 'RightHook', 'Uppercut'],
+    punchLeft: [],
     kick: 'Kicking',
-    kickVariants: ['Kicking', 'MmaKick'],
-    kickSpecial: ['FlipKick', 'ChapaGiratoria'],
-    // Extra flip attacks from a later Mixamo pack (js will skip missing names).
-    flipSpecial: ['FlipKick', 'ChapaGiratoria', 'Backflip', 'FrontFlip', 'Tumbling'],
-    // Win celebrations from the same upcoming pack. Missing clips fall back in playVictory().
+    kickVariants: ['Kicking', 'MmaKick', 'RoundhouseKick', 'SideKick', 'MeiaLuaDeFrente', 'LegSweep', 'KneeKickLead'],
+    kickSpecial: ['FlipKick', 'ChapaGiratoria', 'SpinFlipKick', 'MeiaLuaDeCompasso'],
+    flipSpecial: ['FlipKick', 'ChapaGiratoria', 'Backflip', 'FrontFlip', 'BackFlipToUppercut', 'SpinFlipKick', 'MeiaLuaDeCompasso'],
     victory: 'Victory',
-    victoryVariants: ['Victory', 'WinCelebration', 'Cheer', 'HipHopDancing'],
+    victoryVariants: ['Victory', 'VictoryIdle', 'Taunt'],
+    dodgeVariants: ['Dodging', 'DodgingBack'],
+    knockdownVariants: ['KnockedDown', 'LivershotKnockdown', 'StumbleBackwards'],
+    koVariants: ['KnockedOut', 'StandingReactDeathBackward', 'Defeated'],
     block: 'CenterBlock',
     blockVariants: ['CenterBlock', 'BodyBlock', 'LeftBlock', 'RightBlock'],
     hit: 'Stunned',
     hitByPart: {
-      head: ['HeadHit', 'HitOnSideOfHead'],
-      torso: ['HitToBody', 'BigStomachHit'],
-      armL: ['HitToBody', 'Stunned'],
-      armR: ['HitToBody', 'Stunned'],
-      legL: ['HitOnLegs'],
-      legR: ['HitOnLegs'],
+      head: ['HeadHit', 'HitOnSideOfHead', 'Reaction'],
+      torso: ['HitToBody', 'BigStomachHit', 'Reaction'],
+      armL: ['HitToBody', 'Stunned', 'Reaction'],
+      armR: ['HitToBody', 'Stunned', 'Reaction'],
+      legL: ['HitOnLegs', 'Reaction'],
+      legR: ['HitOnLegs', 'Reaction'],
     },
     stunned: 'Stunned',
     ko: 'KnockedOut',
@@ -46,7 +50,7 @@ export const MODEL = {
 };
 
 export const LOOP_CLIPS = [
-  'FightingIdle', 'InjuredStumbleIdle',
+  'FightingIdle', 'InjuredStumbleIdle', 'Idle', 'VictoryIdle',
   'Walking', 'WalkingBackwards', 'JogStrafeLeft', 'JogStrafeRight',
 ];
 
@@ -55,6 +59,11 @@ export const ARENA = {
   apothem: 6.1,
   floorY: 0,
   floorThickness: 0.28,
+  // Visual floor-mesh top and physics plane share this Y so feet and colliders agree.
+  matTop: 0,
+  // Visible fence/posts/rails. Physics ring walls stay on either way so fighters and debris stay in.
+  // Set true later to bring the cage back.
+  cage: false,
 };
 
 export const COMBAT = {
@@ -71,8 +80,8 @@ export const COMBAT = {
 };
 
 export const GFX_PRESETS = {
-  low: { pixelCap: 1, shadows: false, shadowSize: 512, exposure: 0.95 },
-  high: { pixelCap: 2, shadows: true, shadowSize: 2048, exposure: 1.05 },
+  low: { pixelCap: 1, shadows: false, shadowSize: 512, exposure: 1.4 },
+  high: { pixelCap: 2, shadows: true, shadowSize: 2048, exposure: 1.55 },
 };
 
 // Per-part wrecking. Names in `bind` are normalized (lowercase, no "mixamorig",

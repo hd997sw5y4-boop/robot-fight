@@ -217,11 +217,15 @@ export function moveSpeedMul(f) {
   if (!f.parts) return 1;
   const l = f.parts.legL;
   const r = f.parts.legR;
-  if (l.detached && r.detached) return 0.16;
+  if (l.detached && r.detached) return 0;
+  if (l.detached || r.detached) {
+    const remain = l.detached ? r : l;
+    const wear = remain.detached ? 1 : 1 - remain.hp / remain.max;
+    return 0.34 * (1 - 0.35 * wear);
+  }
   let mul = 1;
   for (const leg of [l, r]) {
-    if (leg.detached) mul *= 0.58;
-    else mul *= 1 - 0.4 * (1 - leg.hp / leg.max);
+    mul *= 1 - 0.4 * (1 - leg.hp / leg.max);
   }
   return mul;
 }
@@ -655,6 +659,7 @@ function clampXZ(x, z, pad) {
 
 export function applyMalfunctions(f, dt) {
   if (!f.parts) return;
+  const ragdolled = !!(f.phys && f.phys.ragdoll && f.phys.ragdoll.active) || f.state === 'ko' || f.state === 'down';
   f.limpT = (f.limpT || 0) + dt;
   const l = f.parts.legL;
   const r = f.parts.legR;
@@ -662,9 +667,12 @@ export function applyMalfunctions(f, dt) {
     l.detached ? 1 : 1 - l.hp / l.max,
     r.detached ? 1 : 1 - r.hp / r.max,
   );
-  f.model.position.y = f.baseY + Math.abs(Math.sin(f.limpT * 10)) * 0.07 * limp;
-  const sway = Math.sin(f.limpT * 7) * 0.09 * limp;
-  f.model.rotation.z = sway;
+  if (!ragdolled) {
+    // Vertical bounce is handled by per-frame foot grounding so soles stay on the mat.
+    const oneLeg = (l.detached && !r.detached) || (r.detached && !l.detached);
+    const sway = Math.sin(f.limpT * (oneLeg ? 5.2 : 7)) * (oneLeg ? 0.16 : 0.09) * limp;
+    f.model.rotation.z = sway;
+  }
 
   const head = f.parts.head;
   const hd = head.detached ? 0 : 1 - head.hp / head.max;

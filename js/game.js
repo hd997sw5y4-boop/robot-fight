@@ -3,7 +3,8 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MODEL, ARENA, COMBAT, GFX_PRESETS, LOOP_CLIPS } from './config.js';
-import { getSettings, isSettingsOpen, initSettings, updateFps } from './settings.js';
+import { CLIP_SPEEDS } from './clip-speeds.js';
+import { getSettings, isSettingsOpen, initSettings, updateFps, setFov } from './settings.js';
 import { unlockAudio, playSfx, playHit, setBuzz, startCrowd } from './audio.js';
 import { buildArena as buildArenaVisual, addArenaLights } from './arena.js';
 import {
@@ -18,6 +19,7 @@ import {
   resetFighterPhysics,
   clearPhysicsDebris,
   onPhysicsBounce,
+  isRagdollSettled,
 } from './physics.js';
 import {
   registerFightRuntime,
@@ -57,25 +59,56 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x05060a);
-scene.fog = new THREE.Fog(0x05060a, 12, 32);
+scene.background = new THREE.Color(0x080a10);
+scene.fog = new THREE.Fog(0x080a10, 18, 42);
 
-const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 80);
+function clampFov(v) {
+  return Math.max(45, Math.min(90, +v || 50));
+}
+let fovTarget = clampFov(getSettings().fov);
+let fovLive = fovTarget;
+const camera = new THREE.PerspectiveCamera(fovLive, 1, 0.1, 80);
 camera.position.set(0, 3.2, 12.5);
+
+function applyFov(v) {
+  fovTarget = clampFov(v);
+}
+
+function stepFov(dt) {
+  const k = dt <= 0 ? 0.35 : 1 - Math.pow(0.0007, dt);
+  fovLive += (fovTarget - fovLive) * k;
+  if (Math.abs(camera.fov - fovLive) > 0.02) {
+    camera.fov = fovLive;
+    camera.updateProjectionMatrix();
+  }
+}
+
+window.addEventListener('wheel', (e) => {
+  if (isSettingsOpen()) return;
+  const el = e.target;
+  if (el && el.closest && el.closest('#setp, #overlay, input, select, textarea, button, a, label')) return;
+  e.preventDefault();
+  const step = Math.sign(e.deltaY) * Math.min(5.5, 1.15 + Math.abs(e.deltaY) * 0.035);
+  setFov(clampFov(fovTarget + step), true);
+}, { passive: false });
 
 const hitLight = new THREE.PointLight(0xffb44a, 0, 6);
 hitLight.decay = 2;
+hitLight.userData.baseIntensity = 0;
 scene.add(hitLight);
 
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.06).texture;
-scene.environmentIntensity = 0.22;
+scene.environmentIntensity = 0.38;
+
+let lightMul = Math.max(0.5, Math.min(2, getSettings().light || 1));
+const litLights = [];
 
 function applyGfx(key) {
   gfxKey = key === 'low' ? 'low' : 'high';
   const p = GFX_PRESETS[gfxKey];
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, p.pixelCap));
-  renderer.toneMappingExposure = p.exposure;
+  renderer.toneMappingExposure = p.exposure * lightMul;
   renderer.shadowMap.enabled = p.shadows;
   scene.traverse((o) => {
     if (o.isLight && o.shadow) {
@@ -87,7 +120,58 @@ function applyGfx(key) {
       }
     }
   });
+  applyLightIntensities();
   resize();
+}
+
+function applyLight(v) {
+  lightMul = Math.max(0.5, Math.min(2, +v || 1));
+  const p = GFX_PRESETS[gfxKey];
+  renderer.toneMappingExposure = p.exposure * lightMul;
+  applyLightIntensities();
+}
+
+function applyLightIntensities() {
+  for (const l of litLights) {
+    const base = l.userData && l.userData.baseIntensity;
+    if (base != null) l.intensity = base * lightMul;
+  }
+}
+
+function trackLight(l) {
+  if (!l) return l;
+  if (l.userData.baseIntensity == null) l.userData.baseIntensity = l.intensity;
+  if (!litLights.includes(l)) litLights.push(l);
+  return l;
+}
+
+let fighterRims = [];
+const _rimDir = new THREE.Vector3();
+function makeFighterRim(color) {
+  const l = new THREE.DirectionalLight(color, 0.55);
+  l.userData.baseIntensity = 0.55;
+  trackLight(l);
+  scene.add(l, l.target);
+  return l;
+}
+
+function updateFighterRims() {
+  if (!fighterRims.length || !p1 || !p2) return;
+  const pairs = [[p1, fighterRims[0]], [p2, fighterRims[1]]];
+  for (const [f, light] of pairs) {
+    if (!f || !light) continue;
+    _rimDir.copy(camera.position).sub(f.root.position);
+    _rimDir.y = 0;
+    if (_rimDir.lengthSq() < 1e-4) _rimDir.set(0, 0, 1);
+    else _rimDir.normalize();
+    light.position.set(
+      f.root.position.x - _rimDir.x * 3.4,
+      f.root.position.y + 2.5,
+      f.root.position.z - _rimDir.z * 3.4,
+    );
+    light.target.position.set(f.root.position.x, f.root.position.y + 1.15, f.root.position.z);
+    light.target.updateMatrixWorld();
+  }
 }
 
 function resize() {
@@ -100,7 +184,11 @@ function resize() {
 window.addEventListener('resize', resize);
 initSettings({
   applyGfx,
+  applyFov,
+  applyLight,
   onChange(s) {
+    applyFov(s.fov);
+    applyLight(s.light);
     if (s.round === 0) {
       match.roundLeft = null;
       paintRound();
@@ -319,18 +407,211 @@ function makeFighter(gltf, color, side) {
     spine,
     hipsBind: hips ? hips.position.clone() : null,
     config: defaultFighterConfig(side),
+    modelScale: scale,
   };
   f.config.color = color;
 
   mixer.addEventListener('finished', () => {
     if (f.state === 'ko' || f.state === 'down' || isRagdoll(f)) return;
+    if (match.over) return;
     if (f.health > 0 && (f.state === 'punch' || f.state === 'kick' || f.state === 'hit')) {
       f.state = 'idle';
       setAnim(f, idleClipFor(f), 0.15);
     }
   });
   prepareFighterDamage(f);
+  cacheFeet(f);
   return f;
+}
+
+function boneKey(name) {
+  return String(name || '').replace(/^mixamorig[:._]*/i, '');
+}
+
+function cacheFeet(f) {
+  f.footBones = [];
+  f.ikLegs = { L: {}, R: {} };
+  f.groundY = 0;
+  f.model.traverse((o) => {
+    if (!o.isBone && o.type !== 'Bone') return;
+    const n = boneKey(o.name);
+    const k = n.toLowerCase();
+    if (k === 'leftfoot' || k === 'lefttoebase' || k === 'lefttoe'
+      || k === 'rightfoot' || k === 'righttoebase' || k === 'righttoe') {
+      f.footBones.push(o);
+    }
+    if (n === 'LeftUpLeg') f.ikLegs.L.thigh = o;
+    if (n === 'LeftLeg') f.ikLegs.L.shin = o;
+    if (n === 'LeftFoot') f.ikLegs.L.foot = o;
+    if (n === 'LeftToeBase') f.ikLegs.L.toe = o;
+    if (n === 'RightUpLeg') f.ikLegs.R.thigh = o;
+    if (n === 'RightLeg') f.ikLegs.R.shin = o;
+    if (n === 'RightFoot') f.ikLegs.R.foot = o;
+    if (n === 'RightToeBase') f.ikLegs.R.toe = o;
+  });
+}
+
+const _footY = new THREE.Vector3();
+const _ikA = new THREE.Vector3();
+const _ikB = new THREE.Vector3();
+const _ikC = new THREE.Vector3();
+const _ikT = new THREE.Vector3();
+const _ikFwd = new THREE.Vector3();
+const _ikKnee = new THREE.Vector3();
+const _ikQ = new THREE.Quaternion();
+const _ikQ2 = new THREE.Quaternion();
+const _ikM = new THREE.Matrix4();
+const _ikInv = new THREE.Matrix4();
+const _ikOne = new THREE.Vector3(1, 1, 1);
+
+function matTopY() {
+  return (ARENA.matTop != null) ? ARENA.matTop : 0;
+}
+
+function usableFootBones(f) {
+  const out = [];
+  for (const b of (f.footBones || [])) {
+    const k = boneKey(b.name).toLowerCase();
+    if (f.parts) {
+      if (f.parts.legL && f.parts.legL.detached && k.startsWith('left')) continue;
+      if (f.parts.legR && f.parts.legR.detached && k.startsWith('right')) continue;
+    }
+    out.push(b);
+  }
+  return out;
+}
+
+function lowestFootY(f) {
+  const bones = usableFootBones(f);
+  if (!bones.length) return null;
+  f.model.updateWorldMatrix(true, true);
+  let minY = Infinity;
+  for (const b of bones) {
+    b.getWorldPosition(_footY);
+    if (_footY.y < minY) minY = _footY.y;
+  }
+  return Number.isFinite(minY) ? minY : null;
+}
+
+function groundFeet(f, dt) {
+  if (!f || isRagdoll(f) || f.state === 'ko' || f.state === 'down') return;
+  if (f.parts && f.parts.legL && f.parts.legL.detached && f.parts.legR && f.parts.legR.detached) return;
+  const skipIK = f.state === 'getup' && (f.getupBlend || 0) > 0.2;
+  const top = matTopY();
+  let minY = lowestFootY(f);
+  if (minY == null) return;
+  const err = top - minY;
+  f.groundY = f.groundY || 0;
+  // World-space lift on the root (root scale is 1). Lift instantly so feet never stay below the mat;
+  // ease downward so the stance doesn't bounce.
+  if (err > 0.0004) f.groundY += err;
+  else if (err < -0.0004) {
+    const k = 1 - Math.pow(0.0008, Math.max(dt || 0.016, 1 / 120));
+    f.groundY += err * k;
+  }
+  f.root.position.y = f.groundY;
+  minY = lowestFootY(f);
+  if (minY != null && minY < top - 0.0004) {
+    f.groundY += (top - minY);
+    f.root.position.y = f.groundY;
+    f.model.updateWorldMatrix(true, true);
+  }
+  if (!skipIK) plantStanceIK(f, top);
+  // Final clamp after IK (IK can dip a toe).
+  minY = lowestFootY(f);
+  if (minY != null && minY < top - 0.0004) {
+    f.groundY += (top - minY);
+    f.root.position.y = f.groundY;
+  }
+}
+
+function plantStanceIK(f, top) {
+  if (!f.ikLegs) return;
+  for (const side of ['L', 'R']) {
+    if (f.parts && f.parts[side === 'L' ? 'legL' : 'legR'] && f.parts[side === 'L' ? 'legL' : 'legR'].detached) continue;
+    const leg = f.ikLegs[side];
+    if (!leg || !leg.thigh || !leg.shin || !leg.foot) continue;
+    leg.foot.updateWorldMatrix(true, false);
+    leg.foot.getWorldPosition(_ikC);
+    let low = _ikC.y;
+    if (leg.toe) {
+      leg.toe.updateWorldMatrix(true, false);
+      leg.toe.getWorldPosition(_ikT);
+      low = Math.min(low, _ikT.y);
+    }
+    const sink = top - low;
+    // Swing foot high in the air: leave the clip alone. Plant if it's through or hovering a little.
+    if (sink < -0.07) continue;
+    _ikT.copy(_ikC);
+    _ikT.y += sink;
+    twoBoneIK(leg.thigh, leg.shin, leg.foot, _ikT);
+  }
+}
+
+function twoBoneIK(thigh, shin, foot, target) {
+  thigh.updateWorldMatrix(true, false);
+  shin.updateWorldMatrix(true, false);
+  foot.updateWorldMatrix(true, false);
+  thigh.getWorldPosition(_ikA);
+  shin.getWorldPosition(_ikB);
+  foot.getWorldPosition(_ikC);
+  const l1 = Math.max(0.05, _ikA.distanceTo(_ikB));
+  const l2 = Math.max(0.05, _ikB.distanceTo(_ikC));
+  const toT = target.clone().sub(_ikA);
+  let dist = toT.length();
+  const maxD = l1 + l2 - 0.002;
+  if (dist < 0.02) return;
+  if (dist > maxD) {
+    toT.multiplyScalar(maxD / dist);
+    dist = maxD;
+    target = _ikA.clone().add(toT);
+  }
+  const minD = Math.abs(l1 - l2) + 0.002;
+  if (dist < minD) {
+    toT.multiplyScalar(minD / dist);
+    dist = minD;
+    target = _ikA.clone().add(toT);
+  }
+  const axis = _ikFwd.copy(_ikB).sub(_ikA).cross(_ikC.clone().sub(_ikA));
+  if (axis.lengthSq() < 1e-8) {
+    axis.set(0, 0, 1).applyQuaternion(thigh.getWorldQuaternion(_ikQ));
+  }
+  axis.normalize();
+  const cosA = Math.max(-1, Math.min(1, (l1 * l1 + dist * dist - l2 * l2) / (2 * l1 * dist)));
+  const ang = Math.acos(cosA);
+  _ikKnee.copy(toT).normalize();
+  const rot = _ikQ2.setFromAxisAngle(axis, ang);
+  _ikKnee.applyQuaternion(rot).multiplyScalar(l1).add(_ikA);
+
+  alignBoneToward(thigh, _ikA, _ikKnee, shin);
+  shin.updateWorldMatrix(true, false);
+  shin.getWorldPosition(_ikB);
+  alignBoneToward(shin, _ikB, target, foot);
+}
+
+function alignBoneToward(bone, origin, toward, child) {
+  const parent = bone.parent;
+  child.updateWorldMatrix(true, false);
+  child.getWorldPosition(_footY);
+  const cur = _footY.sub(origin);
+  const want = toward.clone().sub(origin);
+  if (cur.lengthSq() < 1e-10 || want.lengthSq() < 1e-10) return;
+  cur.normalize();
+  want.normalize();
+  _ikQ.setFromUnitVectors(cur, want);
+  const worldQ = bone.getWorldQuaternion(_ikQ2);
+  worldQ.premultiply(_ikQ);
+  if (parent) {
+    parent.updateWorldMatrix(true, false);
+    _ikInv.copy(parent.matrixWorld).invert();
+    const parentQ = new THREE.Quaternion();
+    _ikInv.decompose(_ikA, parentQ, _ikB);
+    bone.quaternion.copy(parentQ.invert().multiply(worldQ));
+  } else {
+    bone.quaternion.copy(worldQ);
+  }
+  bone.updateMatrix();
+  bone.updateWorldMatrix(true, false);
 }
 
 function resolveClip(f, name) {
@@ -344,31 +625,146 @@ function resolveClip(f, name) {
   return null;
 }
 
-function setAnim(f, name, fade = 0.12) {
+function setAnim(f, name, fade = 0.2) {
   const clipName = resolveClip(f, name);
   if (!clipName) return;
   const next = f.actions[clipName];
-  const oneshot = ['punch', 'kick', 'hit', 'ko', 'getUp', 'GettingUp', 'KnockedOut'].includes(name)
+  const oneshot = ['punch', 'kick', 'hit', 'ko', 'getUp', 'getup', 'GettingUp', 'KnockedOut'].includes(name)
     || (MODEL.animations.punchVariants || []).includes(clipName)
+    || (MODEL.animations.punchRight || []).includes(clipName)
+    || (MODEL.animations.punchLeft || []).includes(clipName)
     || (MODEL.animations.kickVariants || []).includes(clipName)
     || (MODEL.animations.kickSpecial || []).includes(clipName)
+    || (MODEL.animations.flipSpecial || []).includes(clipName)
+    || (MODEL.animations.blockVariants || []).includes(clipName)
+    || (MODEL.animations.victoryVariants || []).includes(clipName)
+    || clipName === MODEL.animations.victory
     || clipName === 'KnockedOut' || clipName === 'GettingUp';
+  const fadeT = Math.max(0.15, Math.min(0.3, fade));
   if (f.current === clipName) {
-    if (oneshot) next.reset().play();
-    return;
+    // Don't hard-reset a playing clip — that pops mid-pose. Let it finish or keep looping.
+    return next;
   }
   const prev = f.actions[f.current];
   next.reset();
   next.enabled = true;
-  if (prev) prev.crossFadeTo(next, fade, false);
-  else next.fadeIn(fade);
+  next.setEffectiveWeight(1);
+  next.timeScale = 0.9 + Math.random() * 0.2;
+  if (prev && prev !== next) prev.crossFadeTo(next, fadeT, true);
+  else next.fadeIn(fadeT);
   next.play();
   f.current = clipName;
+  f.locoActive = !oneshot && isLocoClip(clipName);
+  if (oneshot) fadeLocoOut(f, fadeT);
+  return next;
 }
 
-function pickClip(list, fallback) {
-  if (list && list.length) return list[Math.floor(Math.random() * list.length)];
-  return fallback;
+function fadeLocoOut(f, fade) {
+  if (!f._loco) return;
+  for (const key of LOCO_KEYS) {
+    const act = f._loco[key];
+    if (act && act.isRunning()) {
+      act.fadeOut(Math.max(0.15, fade || 0.2));
+      if (f._locoW) f._locoW[key] = 0;
+    }
+  }
+}
+
+function isLocoClip(name) {
+  const a = MODEL.animations;
+  return name === a.idle || name === 'Idle' || name === a.idleInjured
+    || name === a.walkForward || name === a.walkBack
+    || name === a.strafeLeft || name === a.strafeRight
+    || (a.idleVariants || []).includes(name);
+}
+
+function availableClips(f, list) {
+  return (list || []).filter((n) => n && f && f.actions[n]);
+}
+
+function pickClip(list, fallback, avoid, fighter, weights) {
+  let pool = list ? list.slice() : [];
+  if (fighter) pool = pool.filter((n) => fighter.actions[n]);
+  const filtered = avoid ? pool.filter((n) => n !== avoid) : pool;
+  const use = filtered.length ? filtered : (pool.length ? pool : (fallback ? [fallback] : []));
+  if (!use.length) return fallback;
+  if (weights && use.length > 1) {
+    let total = 0;
+    const w = use.map((n) => {
+      const v = (typeof weights === 'function' ? weights(n) : (weights[n] || 1));
+      total += v;
+      return v;
+    });
+    let r = Math.random() * total;
+    for (let i = 0; i < use.length; i++) {
+      r -= w[i];
+      if (r <= 0) return use[i];
+    }
+  }
+  return use[Math.floor(Math.random() * use.length)] || fallback;
+}
+
+function punchClipsFor(f) {
+  const right = MODEL.animations.punchRight || MODEL.animations.punchVariants || [];
+  const left = MODEL.animations.punchLeft || [];
+  const a = f.parts;
+  let list = [];
+  if (!a || !a.armR.detached) list = list.concat(right);
+  if (!a || !a.armL.detached) list = list.concat(left);
+  const have = availableClips(f, [...new Set(list)]);
+  if (have.length) return have;
+  if (a && a.armR.detached && !left.length) return [];
+  if (a && a.armL.detached && a.armR.detached) return [];
+  return availableClips(f, MODEL.animations.punchVariants);
+}
+
+function pickPunch(f) {
+  const clip = pickClip(punchClipsFor(f), MODEL.animations.punch, f.lastPunch, f);
+  f.lastPunch = clip;
+  return clip;
+}
+
+function pickKick(f, allowFlip) {
+  const special = availableClips(f, MODEL.animations.flipSpecial || MODEL.animations.kickSpecial);
+  const basic = availableClips(f, MODEL.animations.kickVariants);
+  const useSpecial = allowFlip && special.length && Math.random() < 0.14;
+  const clip = pickClip(useSpecial ? special : basic, MODEL.animations.kick, f.lastKick, f);
+  f.lastKick = clip;
+  return clip;
+}
+
+const _side = new THREE.Vector3();
+const _toAtk = new THREE.Vector3();
+function pickBlock(f, other) {
+  const have = availableClips(f, MODEL.animations.blockVariants);
+  let prefer = have.slice();
+  if (other && have.length) {
+    const low = other.state === 'kick';
+    _toAtk.set(other.root.position.x - f.root.position.x, 0, other.root.position.z - f.root.position.z);
+    _side.set(1, 0, 0).applyQuaternion(f.root.quaternion);
+    const side = _toAtk.dot(_side);
+    if (low) prefer = have.filter((n) => /body|center/i.test(n));
+    else if (side > 0.12) prefer = have.filter((n) => /right/i.test(n));
+    else if (side < -0.12) prefer = have.filter((n) => /left/i.test(n));
+    else prefer = have.filter((n) => /center/i.test(n));
+    if (!prefer.length) prefer = have;
+  }
+  const clip = pickClip(prefer, MODEL.animations.block, f.lastBlock, f);
+  f.lastBlock = clip;
+  return clip;
+}
+
+function pickHitClip(f, partId) {
+  const map = MODEL.animations.hitByPart || {};
+  const extra = ['Stunned', 'StumbleBackwards', 'HitToBody', 'BigStomachHit', 'HeadHit', 'HitOnSideOfHead', 'HitOnLegs'];
+  const list = availableClips(f, (map[partId] || map.torso || []).concat(extra));
+  const clip = pickClip(list, MODEL.animations.hit || 'Stunned', f.lastHit, f, (n) => {
+    if ((map[partId] || []).includes(n)) return 3;
+    if (n === 'StumbleBackwards') return 0.6;
+    return 1;
+  });
+  f.lastHit = clip;
+  return clip;
 }
 
 function hitClipFor(partId) {
@@ -388,7 +784,8 @@ function idleClipFor(f) {
     ));
     if (lowHp || legsBad) return injured;
   }
-  return MODEL.animations.idle || 'FightingIdle';
+  const idles = availableClips(f, MODEL.animations.idleVariants || [MODEL.animations.idle || 'FightingIdle']);
+  return pickClip(idles, MODEL.animations.idle || 'FightingIdle', f.lastIdle, f);
 }
 
 function moveClipFor(sidestep, inout) {
@@ -402,6 +799,11 @@ window.addEventListener('keydown', (e) => {
   unlockAudio();
   if (e.key === 'Escape') return;
   if (isSettingsOpen()) return;
+  if (match && match.over && (e.key === 'Enter' || e.key === 'r' || e.key === 'R')) {
+    e.preventDefault();
+    if (!e.repeat) resetMatch();
+    return;
+  }
   keys.add(e.key.toLowerCase());
   if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(e.key.toLowerCase())) e.preventDefault();
 });
@@ -455,14 +857,33 @@ function toward(me, other) {
   return v.normalize();
 }
 
-function moveFighter(f, other, sidestep, inout, dt, speed) {
+function clipWorldSpeed(f, name) {
+  const local = CLIP_SPEEDS[name];
+  if (!local) return 0;
+  return local * (f.modelScale || (f.model && f.model.scale.x) || 1);
+}
+
+function locoMoveSpeeds(f, blocking) {
+  const limp = moveSpeedMul(f);
+  const blockMul = blocking ? (COMBAT.blockMoveSpeed / Math.max(0.2, COMBAT.moveSpeed)) : 1;
+  const mul = limp * blockMul;
+  const strafe = 0.5 * (clipWorldSpeed(f, 'JogStrafeLeft') + clipWorldSpeed(f, 'JogStrafeRight'));
+  return {
+    fwd: (clipWorldSpeed(f, 'Walking') || COMBAT.moveSpeed * 0.35) * mul,
+    back: (clipWorldSpeed(f, 'WalkingBackwards') || COMBAT.moveSpeed * 0.3) * mul,
+    strafe: (strafe || COMBAT.moveSpeed * 0.7) * mul,
+  };
+}
+
+function moveFighter(f, other, sidestep, inout, dt, speeds) {
   const fwd = toward(f, other);
   const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
+  const along = inout >= 0 ? speeds.fwd : speeds.back;
   const vel = new THREE.Vector3();
-  vel.addScaledVector(right, sidestep);
-  vel.addScaledVector(fwd, inout);
-  if (vel.lengthSq() > 1) vel.normalize();
-  setFighterMove(f, vel.x * speed, vel.z * speed);
+  vel.addScaledVector(right, sidestep * speeds.strafe);
+  vel.addScaledVector(fwd, inout * along);
+  setFighterMove(f, vel.x, vel.z);
+  return Math.hypot(vel.x, vel.z);
 }
 
 function separate(a, b) {
@@ -495,7 +916,10 @@ function tryAttack(f, kind, clipName) {
   if (kind === 'kick' && !canKick(f)) return;
   const spec = COMBAT[kind];
   const mods = attackMods(f, kind);
-  const clip = clipName || MODEL.animations[kind];
+  if (kind === 'punch' && !punchClipsFor(f).length) return;
+  const clip = clipName
+    || (kind === 'punch' ? pickPunch(f) : pickKick(f, true))
+    || MODEL.animations[kind];
   f.state = kind;
   f.stateT = 0;
   f.hitThisAttack = false;
@@ -503,7 +927,7 @@ function tryAttack(f, kind, clipName) {
   f.attackClip = clip;
   f.blocking = false;
   f.shield.visible = false;
-  setAnim(f, clip, 0.08);
+  setAnim(f, clip, 0.16);
   playSfx('whoosh');
   const action = f.actions[clip] || f.actions[kind];
   if (action) {
@@ -527,7 +951,9 @@ function tryBlock(f, heldBlock) {
   if (heldBlock) {
     if (f.state !== 'block') {
       f.state = 'block';
-      setAnim(f, f.blockClip || MODEL.animations.block, 0.1);
+      const other = f === p1 ? p2 : p1;
+      const clip = f.blockClip || pickBlock(f, other);
+      setAnim(f, clip, 0.16);
     }
   } else if (f.state === 'block') f.state = 'idle';
 }
@@ -555,7 +981,10 @@ function applyHit(atk, def, spec, kind) {
   hitLight.intensity = 12 + Math.min(8, force);
   hitLight.position.copy(hit.point);
   playHit({ blocked, heavy: dmg >= 12 || force >= 5, kick: kind === 'kick' });
-  addShake(blocked ? 0.08 : 0.16 + dmg * 0.01 + force * 0.02);
+  const heavy = force >= 5.1 || dmg >= 12;
+  addShake(blocked ? 0.035 : (heavy ? 0.11 + force * 0.012 : 0.045 + dmg * 0.004 + force * 0.006));
+  if (!blocked && heavy) triggerHitStop(0.09);
+  else if (!blocked) triggerHitStop(0.04);
   const fwd = hit.dir;
   const kb = COMBAT.knockback * (blocked ? 0.35 : 1) * (0.8 + force * 0.08);
   if (def.phys && def.phys.body && !isRagdoll(def)) {
@@ -566,7 +995,7 @@ function applyHit(atk, def, spec, kind) {
     def.root.position.z += fwd.z * kb;
     placeInOctagon(def.root.position, 0.55, true);
   }
-  if (def.health <= 0) {
+  if (def.health <= 0 || isCatastrophic(def)) {
     ko(def, atk, { dir: fwd, force });
     return;
   }
@@ -574,7 +1003,6 @@ function applyHit(atk, def, spec, kind) {
     def.blocking = false;
     def.shield.visible = false;
     def.invuln = COMBAT.hitInvuln;
-    const heavy = force >= 5.1 || dmg >= 12;
     if (heavy) {
       def.state = 'down';
       def.stateT = 0;
@@ -582,9 +1010,16 @@ function applyHit(atk, def, spec, kind) {
     } else {
       def.state = 'hit';
       def.stateT = 0;
-      setAnim(def, hitClipFor(hit.partId), 0.06);
+      setAnim(def, pickHitClip(def, hit.partId), 0.16);
     }
   }
+}
+
+function isCatastrophic(f) {
+  if (!f || !f.parts) return false;
+  if (f.parts.head && f.parts.head.detached) return true;
+  if (f.parts.legL && f.parts.legL.detached && f.parts.legR && f.parts.legR.detached) return true;
+  return false;
 }
 
 function playVictory(f) {
@@ -592,8 +1027,11 @@ function playVictory(f) {
   const names = []
     .concat(MODEL.animations.victoryVariants || [])
     .concat(MODEL.animations.victory || []);
-  const clip = names.find((n) => n && f.actions[n]);
-  if (clip) setAnim(f, clip, 0.2);
+  const clip = pickClip(names, names[0], f.lastVictory, f);
+  if (clip) {
+    f.lastVictory = clip;
+    setAnim(f, clip, 0.22);
+  }
 }
 
 function ko(loser, winner, info) {
@@ -604,20 +1042,36 @@ function ko(loser, winner, info) {
   const dir = (info && info.dir) || new THREE.Vector3(winner.root.position.x - loser.root.position.x, 0, winner.root.position.z - loser.root.position.z).normalize();
   const force = (info && info.force) || 6;
   enableRagdoll(loser, { x: dir.x * (5 + force), y: 3.1, z: dir.z * (5 + force) }, { kind: 'ko', until: Infinity });
-  if (winner && winner.state !== 'ko') playVictory(winner);
+  if (winner && winner.state !== 'ko' && winner.state !== 'down' && !isRagdoll(winner)) {
+    playVictory(winner);
+  }
   match.over = true;
   match.winner = winner ? winner.id : null;
-  document.getElementById('ko-title').textContent = winner && winner.id === 'p1' ? 'Blue wins' : 'Red wins';
-  document.getElementById('ko-sub').textContent = winner && winner.id === 'p1' ? 'You won the fight.' : 'CPU won the fight.';
-  document.getElementById('overlay').classList.remove('hidden');
+  match.koT = 0;
+  match.orbitT = 0;
+  match.overlayAt = performance.now() + 1600;
+  const title = document.getElementById('ko-title');
+  const sub = document.getElementById('ko-sub');
+  if (title) title.textContent = winner && winner.id === 'p1' ? 'Blue wins' : 'Red wins';
+  if (sub) {
+    if (info && info.reason === 'head') sub.textContent = winner && winner.id === 'p1' ? "You took the opponent's head." : 'Your head was torn off.';
+    else if (info && info.reason === 'legs') sub.textContent = 'Both legs gone. The fighter collapsed.';
+    else sub.textContent = winner && winner.id === 'p1' ? 'You won the fight.' : 'CPU won the fight.';
+  }
   playSfx('ko');
-  addShake(0.28);
+  addShake(0.16);
   notifyFightEnd({
     winner: match.winner,
     reason: 'ko',
     p1: { health: p1.health, config: p1.config },
     p2: { health: p2.health, config: p2.config },
   });
+}
+
+function showKoOverlay() {
+  const el = document.getElementById('overlay');
+  if (el) el.classList.remove('hidden');
+  match.overlayAt = 0;
 }
 
 const ai = { t: 0, sidestep: 0, inout: 0, block: false, punch: false, kick: false };
@@ -646,6 +1100,7 @@ function updateAI(cpu, player, dt) {
     ai.block = false;
     if ((player.state === 'punch' || player.state === 'kick') && d < 1.8 && Math.random() < prof.react) {
       ai.block = true;
+      ai.blockClip = pickBlock(cpu, player);
       ai.inout = -0.25;
       ai.sidestep = 0;
     } else if (d > 1.45) {
@@ -658,17 +1113,15 @@ function updateAI(cpu, player, dt) {
       ai.inout = 0;
       ai.sidestep = (Math.random() - 0.5) * 1.2;
       const r = Math.random();
-      if (r < prof.punch) {
+      if (r < prof.punch && punchClipsFor(cpu).length) {
         ai.punch = true;
-        ai.punchClip = pickClip(MODEL.animations.punchVariants, MODEL.animations.punch);
-      } else if (r < prof.punch + prof.kick) {
+        ai.punchClip = pickPunch(cpu);
+      } else if (r < prof.punch + prof.kick && canKick(cpu)) {
         ai.kick = true;
-        ai.kickClip = Math.random() < prof.special
-          ? pickClip(MODEL.animations.flipSpecial || MODEL.animations.kickSpecial, MODEL.animations.kick)
-          : pickClip(MODEL.animations.kickVariants, MODEL.animations.kick);
+        ai.kickClip = pickKick(cpu, true);
       } else if (r < prof.punch + prof.kick + prof.block) {
         ai.block = true;
-        ai.blockClip = pickClip(MODEL.animations.blockVariants, MODEL.animations.block);
+        ai.blockClip = pickBlock(cpu, player);
       }
     }
   }
@@ -680,11 +1133,29 @@ function stepFighter(f, other, inp, dt) {
   f.invuln = Math.max(0, f.invuln - dt);
   f.stateT += dt;
   if (f.state === 'ko' || f.state === 'down' || isRagdoll(f)) return;
+  if (f.state === 'getup') {
+    setFighterMove(f, 0, 0);
+    const action = f.actions.GettingUp || f.actions[resolveClip(f, 'getUp')];
+    const dur = action ? action.getClip().duration / Math.max(0.2, action.timeScale || 1) : 2.0;
+    if (f.stateT > dur * 0.95) {
+      f.state = 'idle';
+      f.getupSnap = null;
+      f.getupBlend = 0;
+      setAnim(f, idleClipFor(f), 0.22);
+    }
+    return;
+  }
+  if (match.over) {
+    setFighterMove(f, 0, 0);
+    return;
+  }
+
+  if (maybeKneeDrop(f, dt)) return;
 
   if (f.state === 'hit') {
     if (f.stateT > COMBAT.hitStun) {
       f.state = 'idle';
-      setAnim(f, idleClipFor(f), 0.12);
+      setAnim(f, idleClipFor(f), 0.16);
     }
     return;
   }
@@ -701,7 +1172,7 @@ function stepFighter(f, other, inp, dt) {
     }
     if (f.stateT > dur + 0.05 && f.state !== 'ko') {
       f.state = 'idle';
-      setAnim(f, idleClipFor(f), 0.12);
+      setAnim(f, idleClipFor(f), 0.16);
     }
     return;
   }
@@ -712,15 +1183,10 @@ function stepFighter(f, other, inp, dt) {
   else if (inp.kick) tryAttack(f, 'kick', inp.kickClip);
   if (f.state === 'punch' || f.state === 'kick' || f.state === 'hit' || f.state === 'ko') return;
 
-  const speed = (f.blocking ? COMBAT.blockMoveSpeed : COMBAT.moveSpeed) * moveSpeedMul(f);
+  const speeds = locoMoveSpeeds(f, f.blocking);
   const moving = Math.abs(inp.sidestep) + Math.abs(inp.inout) > 0.12;
   if (moving) {
-    moveFighter(f, other, inp.sidestep, inp.inout, dt, speed);
-    f.stepT = (f.stepT || 0) + dt;
-    if (f.stepT > 0.32) {
-      f.stepT = 0;
-      playSfx('step', { vol: 0.5 + Math.min(0.25, (Math.abs(inp.sidestep) + Math.abs(inp.inout)) * 0.2) });
-    }
+    const actual = moveFighter(f, other, inp.sidestep, inp.inout, dt, speeds);
     f.servoT = (f.servoT || 0) + dt;
     if (f.servoT > 0.72) {
       f.servoT = 0;
@@ -728,17 +1194,155 @@ function stepFighter(f, other, inp, dt) {
     }
     if (!f.blocking) {
       f.state = 'walk';
-      const clip = moveClipFor(inp.sidestep, inp.inout);
-      if (f.current !== clip) setAnim(f, clip, 0.12);
+      updateLoco(f, inp.sidestep, inp.inout, dt, actual, speeds);
     }
   } else {
     setFighterMove(f, 0, 0);
     if (!f.blocking) {
-      const idle = idleClipFor(f);
-      if (f.current !== idle) setAnim(f, idle, 0.18);
       f.state = 'idle';
+      updateLoco(f, 0, 0, dt, 0, null);
     }
   }
+}
+
+const LOCO_KEYS = ['idle', 'idleB', 'injured', 'walkFwd', 'walkBack', 'strafeL', 'strafeR'];
+
+function locoActions(f) {
+  if (f._loco) return f._loco;
+  const a = MODEL.animations;
+  const idles = availableClips(f, a.idleVariants || [a.idle]);
+  const idleA = idles[0] || a.idle || 'FightingIdle';
+  const idleB = idles.find((n) => n !== idleA) || idleA;
+  f._loco = {
+    idle: f.actions[idleA],
+    idleB: f.actions[idleB],
+    injured: f.actions[a.idleInjured],
+    walkFwd: f.actions[a.walkForward || 'Walking'],
+    walkBack: f.actions[a.walkBack || 'WalkingBackwards'],
+    strafeL: f.actions[a.strafeLeft || 'JogStrafeLeft'],
+    strafeR: f.actions[a.strafeRight || 'JogStrafeRight'],
+  };
+  f._locoW = { idle: 1, idleB: 0, injured: 0, walkFwd: 0, walkBack: 0, strafeL: 0, strafeR: 0 };
+  return f._loco;
+}
+
+function updateLoco(f, sidestep, inout, dt, actualSpeed, moveSpeeds) {
+  const acts = locoActions(f);
+  const injured = idleClipFor(f) === MODEL.animations.idleInjured;
+  const speed = Math.min(1, Math.hypot(sidestep, inout));
+  const target = { idle: 0, idleB: 0, injured: 0, walkFwd: 0, walkBack: 0, strafeL: 0, strafeR: 0 };
+  if (speed < 0.12) {
+    if (injured && acts.injured) target.injured = 1;
+    else {
+      target.idle = 0.72;
+      target.idleB = acts.idleB && acts.idleB !== acts.idle ? 0.28 : 0;
+      if (!acts.idleB || acts.idleB === acts.idle) target.idle = 1;
+    }
+  } else {
+    const ax = sidestep;
+    const az = inout;
+    if (az > 0) target.walkFwd = az;
+    else if (az < 0) target.walkBack = -az;
+    if (ax < 0) target.strafeL = -ax;
+    else if (ax > 0) target.strafeR = ax;
+    let s = 0;
+    for (const k of LOCO_KEYS) s += target[k];
+    if (s > 0) for (const k of LOCO_KEYS) target[k] /= s;
+  }
+  const k = 1 - Math.pow(0.012, Math.max(dt, 1 / 120));
+  f._locoW = f._locoW || { idle: 1, idleB: 0, injured: 0, walkFwd: 0, walkBack: 0, strafeL: 0, strafeR: 0 };
+  let top = 'idle';
+  let topW = -1;
+  for (const key of LOCO_KEYS) {
+    const act = acts[key];
+    f._locoW[key] += (target[key] - f._locoW[key]) * k;
+    const w = f._locoW[key];
+    if (!act) continue;
+    if (w > 0.01) {
+      if (!act.isRunning()) {
+        act.reset().play();
+        act.timeScale = 0.95 + Math.random() * 0.1;
+      }
+      act.enabled = true;
+      act.setEffectiveWeight(w);
+    } else if (act.isRunning()) {
+      act.setEffectiveWeight(0);
+      if (w < 0.002) act.stop();
+    }
+    if (w > topW) { topW = w; top = key; }
+  }
+  const nameOf = {
+    idle: (acts.idle && acts.idle.getClip().name) || MODEL.animations.idle,
+    idleB: (acts.idleB && acts.idleB.getClip().name) || MODEL.animations.idle,
+    injured: MODEL.animations.idleInjured,
+    walkFwd: MODEL.animations.walkForward || 'Walking',
+    walkBack: MODEL.animations.walkBack || 'WalkingBackwards',
+    strafeL: MODEL.animations.strafeLeft || 'JogStrafeLeft',
+    strafeR: MODEL.animations.strafeRight || 'JogStrafeRight',
+  };
+  f.current = nameOf[top] || f.current;
+  f.locoActive = true;
+
+  if (speed >= 0.12 && actualSpeed != null) {
+    const clipFor = { walkFwd: 'Walking', walkBack: 'WalkingBackwards', strafeL: 'JogStrafeLeft', strafeR: 'JogStrafeRight' };
+    let expected = 0;
+    for (const key of ['walkFwd', 'walkBack', 'strafeL', 'strafeR']) {
+      const w = f._locoW[key] || 0;
+      if (w <= 0.01) continue;
+      expected += w * clipWorldSpeed(f, clipFor[key]);
+    }
+    const ts = expected > 1e-4 ? Math.max(0.7, Math.min(1.25, actualSpeed / expected)) : 1;
+    for (const key of ['walkFwd', 'walkBack', 'strafeL', 'strafeR']) {
+      const act = acts[key];
+      if (act && act.isRunning()) act.timeScale = ts;
+    }
+  }
+}
+
+function stepFootSounds(f, dt) {
+  if (!f || isRagdoll(f) || f.state === 'ko' || f.state === 'down' || f.state === 'getup') return;
+  if (f.state !== 'walk') return;
+  const top = matTopY();
+  f._footSfx = f._footSfx || { L: { y: top, t: 0 }, R: { y: top, t: 0 } };
+  for (const side of ['L', 'R']) {
+    const leg = f.ikLegs && f.ikLegs[side];
+    const bone = (leg && (leg.toe || leg.foot)) || null;
+    if (!bone) continue;
+    bone.getWorldPosition(_footY);
+    const y = _footY.y;
+    const rec = f._footSfx[side];
+    rec.t = (rec.t || 0) + dt;
+    const wasUp = rec.y > top + 0.045;
+    const nowDown = y <= top + 0.038;
+    if (wasUp && nowDown && rec.t > 0.16) {
+      rec.t = 0;
+      playSfx('step', { vol: 0.48, rate: 0.94 + Math.random() * 0.12 });
+    }
+    rec.y = y;
+  }
+}
+
+function maybeKneeDrop(f, dt) {
+  const l = f.parts && f.parts.legL;
+  const r = f.parts && f.parts.legR;
+  const one = !!(l && r && ((l.detached && !r.detached) || (!l.detached && r.detached)));
+  if (!one) return false;
+  if (f.state === 'punch' || f.state === 'kick' || f.state === 'hit' || f.state === 'ko' || f.state === 'down') return false;
+  f.kneeAcc = (f.kneeAcc || 0) + dt;
+  if (f.kneeAcc < 0.9 + (f.kneeNext || 0)) return false;
+  f.kneeAcc = 0;
+  f.kneeNext = 0.45 + Math.random() * 1.15;
+  f.state = 'hit';
+  f.stateT = 0;
+  f.blocking = false;
+  f.shield.visible = false;
+  setFighterMove(f, 0, 0);
+  const clip = (f.actions.HitOnLegs && 'HitOnLegs')
+    || (f.actions.InjuredStumbleIdle && 'InjuredStumbleIdle')
+    || 'hit';
+  setAnim(f, clip, 0.14);
+  playSfx('servo', { vol: 0.38, rate: 0.82 });
+  return true;
 }
 
 function syncHud() {
@@ -757,18 +1361,34 @@ function addShake(amount) {
   shakeAmp = Math.min(0.45, shakeAmp + amount);
 }
 
+let hitStopLeft = 0;
+function triggerHitStop(sec) {
+  hitStopLeft = Math.max(hitStopLeft, sec);
+}
+
 function updateCamera(dt) {
   const a = p1.root.position;
   const b = p2.root.position;
-  lookT.set((a.x + b.x) / 2, 1.15, (a.z + b.z) / 2);
+  const midY = match.over ? 0.85 : 1.15;
+  lookT.set((a.x + b.x) / 2, midY, (a.z + b.z) / 2);
+  if (match.over) {
+    match.orbitT = (match.orbitT || 0) + dt;
+    const radius = 8.2;
+    const ang = match.orbitT * 0.22;
+    const y = 3.55 + Math.sin(match.orbitT * 0.18) * 0.3;
+    camT.set(lookT.x + Math.sin(ang) * radius, y, lookT.z + Math.cos(ang) * radius);
+    camera.position.lerp(camT, dt <= 0 ? 0 : 1 - Math.pow(0.015, dt));
+    camera.lookAt(lookT);
+    return;
+  }
   const dist = a.distanceTo(b);
-  camT.set(lookT.x, 3.15, lookT.z + 11.2 + dist * 0.35);
+  camT.set(lookT.x, 3.45, lookT.z + 8.6 + dist * 0.3);
   camera.position.lerp(camT, dt <= 0 ? 0 : 1 - Math.pow(0.001, dt));
   camera.lookAt(lookT);
   if (shakeAmp > 0) {
     camera.position.x += (Math.random() - 0.5) * shakeAmp;
-    camera.position.y += (Math.random() - 0.5) * shakeAmp * 0.55;
-    if (dt > 0) shakeAmp = Math.max(0, shakeAmp - dt * 2.4);
+    camera.position.y += (Math.random() - 0.5) * shakeAmp * 0.5;
+    if (dt > 0) shakeAmp = Math.max(0, shakeAmp - dt * 3.2);
   }
 }
 
@@ -832,6 +1452,48 @@ function stepRound(dt) {
   paintRound();
 }
 
+function beginGetUp(f) {
+  if (!f || f.state === 'getup') return;
+  const snap = [];
+  f.model.updateWorldMatrix(true, true);
+  f.model.traverse((o) => {
+    if (!o.isBone && o.type !== 'Bone') return;
+    snap.push({ bone: o, pos: o.position.clone(), quat: o.quaternion.clone() });
+  });
+  const x = f.root.position.x;
+  const z = f.root.position.z;
+  disableRagdoll(f);
+  f.root.position.set(x, 0, z);
+  if (f.phys && f.phys.body) {
+    f.phys.body.position.set(x, 0, z);
+    f.phys.body.velocity.setZero();
+  }
+  f.state = 'getup';
+  f.stateT = 0;
+  f.getupBlend = 1;
+  f.getupSnap = snap;
+  f.groundY = 0;
+  const clip = f.actions.GettingUp ? 'GettingUp' : (MODEL.animations.getUp || 'GettingUp');
+  setAnim(f, clip, 0.18);
+  if (f.mixer) f.mixer.timeScale = 1;
+}
+
+function applyGetupBlend(f, dt) {
+  if (!f.getupSnap) return;
+  f.getupBlend = Math.max(0, (f.getupBlend || 0) - dt / 0.4);
+  const w = f.getupBlend;
+  if (w <= 0) {
+    f.getupSnap = null;
+    return;
+  }
+  // w=1 at start (full ragdoll pose), w=0 is the Getting Up clip.
+  const tAnim = 1 - w;
+  for (const s of f.getupSnap) {
+    s.bone.position.lerpVectors(s.pos, s.bone.position, tAnim);
+    s.bone.quaternion.slerpQuaternions(s.quat, s.bone.quaternion, tAnim);
+  }
+}
+
 function poseAfterMixer(f) {
   if (isRagdoll(f)) return;
   // Keep the game's movement in charge: pin hips X/Z, leave Y for clip bounce.
@@ -856,6 +1518,9 @@ function resetMatch() {
     f.shield.visible = false;
     f.root.position.set(f.startX, 0, 0);
     f.root.scale.set(1, 1, 1);
+    f.groundY = 0;
+    f.getupSnap = null;
+    f.getupBlend = 0;
     resetFighterPhysics(f, f.startX, 0);
     f.atkMods = null;
     resetFighterDamage(f, scene);
@@ -870,6 +1535,10 @@ function resetMatch() {
   match.getupT = 0;
   match.camLock = false;
   match.roundLeft = null;
+  match.koT = 0;
+  match.orbitT = 0;
+  match.overlayAt = 0;
+  hitStopLeft = 0;
   paintRound();
   const banner = document.getElementById('banner');
   banner.style.opacity = '';
@@ -881,7 +1550,13 @@ function resetMatch() {
 function tick() {
   const rawDt = Math.min(0.05, clock.getDelta());
   updateFps(rawDt);
-  const dt = isSettingsOpen() ? 0 : rawDt;
+  stepFov(rawDt);
+  let dt = isSettingsOpen() ? 0 : rawDt;
+  if (dt > 0 && hitStopLeft > 0 && !match.over) {
+    hitStopLeft = Math.max(0, hitStopLeft - rawDt);
+    dt = rawDt * 0.16;
+  }
+  if (match.over && match.overlayAt && performance.now() >= match.overlayAt) showKoOverlay();
   if (match.phase === 'getup') {
     match.getupT = (match.getupT || 0) + dt;
     const getup = (p1.actions.GettingUp || p1.actions.getUp);
@@ -911,12 +1586,12 @@ function tick() {
   const ain = canAct ? updateAI(p2, p1, dt) : { sidestep: 0, inout: 0, punch: false, kick: false, block: false };
 
   for (const f of [p1, p2]) {
-    if (f && f.state === 'down' && isRagdoll(f) && f.phys.ragdoll.until < performance.now()) {
-      disableRagdoll(f);
-      f.state = 'idle';
-      f.stateT = 0;
-      setAnim(f, idleClipFor(f), 0.2);
-    }
+    if (!f || f.state !== 'down' || !isRagdoll(f)) continue;
+    const stayDown = f.health <= 0 || isCatastrophic(f);
+    if (stayDown) continue;
+    const timeUp = !f.phys.ragdoll.until || f.phys.ragdoll.until < performance.now();
+    const settled = isRagdollSettled(f);
+    if ((settled && (timeUp || f.stateT > 0.45)) || f.stateT > 1.7) beginGetUp(f);
   }
   stepFighter(p1, p2, pin, dt);
   stepFighter(p2, p1, ain, dt);
@@ -926,15 +1601,23 @@ function tick() {
   for (const f of [p1, p2]) {
     if (isRagdoll(f)) continue;
     f.mixer.update(dt);
+    applyGetupBlend(f, dt);
     f.root.position.y = 0;
     poseAfterMixer(f);
     applyMalfunctions(f, dt);
+    groundFeet(f, dt);
+    stepFootSounds(f, dt);
   }
   if (isRagdoll(p1)) applyMalfunctions(p1, dt);
   if (isRagdoll(p2)) applyMalfunctions(p2, dt);
   stepDamage(scene, dt);
+  if (!match.over && match.phase === 'fight') {
+    if (isCatastrophic(p1) && p1.state !== 'ko') ko(p1, p2, { reason: p1.parts.head && p1.parts.head.detached ? 'head' : 'legs' });
+    else if (isCatastrophic(p2) && p2.state !== 'ko') ko(p2, p1, { reason: p2.parts.head && p2.parts.head.detached ? 'head' : 'legs' });
+  }
 
   if (!match.camLock) updateCamera(dt);
+  updateFighterRims();
   hitLight.intensity = Math.max(0, hitLight.intensity - dt * 28);
   setBuzz(isSettingsOpen() ? 0 : buzzFromFighters());
   syncHud();
@@ -993,7 +1676,18 @@ function getFightState() {
 
 function onLoad(gltf) {
   const built = buildArenaVisual(scene, { tiled, metalColor, metalRough, metalMetal });
-  addArenaLights(scene, built.fixturePos);
+  const lightRig = addArenaLights(scene, built.fixturePos);
+  if (lightRig) {
+    trackLight(lightRig.hemi);
+    trackLight(lightRig.fill);
+    trackLight(lightRig.fill2);
+    trackLight(lightRig.rim);
+    trackLight(lightRig.rimL);
+    trackLight(lightRig.rimR);
+    for (const s of (lightRig.spots || [])) trackLight(s);
+  }
+  fighterRims = [makeFighterRim(0xc8e0ff), makeFighterRim(0xffd4b8)];
+  applyLight(getSettings().light);
   initArenaPhysics();
   p1 = makeFighter(gltf, MODEL.colors.p1, 'p1');
   p2 = makeFighter(gltf, MODEL.colors.p2, 'p2');
@@ -1052,6 +1746,63 @@ function onLoad(gltf) {
     stepDamage(scene, 0);
     syncHud();
     renderer.render(scene, camera);
+  };
+  window.__rfSkipToFight = () => {
+    startFightFromShell({ skipIntro: true });
+    const banner = document.getElementById('banner');
+    banner.classList.remove('show');
+    banner.style.opacity = '';
+    document.getElementById('overlay').classList.add('hidden');
+    match.camLock = false;
+    delete window.__rfDebug;
+  };
+  window.__rfPrepKoShot = () => {
+    startFightFromShell({ skipIntro: true });
+    const banner = document.getElementById('banner');
+    banner.classList.remove('show');
+    banner.style.opacity = '0';
+    match.camLock = false;
+    delete window.__rfDebug;
+    const towardCam = new THREE.Vector3(0.15, 0.08, 1);
+    previewDamage(p2, scene, towardCam);
+    p2.health = 0;
+    ko(p2, p1, { dir: towardCam, force: 7.5 });
+    match.overlayAt = performance.now() + 900;
+    document.getElementById('overlay').classList.add('hidden');
+    document.getElementById('fps').classList.add('hidden');
+  };
+
+  window.__rfMeasureFeet = () => {
+    const top = matTopY();
+    const out = { matTop: top };
+    for (const f of [p1, p2]) {
+      f.model.updateWorldMatrix(true, true);
+      const bones = {};
+      let minY = Infinity;
+      for (const b of (f.footBones || [])) {
+        const v = new THREE.Vector3();
+        b.getWorldPosition(v);
+        bones[b.name] = +v.y.toFixed(4);
+        if (v.y < minY) minY = v.y;
+      }
+      out[f.id] = { rootY: +f.root.position.y.toFixed(4), groundY: +(f.groundY || 0).toFixed(4), minY: Number.isFinite(minY) ? +minY.toFixed(4) : null, bones };
+    }
+    return out;
+  };
+  window.__rfPrepFeetShot = () => {
+    startFightFromShell({ skipIntro: true });
+    const banner = document.getElementById('banner');
+    banner.classList.remove('show');
+    banner.style.opacity = '0';
+    document.getElementById('overlay').classList.add('hidden');
+    document.getElementById('fps').classList.add('hidden');
+    delete window.__rfDebug;
+    match.camLock = true;
+    const mid = new THREE.Vector3().addVectors(p1.root.position, p2.root.position).multiplyScalar(0.5);
+    camera.fov = 40;
+    camera.updateProjectionMatrix();
+    camera.position.set(mid.x + 0.15, 0.28, mid.z + 2.15);
+    camera.lookAt(mid.x, matTopY() + 0.04, mid.z);
   };
   renderer.setAnimationLoop(tick);
 }

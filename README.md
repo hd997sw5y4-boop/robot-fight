@@ -16,9 +16,9 @@ Desktop only in this first version. Open the link in a web browser.
 - **Gamepad** (optional) — left stick or D-pad to move, button A/× punch, B/○ kick, X/□ or a shoulder button to block
 - **Esc** or the gear button at the top — Settings (pauses the fight)
 
-Press **Fight again** after a knockout to restart.
+A knockdown lets the robot settle, blend back into **Getting Up**, and keep fighting. Only a real knockout (health gone, head gone, or both legs gone) stays down; then the robots remain where they fell (no automatic rematch). A slow camera orbit plays, and **Fight again** (or **R** / **Enter**) is the only way to start another fight.
 
-Settings (saved in the browser) include graphics quality, master, SFX, and crowd/ambience volume, camera shake, CPU difficulty, an optional round timer, a controls overlay, a read-only keyboard/gamepad list, and an FPS counter.
+Settings (saved in the browser) include graphics quality, a field-of-view slider (45–90°, also zoomed with the mouse wheel), a lighting/brightness slider (50–200%), master, SFX, and crowd/ambience volume, camera shake, CPU difficulty, an optional round timer, a controls overlay, a read-only keyboard/gamepad list, and an FPS counter.
 
 Hits land on a body part (head, torso, left/right arm, left/right leg). That spot dents and scuffs, sparks fly, and heavy damage makes the part smoke and malfunction (weaker or slower punches, a limp, a jittery head). When a limb or the head is wrecked it tears off, falls onto the mat, and stops working. The torso can be crushed but stays attached. Tiny pips under each health bar show part condition.
 
@@ -33,5 +33,7 @@ The part-to-bone map lives in `js/config.js` (`DAMAGE.bind`) so a later Mixamo-r
 - **Settings panel look and volume taper:** adapted from Window Workshop Games UI (periwinkle frosted sheet, squared master-volume taper, graphics quality control). Only those pieces were reused.
 - **Sound effects:** CC0 and royalty-free clips (no credit required). Sources and licenses are listed in `CREDITS/LICENSES.md`.
 - **Physics:** [cannon-es](https://github.com/pmndrs/cannon-es) (MIT), vendored from the official package. Fighter capsules, cage/posts, ragdoll knockdowns and KOs, and detached parts that bounce then settle.
+
+The octagon cage/fence is turned off for now (`ARENA.cage` in `js/config.js`); an invisible ring collider still keeps fighters and loose parts on the mat.
 
 The menu/arcade shell can start and end fights through `js/api.js` (`startFight`, `onFightEnd`, `setFighterConfig` with paint colors and AI personality). Flip attacks and win celebrations will use upcoming Mixamo clips (`MODEL.animations.flipSpecial` / `victory`); missing names are skipped until that pack is in the GLB.

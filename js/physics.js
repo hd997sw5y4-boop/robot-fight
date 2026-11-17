@@ -9,7 +9,7 @@ const G = { ARENA: 1, FIGHTER: 2, RAGDOLL: 4, DEBRIS: 8 };
 const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -16.5, 0) });
 world.broadphase = new CANNON.SAPBroadphase(world);
 world.allowSleep = true;
-world.solver.iterations = 14;
+world.solver.iterations = 20;
 world.defaultContactMaterial.friction = 0.35;
 world.defaultContactMaterial.restitution = 0.08;
 
@@ -67,6 +67,8 @@ export function initArenaPhysics() {
   const floor = new CANNON.Body({ mass: 0, material: matFloor, type: CANNON.Body.STATIC });
   floor.addShape(new CANNON.Plane());
   floor.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+  // Plane origin is the mat top, matching the visual floor mesh top (ARENA.matTop).
+  floor.position.set(0, ARENA.matTop || 0, 0);
   floor.collisionFilterGroup = G.ARENA;
   floor.collisionFilterMask = G.FIGHTER | G.RAGDOLL | G.DEBRIS;
   floor.userData = { kind: 'floor' };
@@ -213,7 +215,12 @@ export function enableRagdoll(f, impulse, opts = {}) {
   if (isRagdoll(f)) {
     // already down; add impulse and maybe extend
     const hips = f.phys.ragdoll.entries.find((e) => e.id === 'hips');
-    if (hips && impulse) hips.body.applyImpulse(new CANNON.Vec3(impulse.x, impulse.y || 1.2, impulse.z), hips.body.position);
+    if (hips && impulse) {
+      const ix = Math.max(-5, Math.min(5, impulse.x));
+      const iy = Math.max(0.3, Math.min(3.2, impulse.y || 1.2));
+      const iz = Math.max(-5, Math.min(5, impulse.z));
+      hips.body.applyImpulse(new CANNON.Vec3(ix, iy, iz), hips.body.position);
+    }
     if (opts.until != null) f.phys.ragdoll.until = opts.until;
     return;
   }
@@ -231,10 +238,10 @@ export function enableRagdoll(f, impulse, opts = {}) {
     const body = new CANNON.Body({
       mass: spec.mass,
       material: matSoft,
-      linearDamping: 0.18,
-      angularDamping: 0.36,
+      linearDamping: 0.32,
+      angularDamping: 0.55,
       allowSleep: true,
-      sleepSpeedLimit: 0.28,
+      sleepSpeedLimit: 0.22,
     });
     if (spec.id === 'head' || spec.id === 'hips') {
       body.addShape(new CANNON.Sphere(spec.id === 'head' ? 0.15 : 0.17));
@@ -270,7 +277,7 @@ export function enableRagdoll(f, impulse, opts = {}) {
     const pivotB = new CANNON.Vec3();
     p.body.pointToLocalFrame(new CANNON.Vec3(cWorld.x, cWorld.y, cWorld.z), pivotA);
     e.body.pointToLocalFrame(new CANNON.Vec3(cWorld.x, cWorld.y, cWorld.z), pivotB);
-    const c = new CANNON.PointToPointConstraint(p.body, pivotA, e.body, pivotB, 1e6);
+    const c = new CANNON.PointToPointConstraint(p.body, pivotA, e.body, pivotB, 1e4);
     c.collideConnected = false;
     world.addConstraint(c);
     constraints.push(c);
@@ -283,8 +290,11 @@ export function enableRagdoll(f, impulse, opts = {}) {
   if (impulse) {
     const hips = byId.hips || entries[0];
     const spine = byId.spine || hips;
-    if (hips) hips.body.applyImpulse(new CANNON.Vec3(impulse.x * 0.7, (impulse.y || 1.4) + 1.1, impulse.z * 0.7), hips.body.position);
-    if (spine && spine !== hips) spine.body.applyImpulse(new CANNON.Vec3(impulse.x, impulse.y || 1.2, impulse.z), spine.body.position);
+    const ix = Math.max(-6.5, Math.min(6.5, impulse.x));
+    const iy = Math.max(0.4, Math.min(4.2, impulse.y || 1.4));
+    const iz = Math.max(-6.5, Math.min(6.5, impulse.z));
+    if (hips) hips.body.applyImpulse(new CANNON.Vec3(ix * 0.7, iy, iz * 0.7), hips.body.position);
+    if (spine && spine !== hips) spine.body.applyImpulse(new CANNON.Vec3(ix * 0.45, iy * 0.7, iz * 0.45), spine.body.position);
   }
   f.phys.ragdoll = {
     active: true,
@@ -419,8 +429,35 @@ export function stepPhysics(dt) {
   if (dt <= 0) return;
   const steps = Math.min(4, Math.max(1, Math.round(dt / (1 / 60))));
   world.step(1 / 60, dt, steps);
+  clampRagdollSpeeds();
   syncFightersFromPhysics();
   syncDebris(dt);
+}
+
+function clampRagdollSpeeds() {
+  for (const f of fighters) {
+    if (!isRagdoll(f)) continue;
+    for (const e of f.phys.ragdoll.entries) {
+      const v = e.body.velocity;
+      const sp = v.length();
+      if (sp > 7.5) v.scale(7.5 / sp);
+      const w = e.body.angularVelocity;
+      const wp = w.length();
+      if (wp > 12) w.scale(12 / wp);
+      if (e.body.position.y < (ARENA.matTop || 0) + 0.05) {
+        e.body.position.y = Math.max(e.body.position.y, (ARENA.matTop || 0) + 0.05);
+      }
+    }
+  }
+}
+
+export function isRagdollSettled(f) {
+  if (!isRagdoll(f)) return true;
+  let maxV = 0;
+  for (const e of f.phys.ragdoll.entries) {
+    maxV = Math.max(maxV, e.body.velocity.length(), e.body.angularVelocity.length() * 0.25);
+  }
+  return maxV < 0.55;
 }
 
 export function resetFighterPhysics(f, x, z) {
