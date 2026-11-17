@@ -1,5 +1,5 @@
 // Mixamo-rigged Sketchfab "Robot character" (assetfactory, Free Standard).
-// Animations from Mixamo. Idle is a held Punching frame; walk is procedural.
+// Animations from Mixamo. Idle/walk/strafe use real clips; hips XZ root motion is stripped.
 export const MODEL = {
   url: './models/RobotFighter.glb',
   source: "Robot character by assetfactory (Sketchfab Free Standard); animations from Mixamo",
@@ -7,8 +7,12 @@ export const MODEL = {
   targetHeight: 2.45,
   footOffset: 0,
   animations: {
-    idle: 'Idle',
-    walk: null,
+    idle: 'FightingIdle',
+    idleInjured: 'InjuredStumbleIdle',
+    walkForward: 'Walking',
+    walkBack: 'WalkingBackwards',
+    strafeLeft: 'JogStrafeLeft',
+    strafeRight: 'JogStrafeRight',
     punch: 'Punching',
     punchVariants: ['Punching', 'PunchCombo', 'ElbowPunching'],
     kick: 'Kicking',
@@ -28,12 +32,18 @@ export const MODEL = {
     stunned: 'Stunned',
     ko: 'KnockedOut',
     getUp: 'GettingUp',
+    hitHeavy: 'StumbleBackwards',
   },
   colors: {
     p1: 0x2f74ff,
     p2: 0xe23b3b,
   },
 };
+
+export const LOOP_CLIPS = [
+  'FightingIdle', 'InjuredStumbleIdle',
+  'Walking', 'WalkingBackwards', 'JogStrafeLeft', 'JogStrafeRight',
+];
 
 export const ARENA = {
   // Distance from center to a flat side of the cage (world units).

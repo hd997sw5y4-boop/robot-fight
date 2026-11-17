@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { MODEL, ARENA, COMBAT, GFX_PRESETS } from './config.js';
+import { MODEL, ARENA, COMBAT, GFX_PRESETS, LOOP_CLIPS } from './config.js';
 import {
   prepareFighterDamage,
   canPunch,
@@ -350,7 +350,7 @@ function makeFighter(gltf, color, side) {
   const actions = {};
   for (const clip of gltf.animations) {
     const act = mixer.clipAction(clip);
-    const loop = clip.name === 'Idle';
+    const loop = LOOP_CLIPS.includes(clip.name);
     act.loop = loop ? THREE.LoopRepeat : THREE.LoopOnce;
     if (!loop) act.clampWhenFinished = true;
     actions[clip.name] = act;
@@ -358,7 +358,8 @@ function makeFighter(gltf, color, side) {
   for (const [key, val] of Object.entries(MODEL.animations)) {
     if (typeof val === 'string' && actions[val]) actions[key] = actions[val];
   }
-  if (actions.Idle) actions.Idle.play();
+  const startIdle = MODEL.animations.idle || 'FightingIdle';
+  if (actions[startIdle]) actions[startIdle].play();
   mixer.update(0);
   const box3 = meshBox(model);
   if (box3) model.position.y = -box3.min.y + MODEL.footOffset;
@@ -380,7 +381,7 @@ function makeFighter(gltf, color, side) {
     shield,
     mixer,
     actions,
-    current: 'Idle',
+    current: MODEL.animations.idle || 'FightingIdle',
     health: COMBAT.maxHealth,
     state: 'idle',
     stateT: 0,
@@ -399,7 +400,7 @@ function makeFighter(gltf, color, side) {
     if (f.state === 'ko') return;
     if (f.health > 0 && (f.state === 'punch' || f.state === 'kick' || f.state === 'hit')) {
       f.state = 'idle';
-      setAnim(f, 'idle', 0.15);
+      setAnim(f, idleClipFor(f), 0.15);
     }
   });
   prepareFighterDamage(f);
@@ -447,6 +448,28 @@ function pickClip(list, fallback) {
 function hitClipFor(partId) {
   const map = MODEL.animations.hitByPart || {};
   return pickClip(map[partId] || map.torso, MODEL.animations.hit || 'Stunned');
+}
+
+function idleClipFor(f) {
+  const injured = MODEL.animations.idleInjured;
+  if (injured && f.actions[injured]) {
+    const lowHp = f.health <= COMBAT.maxHealth * 0.4;
+    const l = f.parts && f.parts.legL;
+    const r = f.parts && f.parts.legR;
+    const legsBad = !!(l && r && (
+      l.detached || r.detached
+      || ((1 - l.hp / l.max) + (1 - r.hp / r.max)) / 2 >= 0.5
+    ));
+    if (lowHp || legsBad) return injured;
+  }
+  return MODEL.animations.idle || 'FightingIdle';
+}
+
+function moveClipFor(sidestep, inout) {
+  const ax = Math.abs(sidestep);
+  const az = Math.abs(inout);
+  if (ax >= az) return sidestep < 0 ? (MODEL.animations.strafeLeft || 'JogStrafeLeft') : (MODEL.animations.strafeRight || 'JogStrafeRight');
+  return inout > 0 ? (MODEL.animations.walkForward || 'Walking') : (MODEL.animations.walkBack || 'WalkingBackwards');
 }
 
 window.addEventListener('keydown', (e) => {
@@ -621,7 +644,8 @@ function applyHit(atk, def, spec, kind) {
     def.invuln = COMBAT.hitInvuln;
     def.blocking = false;
     def.shield.visible = false;
-    setAnim(def, hitClipFor(hit.partId), 0.06);
+    const heavy = dmg >= 12 && def.actions[MODEL.animations.hitHeavy];
+    setAnim(def, heavy ? MODEL.animations.hitHeavy : hitClipFor(hit.partId), 0.06);
   }
 }
 
@@ -694,7 +718,7 @@ function stepFighter(f, other, inp, dt) {
   if (f.state === 'hit') {
     if (f.stateT > COMBAT.hitStun) {
       f.state = 'idle';
-      setAnim(f, 'idle', 0.12);
+      setAnim(f, idleClipFor(f), 0.12);
     }
     return;
   }
@@ -711,7 +735,7 @@ function stepFighter(f, other, inp, dt) {
     }
     if (f.stateT > dur + 0.05 && f.state !== 'ko') {
       f.state = 'idle';
-      setAnim(f, 'idle', 0.12);
+      setAnim(f, idleClipFor(f), 0.12);
     }
     return;
   }
@@ -728,10 +752,12 @@ function stepFighter(f, other, inp, dt) {
     moveFighter(f, other, inp.sidestep, inp.inout, dt, speed);
     if (!f.blocking) {
       f.state = 'walk';
-      if (f.current !== 'Idle' && f.current !== 'idle') setAnim(f, 'idle', 0.15);
+      const clip = moveClipFor(inp.sidestep, inp.inout);
+      if (f.current !== clip) setAnim(f, clip, 0.12);
     }
   } else if (!f.blocking) {
-    if (f.current !== 'Idle' && f.current !== 'idle') setAnim(f, 'idle', 0.15);
+    const idle = idleClipFor(f);
+    if (f.current !== idle) setAnim(f, idle, 0.18);
     f.state = 'idle';
   }
 }
@@ -761,21 +787,13 @@ let p2;
 const match = { phase: 'intro', introT: 0, over: false, winner: null };
 const clock = new THREE.Clock();
 
-function poseAfterMixer(f, dt) {
+function poseAfterMixer(f) {
+  // Keep the game's movement in charge: pin hips X/Z, leave Y for clip bounce.
   if (f.hips && f.hipsBind) {
     f.hips.position.x = f.hipsBind.x;
     f.hips.position.z = f.hipsBind.z;
   }
-  if (f.state === 'ko' || f.state === 'hit' || f.state === 'punch' || f.state === 'kick' || f.state === 'getup') return;
-  f.swayT = (f.swayT || 0) + dt;
-  const walk = f.state === 'walk';
-  const bob = walk ? 0.045 : 0.012;
-  const rate = walk ? 8.5 : 1.7;
-  f.model.position.y = f.baseY + Math.sin(f.swayT * rate) * bob;
-  if (f.spine) {
-    f.spine.rotation.z += Math.sin(f.swayT * rate) * (walk ? 0.07 : 0.028);
-    f.spine.rotation.x += Math.sin(f.swayT * 1.35) * 0.014;
-  }
+  f.model.position.y = f.baseY;
 }
 
 function resetMatch() {
@@ -818,8 +836,8 @@ function tick() {
     if (match.getupT > dur * 0.95) {
       match.phase = 'intro';
       match.introT = 0;
-      setAnim(p1, 'idle', 0.2);
-      setAnim(p2, 'idle', 0.2);
+      setAnim(p1, idleClipFor(p1), 0.2);
+      setAnim(p2, idleClipFor(p2), 0.2);
       p1.state = 'idle';
       p2.state = 'idle';
       document.getElementById('banner').classList.add('show');
@@ -843,8 +861,8 @@ function tick() {
   p2.mixer.update(dt);
   p1.root.position.y = 0;
   p2.root.position.y = 0;
-  poseAfterMixer(p1, dt);
-  poseAfterMixer(p2, dt);
+  poseAfterMixer(p1);
+  poseAfterMixer(p2);
   applyMalfunctions(p1, dt);
   applyMalfunctions(p2, dt);
   stepDamage(scene, dt);

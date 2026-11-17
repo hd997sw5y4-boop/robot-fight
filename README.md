@@ -26,6 +26,6 @@ The part-to-bone map lives in `js/config.js` (`DAMAGE.bind`) so a later Mixamo-r
 ## Credits
 
 - **Robot fighter:** [Robot character](https://sketchfab.com/3d-models/robot-character-2fe59c8ef49547d2a1e0a65506701a7e) by assetfactory, Sketchfab Free Standard license (recolored in-game; original source files are not redistributed). See `models/CREDITS.md`.
-- **Animations:** [Mixamo](https://www.mixamo.com) (Adobe). Punch, kick, block, hit, stunned, knocked out, and getting up. Idle is a held ready pose plus a light sway; walk is procedural (the clip set had no idle or walk).
+- **Animations:** [Mixamo](https://www.mixamo.com) (Adobe). Punch, kick, block, hit, stunned, knocked out, and getting up. Idle is Fighting Idle (Injured Stumble Idle when badly hurt). W/S use Walking / Walking Backwards; A/D use Jog Strafe Left / Right. Heavy hits can play Stumble Backwards.
 - **3D engine:** [three.js](https://threejs.org/) r187, MIT license.
 - **Arena metal textures:** [Metal009](https://ambientcg.com/view?id=Metal009) from ambientCG, CC0 1.0 (resized to 512).
