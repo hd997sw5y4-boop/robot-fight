@@ -138,7 +138,7 @@ function applyHdri(on) {
     scene.backgroundBlurriness = 0.08;
     scene.backgroundIntensity = 0.55;
     // Put the gym's window wall behind the fighters.
-    if (scene.backgroundRotation) scene.backgroundRotation.set(0, 0.35, 0);
+    if (scene.backgroundRotation) scene.backgroundRotation.set(0, 0.15, 0);
     scene.fog = null;
     scene.traverse((o) => { if (o.userData && o.userData.voidWall) o.visible = false; });
   } else {
@@ -157,7 +157,7 @@ function loadHdri() {
   if (hdriLoading) return hdriLoading;
   hdriLoading = new Promise((resolve) => {
     new RGBELoader().load(
-      ARENA.hdriUrl || './hdris/wrestling_gym_2k.hdr',
+      ARENA.hdriUrl || './hdris/industrial_pipe_and_valve_01_2k.hdr',
       (tex) => {
         tex.mapping = THREE.EquirectangularReflectionMapping;
         hdriBg = tex;

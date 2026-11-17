@@ -46,4 +46,4 @@ Full-quality WAV masters were downloaded from Mixkit and recompressed to mono OG
 
 ## Poly Haven — CC0 1.0
 
-[Wrestling Gym](https://polyhaven.com/a/wrestling_gym) 2K HDRI, used as an optional environment / backdrop when HDRI is enabled (`hdris/wrestling_gym_2k.hdr`). License: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/). Credit is optional.
+[Industrial Pipe & Valve 01](https://polyhaven.com/a/industrial_pipe_and_valve_01) 2K HDRI, used as an optional environment / backdrop when HDRI is enabled (`hdris/industrial_pipe_and_valve_01_2k.hdr`). License: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/). Credit is optional.
