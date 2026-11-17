@@ -314,13 +314,14 @@ async function main() {
     chrome = spawn('google-chrome', [
       '--headless=new',
       '--no-sandbox',
-      '--disable-gpu',
       '--enable-unsafe-swiftshader',
       '--hide-scrollbars',
       '--mute-audio',
+      '--disable-frame-rate-limit',
+      '--disable-gpu-vsync',
       `--remote-debugging-port=${opt.cdp}`,
       `--user-data-dir=${profile}`,
-      '--window-size=800,450',
+      '--window-size=400,225',
       'about:blank',
     ], { stdio: 'ignore' });
     weStartedChrome = true;
@@ -333,7 +334,7 @@ async function main() {
     await cdp.open();
     await cdp.send('Runtime.enable');
     await cdp.send('Page.enable');
-    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 800, height: 450, deviceScaleFactor: 1, mobile: false });
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 400, height: 225, deviceScaleFactor: 1, mobile: false });
 
     const boot = `
       window.__rfTestConfig = { timeScale: ${JSON.stringify(opt.timeScale)} };
@@ -393,7 +394,8 @@ async function main() {
       })()`);
       console.log('startMatch', started);
     }
-    console.log('entered', await cdp.ev('window.__rfTest.snapshot()'));
+    const armed = await cdp.ev('window.__rfTest.arm && window.__rfTest.arm()');
+    console.log('armed', armed, await cdp.ev('window.__rfTest.snapshot()'));
 
     const t0 = Date.now();
     let lastLog = 0;

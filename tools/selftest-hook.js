@@ -112,6 +112,29 @@
     return totals.attacks[kind];
   }
 
+  let armed = false;
+  let skipRenderInstalled = false;
+
+  function arm() {
+    armed = true;
+    cur = null;
+    prev = null;
+    lastSampleT = null;
+    pendingHits.length = 0;
+    return true;
+  }
+
+  function installSkipRender(a) {
+    if (skipRenderInstalled) return;
+    const THREE = (a && a.THREE) || (window.RFShellHook && window.RFShellHook.THREE);
+    if (!THREE || !THREE.WebGLRenderer) return;
+    const proto = THREE.WebGLRenderer.prototype;
+    if (!proto || proto.__rfTestSkip) { skipRenderInstalled = true; return; }
+    proto.render = function () { return; };
+    proto.__rfTestSkip = true;
+    skipRenderInstalled = true;
+  }
+
   function api() {
     const hook = window.RFShellHook || (window.RFShell && window.RFShell.api);
     const a = (window.RFShell && window.RFShell.api) || hook;
@@ -240,19 +263,20 @@
     const a = api();
     if (!a) return;
     hookClock(a);
+    installSkipRender(a);
     const p1 = a.p1, p2 = a.p2, match = a.match;
     if (!p1 || !p2) return;
     ready = true;
 
     const now = fakeNow();
-    const dt = lastSampleT == null ? 0 : Math.max(0, Math.min(0.08, (now - lastSampleT) / 1000));
+    const dt = lastSampleT == null ? 0 : Math.max(0, Math.min(0.05, (now - lastSampleT) / 1000));
     lastSampleT = now;
 
     const phase = match ? match.phase : null;
     const over = !!(match && match.over);
     const inFight = phase === 'fight' && !over;
 
-    if (inFight && (!cur || cur.ended)) startFight(match, p1, p2);
+    if (armed && inFight && (!cur || cur.ended)) startFight(match, p1, p2);
     if (cur && !cur.ended && over) endFight(match, p1, p2);
     // Round restart without over sticking: new getup/intro after a finished fight is handled
     // when phase returns to fight (startFight above).
@@ -559,6 +583,7 @@
     timeScale,
     thresholds: THRESH,
     setTimeScale,
+    arm,
     snapshot,
     report,
     fights: () => fights.map(summarizeFight),

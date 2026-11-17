@@ -855,7 +855,7 @@ function groundRagdoll(f, dt) {
   if (minY == null) return;
   const err = matTopY() - minY;
   const k = 1 - Math.pow(0.0001, Math.max(dt || 0.016, 1 / 120));
-  rd.visualY = Math.max(-0.15, Math.min(0.08, (rd.visualY || 0) + err * k));
+  rd.visualY = Math.max(-0.15, Math.min(0.13, (rd.visualY || 0) + err * k));
 }
 
 function groundFeet(f, dt) {
@@ -877,8 +877,9 @@ function groundFeet(f, dt) {
   f.groundY = f.groundY || 0;
   if (target > f.groundY) f.groundY = target; // lift instantly: feet never sink
   else {
-    const k = 1 - Math.pow(0.0005, Math.max(dt || 0.016, 1 / 120));
-    f.groundY += (target - f.groundY) * k; // settle down quickly but smoothly
+    // Settle down quickly but smoothly (faster while getting up off the mat, so it never hovers).
+    const k = 1 - Math.pow(f.state === 'getup' ? 0.00001 : 0.0005, Math.max(dt || 0.016, 1 / 120));
+    f.groundY += (target - f.groundY) * k;
   }
   f.root.position.y = f.groundY;
   f.model.updateWorldMatrix(true, true);

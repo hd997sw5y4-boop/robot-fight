@@ -45,3 +45,5 @@ No gameplay judgement: counts and magnitudes only.
 ## Hook
 
 `tools/selftest-hook.js` is not referenced by `index.html`. The harness injects it with `Page.addScriptToEvaluateOnNewDocument`. No line in `js/game.js` is required.
+
+For speed in headless software GL, the hook no-ops `THREE.WebGLRenderer.prototype.render` after the runtime is ready. Simulation, animation, and physics still run; no pixels are required for the measurements.

@@ -317,7 +317,9 @@ export function enableRagdoll(f, impulse, opts = {}) {
     body.position.set(_p.x, _p.y, _p.z);
     body.quaternion.set(_q.x, _q.y, _q.z, _q.w);
     body.collisionFilterGroup = G.RAGDOLL;
-    body.collisionFilterMask = G.ARENA | G.FIGHTER | G.RAGDOLL | G.DEBRIS;
+    // No ragdoll-vs-ragdoll contacts: the mesh-fitted segments overlap at the hips and
+    // shoulders, and that constant self-push kept a downed robot creeping instead of settling.
+    body.collisionFilterMask = G.ARENA | G.FIGHTER | G.DEBRIS;
     body.userData = { kind: 'ragdoll', id: f.id, part: spec.id };
     world.addBody(body);
     const entry = { id: spec.id, parent: spec.parent, bone, body, len };
