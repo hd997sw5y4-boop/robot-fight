@@ -426,3 +426,77 @@ export function addArenaLights(scene, fixturePos) {
   scene.add(rimR);
   return { hemi, spots, fill, fill2, rim, rimL, rimR };
 }
+
+// Glossy floor reflections: a planar mirror pass alpha-mixed over the mat. Bright highlights
+// (lights, glowing eyes, sparks) mix in stronger so the scuffed
+// chrome reads as polished, not as a mirror (alpha-mixed over the mat); a small blur matches the mat's roughness.
+const FloorReflectShader = {
+  name: 'FloorReflectShader',
+  uniforms: {
+    color: { value: null },
+    tDiffuse: { value: null },
+    textureMatrix: { value: null },
+    strength: { value: 0.3 },
+    knee: { value: 0.35 },
+    texel: { value: new THREE.Vector2(1 / 1024, 1 / 576) },
+  },
+  vertexShader: /* glsl */`
+    uniform mat4 textureMatrix;
+    varying vec4 vUv;
+    #include <common>
+    #include <logdepthbuf_pars_vertex>
+    void main() {
+      vUv = textureMatrix * vec4( position, 1.0 );
+      gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+      #include <logdepthbuf_vertex>
+    }`,
+  fragmentShader: /* glsl */`
+    uniform vec3 color;
+    uniform sampler2D tDiffuse;
+    uniform float strength;
+    uniform float knee;
+    uniform vec2 texel;
+    varying vec4 vUv;
+    #include <logdepthbuf_pars_fragment>
+    void main() {
+      #include <logdepthbuf_fragment>
+      vec2 uv = vUv.xy / vUv.w;
+      vec3 c = texture2D( tDiffuse, uv ).rgb * 0.36;
+      c += texture2D( tDiffuse, uv + vec2( texel.x * 2.0, 0.0 ) ).rgb * 0.16;
+      c += texture2D( tDiffuse, uv - vec2( texel.x * 2.0, 0.0 ) ).rgb * 0.16;
+      c += texture2D( tDiffuse, uv + vec2( 0.0, texel.y * 3.0 ) ).rgb * 0.16;
+      c += texture2D( tDiffuse, uv - vec2( 0.0, texel.y * 3.0 ) ).rgb * 0.16;
+      // Real mirror mix (dark robots reflect dark), plus a little extra for bright highlights.
+      float lum = dot( c, vec3( 0.299, 0.587, 0.114 ) );
+      float a = clamp( strength + max( lum - knee, 0.0 ) * 0.6, 0.0, 0.85 );
+      gl_FragColor = vec4( c * color, a );
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`,
+};
+
+export async function addFloorReflection(scene) {
+  const { Reflector } = await import('three/addons/objects/Reflector.js');
+  const a = ARENA.apothem;
+  const r = a / Math.cos(Math.PI / 8);
+  const w = 1024;
+  const h = Math.round(w / Math.max(1, window.innerWidth / Math.max(1, window.innerHeight)));
+  const mirror = new Reflector(new THREE.CircleGeometry(r * 0.995, 8), {
+    textureWidth: w,
+    textureHeight: h,
+    color: 0xd8dee6,
+    clipBias: 0.002,
+    multisample: 0,
+    shader: FloorReflectShader,
+  });
+  mirror.material.uniforms.texel.value.set(1 / w, 1 / h);
+  mirror.material.transparent = true;
+  mirror.material.depthWrite = false;
+  mirror.rotation.x = -Math.PI / 2;
+  mirror.rotation.z = Math.PI / 8;
+  mirror.position.y = 0.0015;
+  mirror.renderOrder = 1;
+  mirror.name = 'floorReflection';
+  scene.add(mirror);
+  return mirror;
+}

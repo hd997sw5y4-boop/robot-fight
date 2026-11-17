@@ -7,7 +7,7 @@ import { MODEL, ARENA, COMBAT, GFX_PRESETS, LOOP_CLIPS } from './config.js';
 import { CLIP_SPEEDS } from './clip-speeds.js';
 import { getSettings, isSettingsOpen, initSettings, updateFps } from './settings.js';
 import { unlockAudio, playSfx, playHit, setBuzz, startCrowd } from './audio.js';
-import { buildArena as buildArenaVisual, addArenaLights } from './arena.js';
+import { buildArena as buildArenaVisual, addArenaLights, addFloorReflection } from './arena.js';
 import {
   initArenaPhysics,
   attachFighter,
@@ -200,8 +200,10 @@ loadHdri().then((ok) => {
 let lightMul = Math.max(0.5, Math.min(2, getSettings().light || 1));
 const litLights = [];
 
+let floorMirror = null;
 function applyGfx(key) {
   gfxKey = key === 'low' ? 'low' : 'high';
+  if (floorMirror) floorMirror.visible = gfxKey !== 'low';
   const p = GFX_PRESETS[gfxKey];
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, p.pixelCap));
   renderer.toneMappingExposure = p.exposure * lightMul;
@@ -1829,7 +1831,15 @@ function resetMatch() {
     resetFighterPhysics(f, f.startX, 0);
     f.atkMods = null;
     resetFighterDamage(f, scene);
+    // Hard-start the round clip at full weight and pose it now, so the first rendered frame
+    // never shows the bind (A/T) pose from a cross-fade out of a stopped KO/ragdoll action.
+    if (f.mixer) f.mixer.stopAllAction();
+    f.current = null;
     setAnim(f, MODEL.animations.getUp || 'idle', 0.08);
+    const startAct = f.actions[f.current];
+    if (startAct) { startAct.stopFading(); startAct.setEffectiveWeight(1); startAct.play(); }
+    if (f.mixer) f.mixer.update(0);
+    poseAfterMixer(f);
     f.state = 'getup';
   }
   clearAllDebris(scene);
@@ -1985,6 +1995,7 @@ function getFightState() {
 function onLoad(gltf) {
   const built = buildArenaVisual(scene, { tiled, metalColor, metalRough, metalMetal });
   const lightRig = addArenaLights(scene, built.fixturePos);
+  addFloorReflection(scene).then((m) => { floorMirror = m; m.visible = gfxKey !== 'low'; }).catch(() => {});
   if (lightRig) {
     trackLight(lightRig.hemi);
     trackLight(lightRig.fill);
