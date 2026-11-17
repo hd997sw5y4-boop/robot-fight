@@ -3,6 +3,23 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MODEL, ARENA, COMBAT, GFX_PRESETS } from './config.js';
+import {
+  prepareFighterDamage,
+  canPunch,
+  canKick,
+  canBlock,
+  attackMods,
+  moveSpeedMul,
+  blockReductionMul,
+  pickHit,
+  applyPartHit,
+  stepDamage,
+  applyMalfunctions,
+  resetFighterDamage,
+  clearAllDebris,
+  syncPartHud,
+  previewDamage,
+} from './damage.js';
 
 const canvas = document.getElementById('c');
 const keys = new Set();
@@ -375,6 +392,7 @@ function makeFighter(gltf, color, side) {
       }
     }
   });
+  prepareFighterDamage(f);
   return f;
 }
 
@@ -493,14 +511,19 @@ function faceEachOther(a, b) {
 function tryAttack(f, kind) {
   if (f.state === 'ko' || f.state === 'hit' || f.state === 'punch' || f.state === 'kick') return;
   if (f.cooldown > 0) return;
+  if (kind === 'punch' && !canPunch(f)) return;
+  if (kind === 'kick' && !canKick(f)) return;
   const spec = COMBAT[kind];
+  const mods = attackMods(f, kind);
   f.state = kind;
   f.stateT = 0;
   f.hitThisAttack = false;
-  f.cooldown = spec.cooldown;
+  f.cooldown = spec.cooldown * mods.cooldownMul;
+  f.atkMods = mods;
   f.blocking = false;
   f.shield.visible = false;
   setAnim(f, kind, 0.08);
+  if (f.actions[kind]) f.actions[kind].timeScale = mods.timeScale;
 }
 
 function tryBlock(f, heldBlock) {
@@ -509,6 +532,7 @@ function tryBlock(f, heldBlock) {
     f.shield.visible = false;
     return;
   }
+  heldBlock = heldBlock && canBlock(f);
   f.blocking = heldBlock;
   f.shield.visible = heldBlock;
   if (heldBlock) f.state = 'block';
@@ -519,14 +543,19 @@ function attackHits(atk, def, spec) {
   return atk.root.position.distanceTo(def.root.position) <= spec.range;
 }
 
-function applyHit(atk, def, spec) {
+function applyHit(atk, def, spec, kind) {
   if (def.state === 'ko' || def.invuln > 0) return;
   const blocked = def.blocking;
-  const dmg = blocked
-    ? Math.max(1, Math.round(spec.damage * (1 - COMBAT.blockReduction)))
-    : spec.damage;
+  const mul = (atk.atkMods && atk.atkMods.damageMul) || 1;
+  const blockMul = blocked ? (1 - COMBAT.blockReduction * blockReductionMul(def)) : 1;
+  const dmg = Math.max(1, Math.round(spec.damage * mul * blockMul));
   def.health = Math.max(0, def.health - dmg);
-  const fwd = toward(atk, def);
+  const hit = pickHit(atk, def, kind || 'punch', toward);
+  applyPartHit(def, hit.partId, dmg, hit.point, hit.dir, scene, { blocked });
+  hitLight.color.setHex(blocked ? 0x88ccff : 0xffe08a);
+  hitLight.intensity = 9;
+  hitLight.position.copy(hit.point);
+  const fwd = hit.dir;
   const kb = COMBAT.knockback * (blocked ? 0.35 : 1);
   def.root.position.x += fwd.x * kb;
   def.root.position.z += fwd.z * kb;
@@ -615,12 +644,7 @@ function stepFighter(f, other, inp, dt) {
     const dur = f.actions[f.state] ? f.actions[f.state].getClip().duration : 0.7;
     if (!f.hitThisAttack && f.stateT >= spec.active[0] && f.stateT <= spec.active[1] && attackHits(f, other, spec)) {
       f.hitThisAttack = true;
-      const midX = f.root.position.x * 0.4 + other.root.position.x * 0.6;
-      const midZ = f.root.position.z * 0.4 + other.root.position.z * 0.6;
-      hitLight.color.setHex(other.blocking ? 0x88ccff : 0xffe08a);
-      hitLight.intensity = 9;
-      hitLight.position.set(midX, 1.15, midZ);
-      applyHit(f, other, spec);
+      applyHit(f, other, spec, f.state);
     }
     if (f.stateT > dur + 0.05 && f.state !== 'ko') {
       f.state = 'idle';
@@ -634,7 +658,7 @@ function stepFighter(f, other, inp, dt) {
   else if (inp.kick) tryAttack(f, 'kick');
   if (f.state === 'punch' || f.state === 'kick' || f.state === 'hit' || f.state === 'ko') return;
 
-  const speed = f.blocking ? COMBAT.blockMoveSpeed : COMBAT.moveSpeed;
+  const speed = (f.blocking ? COMBAT.blockMoveSpeed : COMBAT.moveSpeed) * moveSpeedMul(f);
   const moving = Math.abs(inp.sidestep) + Math.abs(inp.inout) > 0.12;
   if (moving) {
     moveFighter(f, other, inp.sidestep, inp.inout, dt, speed);
@@ -650,6 +674,8 @@ function syncHud() {
   if (!p1 || !p2) return;
   document.getElementById('hp1').style.transform = `scaleX(${Math.max(0, p1.health / COMBAT.maxHealth)})`;
   document.getElementById('hp2').style.transform = `scaleX(${Math.max(0, p2.health / COMBAT.maxHealth)})`;
+  syncPartHud(p1, document.getElementById('parts1'));
+  syncPartHud(p2, document.getElementById('parts2'));
 }
 
 const camT = new THREE.Vector3();
@@ -681,14 +707,20 @@ function resetMatch() {
     f.shield.visible = false;
     f.root.position.set(f.startX, 0, 0);
     f.root.scale.set(1, 1, 1);
+    f.atkMods = null;
     setAnim(f, 'idle', 0.01);
+    resetFighterDamage(f, scene);
   }
+  clearAllDebris(scene);
   document.getElementById('overlay').classList.add('hidden');
   match.over = false;
   match.winner = null;
   match.phase = 'intro';
   match.introT = 0;
-  document.getElementById('banner').classList.add('show');
+  match.camLock = false;
+  const banner = document.getElementById('banner');
+  banner.style.opacity = '';
+  banner.classList.add('show');
   faceEachOther(p1, p2);
   syncHud();
 }
@@ -712,12 +744,13 @@ function tick() {
   faceEachOther(p1, p2);
   p1.mixer.update(dt);
   p2.mixer.update(dt);
-  p1.model.position.y = p1.baseY;
-  p2.model.position.y = p2.baseY;
   p1.root.position.y = 0;
   p2.root.position.y = 0;
+  applyMalfunctions(p1, dt);
+  applyMalfunctions(p2, dt);
+  stepDamage(scene, dt);
 
-  updateCamera(dt);
+  if (!match.camLock) updateCamera(dt);
   hitLight.intensity = Math.max(0, hitLight.intensity - dt * 28);
   syncHud();
   renderer.render(scene, camera);
@@ -739,6 +772,25 @@ function onLoad(gltf) {
     applyGfx(gfxSelect.value);
     try { localStorage.setItem('rf_gfx', gfxKey); } catch (_) {}
   });
+  window.__rfPreviewDamage = () => {
+    match.phase = 'fight';
+    match.introT = 99;
+    match.camLock = true;
+    const banner = document.getElementById('banner');
+    banner.classList.remove('show');
+    banner.style.opacity = '0';
+    const towardCam = new THREE.Vector3(0.15, 0.05, 1);
+    const info = previewDamage(p2, scene, towardCam);
+    const look = new THREE.Vector3(p2.root.position.x - 0.15, 0.75, p2.root.position.z + 0.7);
+    camera.position.set(p2.root.position.x - 0.4, 2.55, p2.root.position.z + 5.1);
+    camera.lookAt(look);
+    window.__rfDebug = info;
+    applyMalfunctions(p1, 0);
+    applyMalfunctions(p2, 0);
+    stepDamage(scene, 0);
+    syncHud();
+    renderer.render(scene, camera);
+  };
   renderer.setAnimationLoop(tick);
 }
 

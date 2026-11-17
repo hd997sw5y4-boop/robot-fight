@@ -14,6 +14,19 @@ html, body { margin: 0; height: 100%; background: #07080c; color: #eef2f6; font-
 }
 .fighter-hud { display: flex; flex-direction: column; gap: 6px; }
 .fighter-hud.right { text-align: right; }
+.parts { display: flex; gap: 4px; margin-top: 1px; }
+.fighter-hud.right .parts { justify-content: flex-end; }
+.parts i {
+  display: block;
+  width: 11px;
+  height: 7px;
+  border-radius: 1px;
+  background: #49c56c;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.45);
+}
+.parts i[data-part="head"] { width: 8px; border-radius: 4px; }
+.parts i.hurt { background: #e8c14a; }
+.parts i.wreck { background: #2a2d33; box-shadow: 0 0 0 1px #6b6f76; }
 .name { font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; opacity: 0.9; }
 .bar {
   height: 16px;

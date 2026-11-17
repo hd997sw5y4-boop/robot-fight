@@ -1,9 +1,8 @@
-// Fighter model + animation map. Swap `url` and `animations` later for a
-// Mixamo-rigged Sketchfab "Robot character" (assetfactory, Free Standard).
+// Fighter model + animation map. Swap `url`, `animations`, and DAMAGE.bind
+// later for a Mixamo-rigged Sketchfab "Robot character" (assetfactory, Free Standard).
 export const MODEL = {
   url: './models/RobotExpressive.glb',
   source: 'RobotExpressive by Tomás Laulhé, CC0 1.0 (three.js examples)',
-  // Fitted to ~1.85 units tall on load; this is a fallback scale.
   scale: 1,
   targetHeight: 2.45,
   footOffset: 0,
@@ -45,4 +44,51 @@ export const COMBAT = {
 export const GFX_PRESETS = {
   low: { pixelCap: 1, shadows: false, shadowSize: 512, exposure: 1.05 },
   high: { pixelCap: 2, shadows: true, shadowSize: 2048, exposure: 1.15 },
+};
+
+// Per-part wrecking. Names in `bind` are normalized (lowercase, no "mixamorig",
+// dots, colons, or underscores) so the same map covers RobotExpressive now and
+// a Mixamo-rigged character later. Torso can be crushed but stays attached.
+export const DAMAGE = {
+  parts: {
+    head: { hp: 32, label: 'Head', detach: true },
+    torso: { hp: 55, label: 'Torso', detach: false },
+    armL: { hp: 28, label: 'Left arm', detach: true },
+    armR: { hp: 28, label: 'Right arm', detach: true },
+    legL: { hp: 28, label: 'Left leg', detach: true },
+    legR: { hp: 28, label: 'Right leg', detach: true },
+  },
+  order: ['head', 'torso', 'armL', 'armR', 'legL', 'legR'],
+  bind: {
+    head: ['head', 'neck', 'headend', 'headtopend'],
+    torso: ['torso', 'body', 'hips', 'abdomen', 'spine', 'spine1', 'spine2', 'chest', 'pelvis'],
+    armL: [
+      'shoulderl', 'upperarml', 'lowerarml', 'arml', 'handl', 'leftshoulder', 'leftarm',
+      'leftforearm', 'lefthand', 'palm1l', 'palm2l', 'palm3l', 'thumbl', 'thumb2l',
+      'indexl', 'index2l', 'middle1l', 'middle2l', 'ring1l', 'ring2l',
+      'leftindex1', 'leftindex2', 'leftindex3', 'leftmiddle1', 'leftmiddle2', 'leftmiddle3',
+      'leftring1', 'leftring2', 'leftring3', 'leftpinky1', 'leftpinky2', 'leftpinky3',
+      'leftthumb1', 'leftthumb2', 'leftthumb3', 'lefthandindex', 'lefthandthumb',
+    ],
+    armR: [
+      'shoulderr', 'upperarmr', 'lowerarmr', 'armr', 'handr', 'rightshoulder', 'rightarm',
+      'rightforearm', 'righthand', 'palm1r', 'palm2r', 'palm3r', 'thumbr', 'thumb2r',
+      'indexr', 'index2r', 'middle1r', 'middle2r', 'ring1r', 'ring2r',
+      'rightindex1', 'rightindex2', 'rightindex3', 'rightmiddle1', 'rightmiddle2', 'rightmiddle3',
+      'rightring1', 'rightring2', 'rightring3', 'rightpinky1', 'rightpinky2', 'rightpinky3',
+      'rightthumb1', 'rightthumb2', 'rightthumb3', 'righthandindex', 'righthandthumb',
+    ],
+    legL: [
+      'upperlegl', 'lowerlegl', 'legl', 'footl', 'leftupleg', 'leftleg', 'leftfoot',
+      'lefttoebase', 'lefttoe', 'toel',
+    ],
+    legR: [
+      'upperlegr', 'lowerlegr', 'legr', 'footr', 'rightupleg', 'rightleg', 'rightfoot',
+      'righttoebase', 'righttoe', 'toer',
+    ],
+  },
+  skip: ['rootnode', 'robotarmature', 'bone', 'poletargetl', 'poletargetr', 'poletargetlend', 'poletargetrend'],
+  dent: { radius: 0.32, depth: 0.085, maxDepth: 0.22, colorDarken: 0.7 },
+  heavySmoke: 0.5,
+  punchArm: 'armR',
 };
