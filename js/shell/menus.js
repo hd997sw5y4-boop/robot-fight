@@ -89,10 +89,11 @@
       <ul>
         <li><b>Robot fighter model:</b> “Robot character” by assetfactory on Sketchfab, Sketchfab Free Standard license (recolored in-game).</li>
         <li><b>Animations:</b> Mixamo (Adobe) — fighting idle, walks, strafes, punches, kicks, blocks, hits, knockouts, get-ups, dodges, flips, and victory/taunt clips.</li>
-        <li><b>Arena metal textures:</b> Metal009 from ambientCG, CC0 1.0.</li>
+        <li><b>Arena textures:</b> Metal009, Metal008 (scratched metal), and Rust004 from ambientCG, CC0 1.0 — mixed into the chrome mat.</li>
+        <li><b>HDRI environment:</b> Moonless Golf 2K from Poly Haven, CC0 1.0 (stand-in sky; swap via Settings / ARENA.hdriUrl).</li>
         <li><b>3D engine:</b> three.js r187, MIT license.</li>
         <li><b>Physics:</b> cannon-es, MIT license.</li>
-        <li><b>Sound effects:</b> CC0 and royalty-free clips (no credit required). Impacts, footsteps, servos, UI, and bells from Kenney (Impact, Sci-fi, and Interface packs); electrical sparks and buzz from Brian MacIntosh / BMacZero; crowd ambience and reactions from Mixkit. Sources and licenses are listed in CREDITS/LICENSES.md.</li>
+        <li><b>Sound effects:</b> CC0 and royalty-free recordings (no credit required). Metal impacts, tools, slams, and machine/spring hydraulics from rubberduck and Ogrebane on OpenGameArt; metal interactions from Iwan “qubodup” Gabovitch; metal footsteps on concrete from Thimras; mech stomp from hc / qubodup; additional metal hits from Brian MacIntosh; electrical sparks and buzz from Brian MacIntosh / BMacZero; fight bells and UI from Kenney; crowd ambience and reactions from Mixkit; arena hum looped from yd’s Factory ambiance (OpenGameArt, CC0). Light arena reverb uses an original generated impulse. Full sources are in CREDITS/LICENSES.md.</li>
         <li><b>Settings panel look and volume taper:</b> adapted from Window Workshop Games UI.</li>
       </ul>
       <p class="rfs-note">CPU fighters, names, and paint schemes are original to this game. Full license notes are in README.md, models/CREDITS.md, and CREDITS/LICENSES.md.</p>

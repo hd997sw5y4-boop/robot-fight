@@ -17,6 +17,7 @@ const KEYS = {
   fps: 'rf_fps',
   fov: 'rf_fov',
   light: 'rf_light',
+  hdri: 'rf_hdri',
 };
 
 const defaults = {
@@ -31,6 +32,7 @@ const defaults = {
   fps: false,
   fov: 50,
   light: 1,
+  hdri: true,
 };
 
 function read() {
@@ -58,6 +60,8 @@ function read() {
     if (fov != null && isFinite(+fov)) s.fov = Math.max(45, Math.min(90, +fov));
     const light = localStorage.getItem(KEYS.light);
     if (light != null && isFinite(+light)) s.light = Math.max(0.5, Math.min(2, +light));
+    const hdri = localStorage.getItem(KEYS.hdri);
+    if (hdri != null) s.hdri = hdri === '1';
   } catch (_) {}
   return s;
 }
@@ -75,6 +79,7 @@ function write(s) {
     localStorage.setItem(KEYS.fps, s.fps ? '1' : '0');
     localStorage.setItem(KEYS.fov, String(s.fov));
     localStorage.setItem(KEYS.light, String(s.light));
+    localStorage.setItem(KEYS.hdri, s.hdri ? '1' : '0');
   } catch (_) {}
 }
 
@@ -124,6 +129,8 @@ function paint() {
   const lightV = $('setLightV');
   if (light && document.activeElement !== light) light.value = String(settings.light);
   if (lightV) lightV.textContent = Math.round(settings.light * 100) + '%';
+  const hdriEl = $('setHdri');
+  if (hdriEl) hdriEl.checked = !!settings.hdri;
   applyChrome();
 }
 
@@ -248,6 +255,11 @@ export function initSettings(nextHooks) {
   bindSlider('setCrowd', 'crowd');
   bindFov();
   bindLight();
+  document.getElementById('setHdri')?.addEventListener('change', (e) => {
+    settings.hdri = e.target.checked;
+    persist();
+    if (hooks.applyHdri) hooks.applyHdri(settings.hdri);
+  });
 }
 
 function clampFov(v) {

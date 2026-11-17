@@ -66,6 +66,10 @@ export const ARENA = {
   cage: false,
   // Two-bone stance IK is off: the solver was twisting legs and lifting feet off the mat.
   stanceIK: false,
+  // HDRI environment + backdrop. Swap the file here when a final space/sky pick lands.
+  // Night-sky stand-in: Poly Haven moonless_golf 2K (CC0).
+  hdri: true,
+  hdriUrl: './hdris/moonless_golf_2k.hdr',
 };
 
 export const COMBAT = {

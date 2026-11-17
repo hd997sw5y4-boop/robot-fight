@@ -1,7 +1,119 @@
 'use strict';
-/* Cage, mat logo, lights, and crowd silhouettes aimed at the approved concept art. */
+/* Cage, chrome mat, lights, and (optional) visible fence aimed at the approved concept art. */
 import * as THREE from 'three';
 import { ARENA } from './config.js';
+
+
+const chromeTexLoader = new THREE.TextureLoader();
+let chromeMaps = null;
+let chromeWaiters = [];
+
+function loadImage(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+function mixChromeMaps(chromeColor, chromeRough, chromeMetal, rustColor, rustRough) {
+  const size = 1024;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  const scratch = document.createElement('canvas');
+  scratch.width = scratch.height = size;
+  const sg = scratch.getContext('2d', { willReadFrequently: true });
+  const blit = (img) => { sg.clearRect(0, 0, size, size); sg.drawImage(img, 0, 0, size, size); return sg.getImageData(0, 0, size, size).data; };
+  const col = blit(chromeColor);
+  const rgh = blit(chromeRough);
+  const met = blit(chromeMetal);
+  const rst = blit(rustColor);
+  const rrg = blit(rustRough);
+  const albedo = g.createImageData(size, size);
+  const rough = g.createImageData(size, size);
+  const metal = g.createImageData(size, size);
+  for (let i = 0; i < col.length; i += 4) {
+    // Rust mask: reddish patches only, contrast-crushed so most of the mat stays chrome.
+    const rust = Math.max(0, (rst[i] * 1.15 - rst[i + 1] * 0.45 - rst[i + 2] * 0.2) / 255);
+    const scuff = Math.max(0, (rgh[i] / 255 - 0.42) * 1.6);
+    const stain = Math.min(1, rust * rust * 3.2 + scuff * 0.55);
+    const cr = col[i], cg = col[i + 1], cb = col[i + 2];
+    // Brighten the base toward chrome silver, then overlay rust and darker scuffs.
+    const sr = Math.min(255, cr * 1.35 + 18);
+    const sgv = Math.min(255, cg * 1.32 + 20);
+    const sb = Math.min(255, cb * 1.28 + 24);
+    albedo.data[i] = sr * (1 - stain) + rst[i] * stain;
+    albedo.data[i + 1] = sgv * (1 - stain) + rst[i + 1] * stain;
+    albedo.data[i + 2] = sb * (1 - stain) + rst[i + 2] * stain;
+    albedo.data[i + 3] = 255;
+    const chromeR = 0.08 + (rgh[i] / 255) * 0.28;
+    const rustR = 0.42 + (rrg[i] / 255) * 0.5;
+    const rv = Math.min(1, chromeR * (1 - stain) + rustR * stain);
+    const r8 = Math.round(rv * 255);
+    rough.data[i] = rough.data[i + 1] = rough.data[i + 2] = r8;
+    rough.data[i + 3] = 255;
+    const chromeM = 0.88 + (met[i] / 255) * 0.12;
+    const rustM = 0.22 + (met[i] / 255) * 0.15;
+    const m8 = Math.round(Math.min(1, chromeM * (1 - stain) + rustM * stain) * 255);
+    metal.data[i] = metal.data[i + 1] = metal.data[i + 2] = m8;
+    metal.data[i + 3] = 255;
+  }
+  const toTex = (data, srgb) => {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = size;
+    cv.getContext('2d').putImageData(data, 0, 0);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.anisotropy = 8;
+    tex.needsUpdate = true;
+    if (srgb) tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  };
+  return { map: toTex(albedo, true), roughnessMap: toTex(rough, false), metalnessMap: toTex(metal, false) };
+}
+
+function requestChromeMaps() {
+  if (chromeMaps) return Promise.resolve(chromeMaps);
+  return Promise.all([
+    loadImage('./textures/chrome_color.jpg'),
+    loadImage('./textures/chrome_rough.jpg'),
+    loadImage('./textures/chrome_metal.jpg'),
+    loadImage('./textures/rust_color.jpg'),
+    loadImage('./textures/rust_rough.jpg'),
+  ]).then(([c, r, m, rc, rr]) => {
+    chromeMaps = mixChromeMaps(c, r, m, rc, rr);
+    const n = chromeTexLoader.load('./textures/chrome_normal.jpg');
+    n.wrapS = n.wrapT = THREE.RepeatWrapping;
+    n.colorSpace = THREE.NoColorSpace;
+    chromeMaps.normalMap = n;
+    for (const fn of chromeWaiters) fn(chromeMaps);
+    chromeWaiters = [];
+    return chromeMaps;
+  }).catch((err) => { console.warn('Chrome mat textures failed', err); return null; });
+}
+requestChromeMaps();
+
+function applyChromeMaps(mat, maps, repeat) {
+  if (!mat || !maps) return;
+  const wrap = (tex) => {
+    const t = tex.clone();
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(repeat, repeat);
+    t.needsUpdate = true;
+    return t;
+  };
+  mat.map = wrap(maps.map);
+  mat.roughnessMap = wrap(maps.roughnessMap);
+  mat.metalnessMap = wrap(maps.metalnessMap);
+  if (maps.normalMap) {
+    mat.normalMap = wrap(maps.normalMap);
+    mat.normalScale = new THREE.Vector2(0.55, 0.55);
+  }
+  mat.needsUpdate = true;
+}
 
 function chainlinkTexture() {
   const c = document.createElement('canvas');
@@ -92,16 +204,18 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
   const a = ARENA.apothem;
   const r = a / Math.cos(Math.PI / 8);
 
-  const floorMat = new THREE.MeshStandardMaterial({
-    color: 0x16181d,
-    metalness: 0.12,
-    roughness: 0.82,
-    map: tiled(metalColor, 5, 5),
-    roughnessMap: tiled(metalRough, 5, 5),
-    metalnessMap: tiled(metalMetal, 5, 5),
+  const floorMat = new THREE.MeshPhysicalMaterial({
+    color: 0xd8dde3,
+    metalness: 0.94,
+    roughness: 0.18,
+    envMapIntensity: 1.35,
+    clearcoat: 0.28,
+    clearcoatRoughness: 0.22,
   });
-  floorMat.map.colorSpace = THREE.SRGBColorSpace;
   const floor = new THREE.Mesh(new THREE.CylinderGeometry(r, r, ARENA.floorThickness, 8), floorMat);
+  const paintChrome = (maps) => applyChromeMaps(floorMat, maps, 4.2);
+  if (chromeMaps) paintChrome(chromeMaps);
+  else chromeWaiters.push(paintChrome);
   floor.position.y = -ARENA.floorThickness / 2;
   floor.rotation.y = Math.PI / 8;
   floor.receiveShadow = true;
@@ -109,13 +223,14 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
 
   const logo = new THREE.Mesh(
     new THREE.CircleGeometry(2.35, 64),
-    new THREE.MeshStandardMaterial({
+    new THREE.MeshPhysicalMaterial({
       map: logoTexture(),
       transparent: true,
-      metalness: 0.05,
-      roughness: 0.45,
+      metalness: 0.85,
+      roughness: 0.28,
+      envMapIntensity: 1.1,
       emissive: 0xffffff,
-      emissiveIntensity: 0.08,
+      emissiveIntensity: 0.04,
       depthWrite: false,
     }),
   );
@@ -139,7 +254,7 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
 
   const edge = new THREE.Mesh(
     new THREE.CylinderGeometry(r + 0.07, r + 0.07, 0.14, 8),
-    new THREE.MeshStandardMaterial({ color: 0x1a1c20, metalness: 0.55, roughness: 0.4 }),
+    new THREE.MeshPhysicalMaterial({ color: 0xb7bec6, metalness: 0.92, roughness: 0.22, envMapIntensity: 1.2 }),
   );
   edge.position.y = 0.02;
   edge.rotation.y = Math.PI / 8;
@@ -147,19 +262,13 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
   edge.castShadow = true;
   group.add(edge);
 
-  const apron = new THREE.Mesh(
-    new THREE.CylinderGeometry(r + 10, r + 10, 0.18, 16),
-    new THREE.MeshStandardMaterial({ color: 0x0a0b0e, metalness: 0.1, roughness: 0.95 }),
-  );
-  apron.position.y = -0.24;
-  apron.receiveShadow = true;
-  group.add(apron);
-
   const wall = new THREE.Mesh(
     new THREE.CylinderGeometry(22, 22, 14, 32, 1, true),
     new THREE.MeshStandardMaterial({ color: 0x07080b, roughness: 1, metalness: 0, side: THREE.BackSide }),
   );
   wall.position.y = 5.5;
+  wall.name = 'arenaVoidWall';
+  wall.userData.voidWall = true;
   group.add(wall);
 
   const postMat = new THREE.MeshStandardMaterial({
@@ -268,42 +377,9 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
     fixturePos.push(new THREE.Vector3(fx, fy, fz));
   }
 
-  addCrowd(group, r);
   scene.add(group);
   cageFadeList = ARENA.cage ? cageFade : [];
   return { group, fixturePos, fenceTop: FENCE_TOP };
-}
-
-function addCrowd(group, cageR) {
-  const geo = new THREE.CapsuleGeometry(0.16, 0.55, 3, 6);
-  const headGeo = new THREE.SphereGeometry(0.14, 6, 5);
-  const mat = new THREE.MeshLambertMaterial({ color: 0x121014 });
-  const n = 160;
-  const body = new THREE.InstancedMesh(geo, mat, n);
-  const heads = new THREE.InstancedMesh(headGeo, mat, n);
-  body.instanceMatrix.setUsage(THREE.StaticDrawUsage);
-  heads.instanceMatrix.setUsage(THREE.StaticDrawUsage);
-  const dummy = new THREE.Object3D();
-  let i = 0;
-  for (; i < n; i++) {
-    const ring = 0.55 + (i % 5) * 0.55;
-    const ang = (i * 2.39996) + ring * 0.4;
-    const rad = cageR + 1.35 + ring;
-    const x = Math.cos(ang) * rad;
-    const z = Math.sin(ang) * rad;
-    const y = 0.55 + (i % 7) * 0.04;
-    dummy.position.set(x, y, z);
-    dummy.rotation.set(0, -ang + Math.PI, (Math.random() - 0.5) * 0.08);
-    dummy.scale.setScalar(0.85 + (i % 5) * 0.08);
-    dummy.updateMatrix();
-    body.setMatrixAt(i, dummy.matrix);
-    dummy.position.y += 0.48;
-    dummy.updateMatrix();
-    heads.setMatrixAt(i, dummy.matrix);
-  }
-  body.frustumCulled = false;
-  heads.frustumCulled = false;
-  group.add(body, heads);
 }
 
 export function addArenaLights(scene, fixturePos) {

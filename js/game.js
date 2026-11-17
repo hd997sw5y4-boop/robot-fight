@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { HDRLoader as RGBELoader } from 'three/addons/loaders/HDRLoader.js';
 import { MODEL, ARENA, COMBAT, GFX_PRESETS, LOOP_CLIPS } from './config.js';
 import { CLIP_SPEEDS } from './clip-speeds.js';
 import { getSettings, isSettingsOpen, initSettings, updateFps, setFov } from './settings.js';
@@ -113,8 +114,68 @@ hitLight.userData.baseIntensity = 0;
 scene.add(hitLight);
 
 const pmrem = new THREE.PMREMGenerator(renderer);
-scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.06).texture;
+const roomEnv = pmrem.fromScene(new RoomEnvironment(), 0.06).texture;
+const darkBg = new THREE.Color(0x080a10);
+scene.environment = roomEnv;
 scene.environmentIntensity = 0.38;
+
+let hdriEnv = null;
+let hdriBg = null;
+let hdriLoading = null;
+let hdriEnabled = false;
+
+function applyHdri(on) {
+  hdriEnabled = !!on;
+  if (hdriEnabled) {
+    if (!hdriEnv) {
+      loadHdri().then((ok) => { if (ok && hdriEnabled) applyHdri(true); });
+      return;
+    }
+    scene.environment = hdriEnv;
+    scene.environmentIntensity = 1.05;
+    scene.background = hdriBg || hdriEnv;
+    scene.backgroundBlurriness = 0.04;
+    scene.backgroundIntensity = 0.7;
+    scene.fog = null;
+    scene.traverse((o) => { if (o.userData && o.userData.voidWall) o.visible = false; });
+  } else {
+    scene.environment = roomEnv;
+    scene.environmentIntensity = 0.38;
+    scene.background = darkBg;
+    scene.backgroundBlurriness = 0;
+    scene.backgroundIntensity = 1;
+    scene.fog = new THREE.Fog(0x080a10, 18, 42);
+    scene.traverse((o) => { if (o.userData && o.userData.voidWall) o.visible = true; });
+  }
+}
+
+function loadHdri() {
+  if (hdriEnv) return Promise.resolve(true);
+  if (hdriLoading) return hdriLoading;
+  hdriLoading = new Promise((resolve) => {
+    new RGBELoader().load(
+      ARENA.hdriUrl || './hdris/moonless_golf_2k.hdr',
+      (tex) => {
+        tex.mapping = THREE.EquirectangularReflectionMapping;
+        hdriBg = tex;
+        hdriEnv = pmrem.fromEquirectangular(tex).texture;
+        hdriLoading = null;
+        resolve(true);
+      },
+      undefined,
+      (err) => {
+        console.warn('HDRI failed to load', err);
+        hdriLoading = null;
+        resolve(false);
+      },
+    );
+  });
+  return hdriLoading;
+}
+
+loadHdri().then((ok) => {
+  if (ok && (getSettings().hdri || ARENA.hdri)) applyHdri(true);
+});
 
 let lightMul = Math.max(0.5, Math.min(2, getSettings().light || 1));
 const litLights = [];
@@ -201,9 +262,11 @@ initSettings({
   applyGfx,
   applyFov,
   applyLight,
+  applyHdri,
   onChange(s) {
     applyFov(s.fov);
     applyLight(s.light);
+    applyHdri(!!s.hdri);
     if (s.round === 0) {
       match.roundLeft = null;
       paintRound();
@@ -1782,6 +1845,8 @@ function onLoad(gltf) {
     syncHud();
     renderer.render(scene, camera);
   };
+  window.__rfSetHdri = (on) => applyHdri(!!on);
+  window.__rfHdriReady = () => !!hdriEnv;
   window.__rfSkipToFight = () => {
     startFightFromShell({ skipIntro: true });
     const banner = document.getElementById('banner');

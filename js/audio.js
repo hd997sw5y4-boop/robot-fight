@@ -1,7 +1,6 @@
 'use strict';
-/* Sample playback + master / SFX / crowd buses.
-   Squared volume taper is from WW3D addons/master-volume.js.
-   Real clips replace the temporary oscillator/noise bus when loaded. */
+/* Sample playback + master / SFX / crowd buses, light arena convolver.
+   Squared volume taper is from WW3D addons/master-volume.js. */
 
 const BASE = './sounds/';
 const BANK = {
@@ -9,20 +8,21 @@ const BANK = {
   click: ['ui_click.ogg', 'ui_click_2.ogg'],
   confirm: ['ui_confirm.ogg'],
   close: ['ui_close.ogg'],
-  servo: ['servo_00.ogg', 'servo_01.ogg', 'servo_02.ogg', 'servo_03.ogg', 'servo_04.ogg'],
-  metalL: ['hit_metal_l_000.ogg', 'hit_metal_l_001.ogg', 'hit_metal_l_003.ogg'],
-  metalM: ['hit_metal_m_000.ogg', 'hit_metal_m_002.ogg', 'hit_metal_m_004.ogg'],
-  metalH: ['hit_metal_h_000.ogg', 'hit_metal_h_001.ogg', 'hit_metal_h_003.ogg'],
-  punchM: ['hit_punch_m_000.ogg', 'hit_punch_m_002.ogg', 'hit_punch_m_004.ogg'],
-  punchH: ['hit_punch_h_000.ogg', 'hit_punch_h_002.ogg', 'hit_punch_h_004.ogg'],
-  block: ['block_000.ogg', 'block_002.ogg', 'block_004.ogg'],
-  field: ['field_000.ogg', 'field_002.ogg', 'field_004.ogg'],
-  step: ['step_000.ogg', 'step_001.ogg', 'step_002.ogg', 'step_003.ogg', 'step_004.ogg'],
-  fall: ['fall_000.ogg', 'fall_002.ogg', 'fall_004.ogg'],
-  tear: ['tear_000.ogg', 'tear_002.ogg', 'tear_004.ogg', 'tear_mine_000.ogg', 'tear_mine_003.ogg'],
-  bounce: ['bounce_000.ogg', 'bounce_002.ogg', 'bounce_004.ogg'],
-  spark: ['spark_0.ogg'],
-  cage: ['cage_000.ogg', 'cage_002.ogg', 'cage_tin_001.ogg', 'cage_tin_003.ogg'],
+  servo: ['servo_0.ogg', 'servo_1.ogg', 'servo_2.ogg', 'servo_3.ogg', 'servo_4.ogg', 'servo_5.ogg'],
+  hydro: ['hydro_0.ogg', 'hydro_1.ogg', 'hydro_2.ogg', 'hydro_3.ogg'],
+  metalL: ['metal_l_0.ogg', 'metal_l_1.ogg', 'metal_l_2.ogg', 'metal_l_3.ogg', 'metal_l_4.ogg', 'metal_l_5.ogg'],
+  metalM: ['metal_m_0.ogg', 'metal_m_1.ogg', 'metal_m_2.ogg', 'metal_m_3.ogg', 'metal_m_4.ogg', 'metal_m_5.ogg'],
+  metalH: ['metal_h_0.ogg', 'metal_h_1.ogg', 'metal_h_2.ogg', 'metal_h_3.ogg', 'metal_h_4.ogg', 'metal_h_5.ogg', 'metal_h_6.ogg'],
+  punchM: ['punch_0.ogg', 'punch_1.ogg', 'punch_2.ogg'],
+  punchH: ['punch_2.ogg', 'punch_3.ogg', 'punch_4.ogg'],
+  block: ['block_0.ogg', 'block_1.ogg', 'block_2.ogg', 'block_3.ogg'],
+  step: ['step_01.ogg', 'step_03.ogg', 'step_05.ogg', 'step_07.ogg', 'step_09.ogg', 'step_11.ogg', 'step_14.ogg', 'step_17.ogg', 'step_20.ogg', 'step_23.ogg'],
+  fall: ['crash_0.ogg', 'crash_2.ogg', 'crash_4.ogg'],
+  tear: ['tear_0.ogg', 'tear_1.ogg', 'tear_2.ogg', 'tear_3.ogg', 'tear_4.ogg'],
+  bounce: ['bounce_0.ogg', 'bounce_1.ogg', 'bounce_2.ogg', 'bounce_3.ogg', 'bounce_4.ogg'],
+  spark: ['spark_0.ogg', 'spark_1.ogg', 'spark_2.ogg'],
+  cage: ['cage_0.ogg', 'cage_1.ogg', 'cage_2.ogg'],
+  crash: ['crash_0.ogg', 'crash_1.ogg', 'crash_2.ogg', 'crash_3.ogg', 'crash_4.ogg'],
   bell: ['bell_000.ogg', 'bell_001.ogg', 'bell_002.ogg'],
   crowdHit: ['crowd_short.ogg', 'crowd_stadium_short.ogg'],
   crowdBig: ['crowd_whistle.ogg', 'crowd_stadium.ogg'],
@@ -32,7 +32,11 @@ const BANK = {
 let ctx = null;
 let master = null;
 let sfx = null;
+let sfxDry = null;
+let sfxWet = null;
+let conv = null;
 let crowd = null;
+let humGain = null;
 let masterLevel = 1;
 let sfxLevel = 1;
 let crowdLevel = 0.7;
@@ -41,15 +45,25 @@ let loaded = false;
 let loading = null;
 let crowdSrc = null;
 let crowdGate = null;
+let humSrc = null;
 let buzzSrc = null;
 let buzzGain = null;
 let buzzLevel = 0;
 const lastAt = new Map();
+const lastPick = new Map();
 
 const clamp = (x) => Math.max(0, Math.min(1, Math.round(x * 100) / 100));
 const taper = (v) => v * v;
-const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const jitter = (amt) => 1 - amt + Math.random() * amt * 2;
+
+function pick(arr, key) {
+  if (!arr || !arr.length) return null;
+  const last = key != null ? lastPick.get(key) : null;
+  const opts = (arr.length > 1 && last != null) ? arr.filter((x) => x !== last) : arr;
+  const v = opts[Math.floor(Math.random() * opts.length)];
+  if (key != null) lastPick.set(key, v);
+  return v;
+}
 
 function applyGains() {
   if (!master || !sfx || !crowd) return;
@@ -66,7 +80,7 @@ async function loadAll() {
   if (loaded) return;
   if (loading) return loading;
   if (!ctx) return;
-  const files = new Set(['crowd_loop.ogg', 'buzz_loop.ogg']);
+  const files = new Set(['crowd_loop.ogg', 'buzz_loop.ogg', 'arena_hum.ogg', 'ir_hall.ogg']);
   for (const list of Object.values(BANK)) for (const f of list) files.add(f);
   loading = Promise.all([...files].map(async (name) => {
     try {
@@ -76,8 +90,21 @@ async function loadAll() {
       const buf = await ctx.decodeAudioData(raw.slice(0));
       buffers.set(name, buf);
     } catch (_) {}
-  })).then(() => { loaded = true; loading = null; ensureCrowd(); applyBuzz(); });
+  })).then(() => {
+    loaded = true;
+    loading = null;
+    hookConvolver();
+    ensureCrowd();
+    ensureHum();
+    applyBuzz();
+  });
   return loading;
+}
+
+function hookConvolver() {
+  if (!ctx || !conv) return;
+  const ir = buffers.get('ir_hall.ogg');
+  if (ir) conv.buffer = ir;
 }
 
 function makeCtx() {
@@ -86,10 +113,24 @@ function makeCtx() {
   ctx = new ACX();
   master = ctx.createGain();
   sfx = ctx.createGain();
+  sfxDry = ctx.createGain();
+  sfxWet = ctx.createGain();
+  conv = ctx.createConvolver();
+  conv.normalize = true;
   crowd = ctx.createGain();
-  sfx.connect(master);
+  humGain = ctx.createGain();
+  sfxDry.gain.value = 0.86;
+  sfxWet.gain.value = 0.18;
+  humGain.gain.value = 0.22;
+  sfx.connect(sfxDry);
+  sfxDry.connect(master);
+  sfx.connect(conv);
+  conv.connect(sfxWet);
+  sfxWet.connect(master);
+  humGain.connect(crowd);
   crowd.connect(master);
   master.connect(ctx.destination);
+  hookConvolver();
   applyGains();
 }
 
@@ -99,6 +140,7 @@ export function unlockAudio() {
   if (ctx.state === 'suspended') ctx.resume().catch(() => {});
   loadAll();
   ensureCrowd();
+  ensureHum();
 }
 
 export function setVolumes(masterV, sfxV, crowdV) {
@@ -106,8 +148,13 @@ export function setVolumes(masterV, sfxV, crowdV) {
   sfxLevel = clamp(sfxV);
   if (crowdV != null && isFinite(+crowdV)) crowdLevel = clamp(crowdV);
   applyGains();
-  if (crowdLevel <= 0) stopCrowd();
-  else ensureCrowd();
+  if (crowdLevel <= 0) {
+    stopCrowd();
+    stopHum();
+  } else {
+    ensureCrowd();
+    ensureHum();
+  }
 }
 
 function ready() {
@@ -128,7 +175,8 @@ function playBuf(buf, opts = {}) {
   const t = ctx.currentTime + (opts.delay || 0);
   g.gain.setValueAtTime(Math.max(0.0001, vol), t);
   src.connect(g);
-  g.connect(bus);
+  if (opts.dry && bus === sfx) g.connect(sfxDry);
+  else g.connect(bus);
   src.start(t);
 }
 
@@ -137,11 +185,13 @@ function playGroup(name, opts = {}) {
   if (!list) return false;
   const files = list.filter((f) => buffers.has(f));
   if (!files.length) return false;
+  const chosen = pick(files, name);
   const rateVar = opts.rateVar == null ? 0.08 : opts.rateVar;
   const volVar = opts.volVar == null ? 0.12 : opts.volVar;
-  playBuf(buffers.get(pick(files)), {
+  playBuf(buffers.get(chosen), {
     bus: opts.bus,
     delay: opts.delay,
+    dry: opts.dry,
     vol: (opts.vol == null ? 1 : opts.vol) * jitter(volVar),
     rate: (opts.rate || 1) * jitter(rateVar),
   });
@@ -155,7 +205,6 @@ function limited(key, ms) {
   return true;
 }
 
-// Tiny coded fallback used only before clips finish loading.
 function tone(freq, dur, start, type, startGain) {
   if (!ctx || !sfx) return;
   const o = ctx.createOscillator();
@@ -177,16 +226,15 @@ export function playHit(opts = {}) {
   const heavy = !!opts.heavy;
   const kick = !!opts.kick;
   if (blocked) {
-    if (!playGroup('block', { vol: 0.95, rateVar: 0.1 })) return;
-    playGroup('field', { vol: 0.32, rateVar: 0.08 });
+    playGroup('block', { vol: 0.95, rateVar: 0.1 });
     playGroup('metalL', { vol: 0.4, rate: 1.12, rateVar: 0.08 });
     return;
   }
   const metal = heavy ? 'metalH' : (kick ? 'metalM' : 'metalL');
   const punch = heavy || kick ? 'punchH' : 'punchM';
   playGroup(metal, { vol: 1, rate: kick ? 0.92 : 1, rateVar: 0.1 });
-  playGroup(punch, { vol: heavy ? 0.72 : 0.5, delay: 0.012, rateVar: 0.08 });
-  if (limited('spark', 40)) playGroup('spark', { vol: heavy ? 0.55 : 0.32, rateVar: 0.14 });
+  playGroup(punch, { vol: heavy ? 0.7 : 0.5, delay: 0.012, rateVar: 0.08 });
+  if (limited('spark', 40)) playGroup('spark', { vol: heavy ? 0.55 : 0.32, rateVar: 0.16 });
   if (heavy && limited('crowdHit', 420)) {
     playGroup(Math.random() < 0.55 ? 'crowdBig' : 'crowdHit', { bus: crowd, vol: 0.78, rateVar: 0.03, volVar: 0.08 });
   }
@@ -199,24 +247,16 @@ export function playSfx(kind, opts = {}) {
   if (kind === 'block') { playHit({ blocked: true }); return; }
   if (kind === 'whoosh' || kind === 'servo') {
     if (!limited('servo', opts.limit || 90)) return;
-    if (!playGroup('servo', { vol: opts.vol == null ? 0.55 : opts.vol, rate: opts.rate || 1, rateVar: 0.1 })) {
-      if (ctx && sfxLevel > 0) {
-        const t = ctx.currentTime;
-        const o = ctx.createOscillator();
-        const g = ctx.createGain();
-        o.type = 'sawtooth';
-        o.frequency.setValueAtTime(180, t);
-        o.frequency.exponentialRampToValueAtTime(90, t + 0.12);
-        g.gain.setValueAtTime(0.05, t);
-        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
-        o.connect(g); g.connect(sfx); o.start(t); o.stop(t + 0.14);
-      }
+    const vol = opts.vol == null ? 0.55 : opts.vol;
+    playGroup('servo', { vol, rate: opts.rate || 1, rateVar: 0.1 });
+    if (Math.random() < 0.45 && limited('hydro', 160)) {
+      playGroup('hydro', { vol: vol * 0.7, rate: (opts.rate || 1) * 0.92, rateVar: 0.08, delay: 0.02 });
     }
     return;
   }
   if (kind === 'step') {
     if (!limited('step', 70)) return;
-    playGroup('step', { vol: opts.vol == null ? 0.55 : opts.vol, rateVar: 0.08 });
+    playGroup('step', { vol: opts.vol == null ? 0.62 : opts.vol, rateVar: 0.08 });
     return;
   }
   if (kind === 'cage') {
@@ -233,6 +273,7 @@ export function playSfx(kind, opts = {}) {
     playGroup('tear', { vol: 1, rateVar: 0.08 });
     playGroup('metalH', { vol: 0.55, delay: 0.04 });
     playGroup('spark', { vol: 0.7, rateVar: 0.12 });
+    playGroup('bounce', { vol: 0.55, delay: 0.08, rateVar: 0.14 });
     return;
   }
   if (kind === 'spark') {
@@ -241,7 +282,7 @@ export function playSfx(kind, opts = {}) {
     return;
   }
   if (kind === 'fall') {
-    playGroup('fall', { vol: 1, rateVar: 0.07 });
+    playGroup('crash', { vol: 1, rateVar: 0.07 });
     playGroup('punchH', { vol: 0.45, delay: 0.05 });
     return;
   }
@@ -255,15 +296,16 @@ export function playSfx(kind, opts = {}) {
     return;
   }
   if (kind === 'ko') {
-    playGroup('fall', { vol: 1, rateVar: 0.06 });
-    playGroup('metalH', { vol: 0.65, delay: 0.06 });
-    playGroup('bell', { vol: 0.95, rateVar: 0.02, delay: 0.04 });
+    playGroup('crash', { vol: 1, rateVar: 0.06 });
+    playGroup('metalH', { vol: 0.7, delay: 0.05 });
+    playGroup('fall', { vol: 0.8, delay: 0.04, rateVar: 0.06 });
+    playGroup('bell', { vol: 0.95, rateVar: 0.02, delay: 0.06 });
     playGroup('crowdKo', { bus: crowd, vol: 0.95, rateVar: 0.025, volVar: 0.05, delay: 0.08 });
     return;
   }
   if (kind === 'tick' || kind === 'click' || kind === 'confirm' || kind === 'close') {
     const vol = kind === 'tick' ? 0.45 : 0.7;
-    if (!playGroup(kind, { vol, rateVar: kind === 'tick' ? 0.04 : 0.06, volVar: 0.08 })) {
+    if (!playGroup(kind, { vol, rateVar: kind === 'tick' ? 0.04 : 0.06, volVar: 0.08, dry: true })) {
       if (sfxLevel > 0) tone(kind === 'tick' ? 880 : 520, 0.05, ctx.currentTime, 'square', 0.045);
     }
     return;
@@ -276,6 +318,13 @@ function stopCrowd() {
   try { crowdSrc.disconnect(); } catch (_) {}
   crowdSrc = null;
   crowdGate = null;
+}
+
+function stopHum() {
+  if (!humSrc) return;
+  try { humSrc.stop(); } catch (_) {}
+  try { humSrc.disconnect(); } catch (_) {}
+  humSrc = null;
 }
 
 function ensureCrowd() {
@@ -293,6 +342,19 @@ function ensureCrowd() {
   crowdSrc = src;
   crowdGate = g;
   src.onended = () => { if (crowdSrc === src) crowdSrc = null; };
+}
+
+function ensureHum() {
+  if (!ctx || !loaded || crowdLevel <= 0 || !buffers.has('arena_hum.ogg') || !humGain) return;
+  if (humSrc) return;
+  if (ctx.state === 'suspended') return;
+  const src = ctx.createBufferSource();
+  src.buffer = buffers.get('arena_hum.ogg');
+  src.loop = true;
+  src.connect(humGain);
+  try { src.start(); } catch (_) { return; }
+  humSrc = src;
+  src.onended = () => { if (humSrc === src) humSrc = null; };
 }
 
 function applyBuzz() {
@@ -333,4 +395,5 @@ export function setBuzz(level) {
 export function startCrowd() {
   unlockAudio();
   ensureCrowd();
+  ensureHum();
 }
