@@ -82,24 +82,38 @@ export const COMBAT = {
   // reach: root-to-root distance where the strike visibly lands (the AI fights from here).
   // range: outer gate; the hit itself needs the fist/foot to touch the body (see strikeContact).
   // recover: idle time after the attack ends (x whiffMul when it missed).
-  punch: { damage: 10, reach: 1.3, range: 1.75, cooldown: 0.55, recover: 0.22, activeFrac: [0.2, 0.78] },
-  kick: { damage: 15, reach: 1.55, range: 2.05, cooldown: 0.8, recover: 0.36, activeFrac: [0.26, 0.8] },
-  whiffMul: 2.2,
+  punch: { damage: 10, reach: 1.2, range: 1.75, cooldown: 0.5, recover: 0.2, activeFrac: [0.2, 0.78] },
+  kick: { damage: 15, reach: 1.55, range: 2.05, cooldown: 0.85, recover: 0.36, activeFrac: [0.26, 0.8] },
+  // Extra idle after a clip by strike class (60 fps targets: jab 16-20f, hook/elbow 22-28f,
+  // knee/kick 28-36f, spinning 36-44f); the clip's own follow-through covers part of it.
+  recoverByClip: {
+    LeadJab: 0.18, Punching: 0.2, PunchCombo: 0.26, ElbowPunching: 0.26, RightHook: 0.26, Uppercut: 0.28,
+    Kicking: 0.36, MmaKick: 0.36, SideKick: 0.36, KneeKickLead: 0.32, LegSweep: 0.38, RoundhouseKick: 0.42,
+    MeiaLuaDeFrente: 0.44, FlipKick: 0.5, ChapaGiratoria: 0.5, SpinFlipKick: 0.55, MeiaLuaDeCompasso: 0.55,
+  },
+  whiffMul: 2.0,
   punchLunge: 0.12, // metres a strike steps in when slightly out of reach (small enough to hide)
   kickLunge: 0.1,
   strikeGap: 1.2,   // no lunge inside this gap; it would drive the body into the opponent
   bodyRadius: 0.36, // defender body capsule used for fist/foot contact
   blockReduction: 0.82,
-  hitStun: 0.5,
+  hitStun: 0.3,        // light hitstun (18f)
+  hitStunHeavy: 0.53,  // hooks, body shots, most kicks (32f)
+  counterExtra: 0.17,  // caught mid-swing: +10f
+  blockStunTail: 0.08, // guard stays locked this long after its pushback
+  hitStopLight: 0.05,
+  hitStopHeavy: 0.08,
+  hitStopCounter: 0.12,
+  koSlowMo: 0.3,       // seconds of mild slow motion on a KO
   hitInvuln: 0.22,
-  hitRock: 0.1,        // metres a light hit rocks a robot back (inside the hit clip)
+  hitRock: 0.26,       // metres a light hit knocks a robot back (walked out with the back-step)
   stumbleForce: 3.8,   // impact force that turns a hit into a stepped stumble-back
   stumbleDist: 0.75,   // metres travelled over the StumbleBackwards steps
   separate: 1.05,      // soft spacing: closer than this, the robot steps back (with its walk)
   separateHard: 0.8,   // emergency push-apart only (physics capsules normally keep this)
-  downMin: 1.5,        // seconds a knocked-down robot stays on the mat at least
-  downRest: 0.7,       // ...and lies still this long after settling before getting up
-  downMax: 2.8,
+  downRest: [0.85, 1.5], // seconds lying still before getting up: first knockdown, later ones
+  downMax: 3.4,        // safety: get up even if the ragdoll never fully settles
+  getupTime: 1.25,     // the GettingUp clip is played over about this long
 };
 
 export const GFX_PRESETS = {
@@ -149,6 +163,24 @@ export const DAMAGE = {
     ],
   },
   skip: ['rootnode', 'robotarmature', 'bone', 'poletargetl', 'poletargetr', 'poletargetlend', 'poletargetrend'],
+  // Smaller breakables inside the limbs. `root` = normalized bone names; every bone below them
+  // belongs to the sub-part (deepest sub-part wins). They break off as their own debris.
+  sub: {
+    handL: { parent: 'armL', hp: 30, label: 'Left hand', root: ['lefthand'] },
+    thumbL: { parent: 'handL', hp: 9, label: 'Left thumb', root: ['lefthandthumb1'] },
+    fingersL: { parent: 'handL', hp: 10, label: 'Left index + middle', root: ['lefthandindex1', 'lefthandmiddle1'] },
+    fingersL2: { parent: 'handL', hp: 10, label: 'Left ring + pinky', root: ['lefthandring1', 'lefthandpinky1'] },
+    handR: { parent: 'armR', hp: 30, label: 'Right hand', root: ['righthand'] },
+    thumbR: { parent: 'handR', hp: 9, label: 'Right thumb', root: ['righthandthumb1'] },
+    fingersR: { parent: 'handR', hp: 10, label: 'Right index + middle', root: ['righthandindex1', 'righthandmiddle1'] },
+    fingersR2: { parent: 'handR', hp: 10, label: 'Right ring + pinky', root: ['righthandring1', 'righthandpinky1'] },
+    footL: { parent: 'legL', hp: 32, label: 'Left foot', root: ['leftfoot'] },
+    toesL: { parent: 'footL', hp: 12, label: 'Left toes', root: ['lefttoebase'] },
+    footR: { parent: 'legR', hp: 32, label: 'Right foot', root: ['rightfoot'] },
+    toesR: { parent: 'footR', hp: 12, label: 'Right toes', root: ['righttoebase'] },
+  },
+  subOrder: ['handL', 'thumbL', 'fingersL', 'fingersL2', 'handR', 'thumbR', 'fingersR', 'fingersR2', 'footL', 'toesL', 'footR', 'toesR'],
+  oil: { maxDrops: 140, maxPuddles: 36, puddleMaxR: 0.42 },
   dent: { radius: 0.32, depth: 0.085, maxDepth: 0.22, colorDarken: 0.7 },
   heavySmoke: 0.5,
   punchArm: 'armR',

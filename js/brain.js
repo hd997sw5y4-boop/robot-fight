@@ -33,6 +33,7 @@ export function createPacedBrain(getProfile) {
     guardUntil: 0,
     feintIn: true,
     lastSelfState: 'idle',
+    upAt: -1,
     hitsLanded: 0,
     t: 0,
   };
@@ -49,7 +50,12 @@ export function createPacedBrain(getProfile) {
     const react = prof.react != null ? prof.react : 0.4;
     // Difficulty sets how fast the robot answers what it sees.
     const reactDelay = prof.think ? prof.think[0] + prof.think[1] * 0.6 : 0.26;
-    const { self, opp, dist } = snap;
+    const { self, opp } = snap;
+    // A damaged head (optics) slows reactions and makes range judgement wobble.
+    const headDmg = self.parts && self.parts.head != null ? Math.max(0, 1 - self.parts.head) : 0;
+    const blur = Math.max(0, headDmg - 0.4);
+    const dist = snap.dist + Math.sin(s.t * 2.3) * blur * 0.45;
+    const reactLag = blur * 0.4;
     s.t += snap.dt;
     s.modeT += snap.dt;
     const intent = { move: 0, strafe: 0, attack: null, block: false, run: false };
@@ -78,16 +84,22 @@ export function createPacedBrain(getProfile) {
     // Opponent on the mat or getting up: no hitting a robot that is down. Step back and wait.
     if (opp.down) {
       if (s.mode !== 'wait') setMode('wait', 0);
+      s.upAt = -1;
       intent.move = dist < 2.3 ? -0.8 : (dist > 3.0 ? 0.35 : 0);
       intent.strafe = 0.35 * s.circleDir;
       return intent;
     }
-    if (s.mode === 'wait') setMode('circle', rand(0.4, 0.8));
+    if (s.mode === 'wait') {
+      // Give a robot that just got up 0.4-0.6 s before pressing again.
+      if (s.upAt < 0) s.upAt = s.t + rand(0.4, 0.6);
+      if (s.t < s.upAt) { intent.strafe = 0.35 * s.circleDir; return intent; }
+      setMode('circle', rand(0.4, 0.8));
+    }
 
     // Defence: notice the attack after the reaction delay, then decide once per attack.
     if (opp.attacking && dist < kickR + 0.7) {
       if (s.seenAttackT < 0) { s.seenAttackT = s.t; s.guardDecided = false; }
-      if (!s.guardDecided && s.t - s.seenAttackT >= reactDelay) {
+      if (!s.guardDecided && s.t - s.seenAttackT >= reactDelay + reactLag) {
         s.guardDecided = true;
         const r = Math.random();
         if (r < react && self.canBlock) s.guardUntil = s.t + 0.6;
@@ -110,7 +122,7 @@ export function createPacedBrain(getProfile) {
         intent.strafe = 0.18 * s.circleDir * Math.sin(s.t * 1.7);
         intent.run = dist > 3.8 && aggr >= 1;
         if (dist <= kickR + 0.02 && self.cooldown <= 0) {
-          if (Math.random() < 0.1 * (2 - Math.min(1.5, aggr))) {
+          if (Math.random() < 0.15) { // feint 10-20% of entries
             setMode('feint', rand(0.35, 0.5));
             s.feintIn = true;
           } else {
@@ -140,13 +152,13 @@ export function createPacedBrain(getProfile) {
         break;
       }
       case 'backoff': {
-        intent.move = dist < punchR + 0.85 ? -1 : 0;
+        intent.move = dist < 2.1 ? -1 : 0;
         intent.strafe = 0.45 * s.circleDir;
         if (s.modeT > s.modeLen) setMode(Math.random() < 0.5 ? 'circle' : 'approach', rand(0.5, 1.1));
         break;
       }
       case 'circle': {
-        const ring = punchR + 0.7;
+        const ring = 2.4; // circle at 2.0-2.8 m
         intent.move = dist > ring + 0.3 ? 0.5 : (dist < ring - 0.3 ? -0.5 : 0);
         intent.strafe = 0.75 * s.circleDir;
         if (s.modeT > s.modeLen) setMode('approach', 0);

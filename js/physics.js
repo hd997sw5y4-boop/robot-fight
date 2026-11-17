@@ -21,8 +21,9 @@ const matCage = new CANNON.Material('cage');
 world.addContactMaterial(new CANNON.ContactMaterial(matFloor, matFighter, { friction: 0.28, restitution: 0.0 }));
 // Ragdoll limbs on the mat: no bounce, high friction, so a knocked-down robot lands heavy and stays.
 world.addContactMaterial(new CANNON.ContactMaterial(matFloor, matSoft, { friction: 0.9, restitution: 0.0 }));
-world.addContactMaterial(new CANNON.ContactMaterial(matFloor, matDebris, { friction: 0.38, restitution: 0.58 }));
-world.addContactMaterial(new CANNON.ContactMaterial(matCage, matDebris, { friction: 0.22, restitution: 0.68 }));
+// Torn parts bounce once or twice, then settle.
+world.addContactMaterial(new CANNON.ContactMaterial(matFloor, matDebris, { friction: 0.45, restitution: 0.34 }));
+world.addContactMaterial(new CANNON.ContactMaterial(matCage, matDebris, { friction: 0.3, restitution: 0.4 }));
 world.addContactMaterial(new CANNON.ContactMaterial(matCage, matSoft, { friction: 0.4, restitution: 0.0 }));
 world.addContactMaterial(new CANNON.ContactMaterial(matCage, matFighter, { friction: 0.2, restitution: 0.05 }));
 world.addContactMaterial(new CANNON.ContactMaterial(matFighter, matFighter, { friction: 0.12, restitution: 0.0 }));
@@ -31,12 +32,21 @@ world.addContactMaterial(new CANNON.ContactMaterial(matSoft, matFighter, { frict
 world.addContactMaterial(new CANNON.ContactMaterial(matSoft, matSoft, { friction: 0.6, restitution: 0.0 }));
 
 // Knockdowns read heavy: ragdoll bodies get extra gravity on top of the world's (about 2x in total).
-const RAGDOLL_GRAVITY_MUL = 2.0;
+// Damping: light in the air so the fall stays fast, heavy once a segment is on the mat so the
+// body settles instead of sliding or hovering (cannon damping is a per-second fraction, so
+// these are the cannon equivalents of ~0.5 / ~3 linear and ~1 / ~4 angular).
+const RAGDOLL_GRAVITY_MUL = 1.85;
+const DAMP_AIR = { lin: 0.3, ang: 0.6 };
+const DAMP_MAT = { lin: 0.95, ang: 0.98 };
 world.addEventListener('preStep', () => {
   const extra = world.gravity.y * (RAGDOLL_GRAVITY_MUL - 1);
+  const top = (ARENA.matTop || 0) + 0.3;
   for (const f of fighters) {
     if (!isRagdoll(f)) continue;
     for (const e of f.phys.ragdoll.entries) {
+      const low = e.body.position.y < top;
+      e.body.linearDamping = low ? DAMP_MAT.lin : DAMP_AIR.lin;
+      e.body.angularDamping = low ? DAMP_MAT.ang : DAMP_AIR.ang;
       if (e.body.sleepState === CANNON.Body.SLEEPING) continue;
       e.body.force.y += e.body.mass * extra;
     }
@@ -271,8 +281,8 @@ export function enableRagdoll(f, impulse, opts = {}) {
     const body = new CANNON.Body({
       mass: spec.mass,
       material: matSoft,
-      linearDamping: 0.04,
-      angularDamping: 0.3,
+      linearDamping: DAMP_AIR.lin,
+      angularDamping: DAMP_AIR.ang,
       allowSleep: true,
       sleepSpeedLimit: 0.3,
       sleepTimeLimit: 0.35,

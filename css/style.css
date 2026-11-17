@@ -28,6 +28,8 @@ html, body { margin: 0; height: 100%; background: #07080c; color: #eef2f6; font-
 .parts i[data-part="head"] { width: 9px; height: 9px; border-radius: 50%; }
 .parts i[data-part="torso"] { width: 11px; height: 12px; }
 .parts i[data-part="legL"], .parts i[data-part="legR"] { width: 8px; height: 12px; }
+.parts i.sub { width: 6px; height: 6px; border-radius: 1px; align-self: flex-end; opacity: 0.85; }
+.parts i.sub[data-part="handL"] { margin-left: 4px; }
 .parts i.hurt { background: #e8c14a; }
 .parts i.wreck { background: #2a2d33; box-shadow: 0 0 0 1px #6b6f76; }
 .name { font-size: 13px; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 700; opacity: 0.95; text-shadow: 0 1px 8px #000; }

@@ -172,7 +172,167 @@ export function prepareFighterDamage(f) {
   f.parts = parts;
   f.limpT = 0;
   f.headFlick = 0;
+  prepareSubParts(f);
 }
+
+/* ---------- sub-parts: hands, finger groups, feet, toes ---------- */
+
+function subLimb(id) {
+  let cur = id;
+  for (let i = 0; i < 4 && DAMAGE.sub[cur]; i++) cur = DAMAGE.sub[cur].parent;
+  return cur;
+}
+
+function subIsWithin(id, ancestor) {
+  for (let cur = id, i = 0; cur && i < 5; i++) {
+    if (cur === ancestor) return true;
+    cur = DAMAGE.sub[cur] && DAMAGE.sub[cur].parent;
+  }
+  return false;
+}
+
+function prepareSubParts(f) {
+  const subs = {};
+  const boneSub = new Map();
+  for (const id of DAMAGE.subOrder) {
+    const spec = DAMAGE.sub[id];
+    const sub = { id, parent: spec.parent, limb: subLimb(id), max: spec.hp, hp: spec.hp, detached: false, rootBones: [], stump: null, oilAcc: 0, sparkAcc: 0, lostT: 0 };
+    f.model.traverse((o) => {
+      if ((o.isBone || o.type === 'Bone') && spec.root.includes(normName(o.name))) sub.rootBones.push(o);
+    });
+    // Parents come first in subOrder, so deeper sub-parts overwrite their bones.
+    for (const rb of sub.rootBones) rb.traverse((o) => { if (o.isBone || o.type === 'Bone') boneSub.set(o, id); });
+    subs[id] = sub;
+  }
+  f.subs = subs;
+  // Per-vertex deepest sub-part code (index in subOrder + 1) on the limb meshes.
+  f.model.traverse((m) => {
+    if (!m.isSkinnedMesh || !m.skeleton) return;
+    const si = m.geometry.attributes.skinIndex;
+    const sw = m.geometry.attributes.skinWeight;
+    if (!si || !sw) return;
+    const codeOf = m.skeleton.bones.map((b) => { const id = boneSub.get(b); return id ? DAMAGE.subOrder.indexOf(id) + 1 : 0; });
+    if (!codeOf.some(Boolean)) return;
+    const arr = new Uint8Array(si.count);
+    for (let i = 0; i < si.count; i++) arr[i] = codeOf[dominantBoneIndex(si, sw, i)] || 0;
+    m.userData.vertSub = arr;
+  });
+}
+
+function subWorldPos(sub, out) {
+  const b = sub.rootBones[0];
+  if (b) b.getWorldPosition(out);
+  return out;
+}
+
+function detachSub(f, sub, dir, scene) {
+  if (!sub || sub.detached) return;
+  const limb = f.parts[sub.limb];
+  for (const id of DAMAGE.subOrder) if (subIsWithin(id, sub.id)) {
+    const s = f.subs[id];
+    if (s.detached) continue;
+    s.detached = true;
+    s.lostT = 0;
+  }
+  if (!limb || limb.detached) return;
+  f.model.updateWorldMatrix(true, true);
+  const pieces = [];
+  for (const mesh of limb.skinned) {
+    const vs = mesh.userData.vertSub;
+    if (!vs || mesh.userData.hiddenPart) continue;
+    const doneBefore = mesh.userData.subGone || (mesh.userData.subGone = new Set());
+    const keep = (i) => {
+      const c = vs[i];
+      if (!c) return false;
+      const id = DAMAGE.subOrder[c - 1];
+      return subIsWithin(id, sub.id) && !doneBefore.has(c);
+    };
+    let any = false; let all = true;
+    for (let i = 0; i < vs.length; i++) { if (keep(i)) any = true; else all = false; }
+    if (!any) continue;
+    const baked = bakeSkinnedWorld(mesh, keep);
+    if (baked) pieces.push(baked);
+    if (all) { mesh.visible = false; mesh.userData.hiddenPart = true; }
+    for (const id of DAMAGE.subOrder) if (subIsWithin(id, sub.id)) doneBefore.add(DAMAGE.subOrder.indexOf(id) + 1);
+  }
+  // Collapse what's left on the robot by shrinking the sub-part's root bones (like limb tears).
+  for (const b of sub.rootBones) b.scale.set(0.001, 0.001, 0.001);
+  sub.stump = sub.rootBones[0] || null;
+  const at = subWorldPos(sub, new THREE.Vector3());
+  const d = dir ? dir.clone().normalize() : new THREE.Vector3(0, 0, 1);
+  const pivot = attachPivot(pieces, scene);
+  if (pivot) {
+    const rec = spawnDebris({
+      mesh: pivot,
+      mass: sub.id.startsWith('hand') || sub.id.startsWith('foot') ? 1.4 : 0.8,
+      velocity: new THREE.Vector3(d.x * 2.2 + (Math.random() - 0.5) * 1.6, 1.8 + Math.random() * 1.4, d.z * 2.2 + (Math.random() - 0.5) * 1.6),
+      angularVelocity: new THREE.Vector3((Math.random() - 0.5) * 16, (Math.random() - 0.5) * 16, (Math.random() - 0.5) * 16),
+      ownerId: f.id,
+    });
+    debrisList.push({ obj: pivot, phys: rec, owner: f.id, settled: false });
+  }
+  playSfx('tear');
+  emitSparks(at, d, 12);
+  sprayOil(at, d, sub.id.startsWith('hand') || sub.id.startsWith('foot') ? 18 : 9);
+}
+
+// Dev/test hook: break a sub-part off directly.
+export function debugBreakSub(f, id, scene) {
+  if (f.subs && f.subs[id]) detachSub(f, f.subs[id], new THREE.Vector3(0.3, 0, 1), scene);
+}
+
+export function oilStats() {
+  return { drops: oilDrops.length, puddles: puddles.length, maxR: +Math.max(0, ...puddles.map((p) => p.r)).toFixed(3) };
+}
+
+// Damage a hand/foot; part of it carries into one of its finger groups / toes.
+function damageSub(f, sub, dmg, dir, scene) {
+  if (!sub || sub.detached || dmg <= 0) return;
+  sub.hp = Math.max(0, sub.hp - dmg);
+  const kids = DAMAGE.subOrder.filter((id) => DAMAGE.sub[id].parent === sub.id && !f.subs[id].detached);
+  if (kids.length) {
+    const kid = f.subs[kids[Math.floor(Math.random() * kids.length)]];
+    kid.hp = Math.max(0, kid.hp - dmg * 0.9);
+    if (kid.hp <= 0) detachSub(f, kid, dir, scene);
+  }
+  if (sub.hp <= 0) detachSub(f, sub, dir, scene);
+}
+
+function sideOfBone(name) {
+  const n = normName(name);
+  return n.startsWith('left') ? 'L' : (n.startsWith('right') ? 'R' : null);
+}
+
+// The striking fist/foot takes wear on every connect (more when it slams into a guard).
+export function applyStrikeWear(f, kind, bone, blocked, force, scene, dir) {
+  if (!f.subs || !bone) return;
+  const n = normName(bone.name);
+  if (kind === 'punch' && !n.includes('hand')) return;
+  if (kind === 'kick' && !(n.includes('foot') || n.includes('toe'))) return;
+  const side = sideOfBone(bone.name);
+  if (!side) return;
+  const sub = f.subs[(kind === 'punch' ? 'hand' : 'foot') + side];
+  const wear = 1 + (blocked ? 2.2 : 0) + Math.min(2, force * 0.15);
+  damageSub(f, sub, wear, dir ? dir.clone().negate() : null, scene);
+}
+
+// Damage multiplier of the fist/foot that landed: missing fingers or a missing hand hit weaker.
+export function strikeMul(f, kind, bone) {
+  if (!f.subs || !bone) return 1;
+  const side = sideOfBone(bone.name);
+  if (!side) return 1;
+  if (kind === 'punch') {
+    const hand = f.subs['hand' + side];
+    if (!hand || hand.detached) return 0.45;
+    let lost = 0;
+    for (const id of ['thumb', 'fingers', 'fingers'].map((k, i) => k + side + (i === 2 ? '2' : ''))) if (f.subs[id] && f.subs[id].detached) lost += 1;
+    return (1 - 0.12 * lost) * (0.85 + 0.15 * hand.hp / hand.max);
+  }
+  const foot = f.subs['foot' + side];
+  if (!foot || foot.detached) return 0.55;
+  return (f.subs['toes' + side] && f.subs['toes' + side].detached ? 0.88 : 1) * (0.85 + 0.15 * foot.hp / foot.max);
+}
+
 
 export function canPunch(f) {
   const a = f.parts;
@@ -231,7 +391,14 @@ export function moveSpeedMul(f) {
   for (const leg of [l, r]) {
     mul *= 1 - 0.4 * (1 - leg.hp / leg.max);
   }
-  return mul;
+  return mul * footMul(f, 'L') * footMul(f, 'R');
+}
+
+function footMul(f, side) {
+  const foot = f.subs && f.subs['foot' + side];
+  if (!foot) return 1;
+  if (foot.detached) return 0.72; // stumping along on the ankle
+  return f.subs['toes' + side].detached ? 0.92 : 1;
 }
 
 export function blockReductionMul(f) {
@@ -527,7 +694,10 @@ function detachPart(f, part, dir, scene) {
     const n = normName(b.name);
     return !n.endsWith('end') && !n.includes('pole');
   }) || null;
+  part.lostT = 0;
+  if (f.subs) for (const sub of Object.values(f.subs)) if (sub.limb === part.id) sub.detached = true;
   emitSparks(pivot.position, impulse, 22);
+  if (part.stump) sprayOil(part.stump.getWorldPosition(new THREE.Vector3()), impulse.clone().negate(), 26);
 }
 
 function emitSparks(point, dir, count = 16) {
@@ -574,6 +744,149 @@ function emitSmoke(point) {
   });
 }
 
+/* ---------- oil: drips, sprays and glossy puddles (capped) ---------- */
+const oilDrops = [];
+const puddles = [];
+const OIL_GEO = new THREE.SphereGeometry(0.016, 6, 4);
+const oilDropMat = new THREE.MeshStandardMaterial({ color: 0x0c0a07, roughness: 0.12, metalness: 0.5 });
+const PUDDLE_GEO = new THREE.PlaneGeometry(2, 2);
+// A few irregular, soft-edged blob masks (overlapping lobes) so puddles never read as discs.
+function puddleTexture(seed) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  let r = seed * 9301 + 49297;
+  const rnd = () => { r = (r * 9301 + 49297) % 233280; return r / 233280; };
+  for (let i = 0; i < 7; i++) {
+    const a = rnd() * Math.PI * 2;
+    const d = i === 0 ? 0 : 14 + rnd() * 20;
+    const x = 64 + Math.cos(a) * d;
+    const y = 64 + Math.sin(a) * d;
+    const rad = i === 0 ? 34 : 14 + rnd() * 16;
+    const grd = g.createRadialGradient(x, y, rad * 0.55, x, y, rad);
+    grd.addColorStop(0, 'rgba(255,255,255,1)');
+    grd.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grd;
+    g.beginPath();
+    g.arc(x, y, rad, 0, Math.PI * 2);
+    g.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  return t;
+}
+let puddleMats = null;
+function getPuddleMats() {
+  if (puddleMats) return puddleMats;
+  puddleMats = [1, 2, 3, 4].map((seed) => new THREE.MeshStandardMaterial({
+    color: 0x150e07,
+    roughness: 0.03,
+    metalness: 0.25,
+    alphaMap: puddleTexture(seed),
+    transparent: true,
+    opacity: 0.86,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+  }));
+  return puddleMats;
+}
+let oilScene = null;
+
+function emitOil(point, dir, count, speed = 0.4) {
+  if (!point) return;
+  const cap = (DAMAGE.oil && DAMAGE.oil.maxDrops) || 140;
+  for (let i = 0; i < count && oilDrops.length < cap; i++) {
+    const m = new THREE.Mesh(OIL_GEO, oilDropMat);
+    m.position.copy(point);
+    const v = new THREE.Vector3((Math.random() - 0.5) * speed, Math.random() * speed * 0.5, (Math.random() - 0.5) * speed);
+    if (dir) v.addScaledVector(dir, speed * 0.6);
+    oilDrops.push({ m, vel: v, age: 0 });
+    m.userData.oilNew = true;
+  }
+}
+
+// Brief pressurised spray when something tears off.
+function sprayOil(point, dir, count) {
+  const d = dir ? dir.clone().setY(0).normalize() : new THREE.Vector3();
+  const cap = (DAMAGE.oil && DAMAGE.oil.maxDrops) || 140;
+  for (let i = 0; i < count && oilDrops.length < cap; i++) {
+    const m = new THREE.Mesh(OIL_GEO, oilDropMat);
+    m.position.copy(point);
+    const sp = 1.6 + Math.random() * 2.4;
+    const v = new THREE.Vector3(
+      d.x * sp * 0.7 + (Math.random() - 0.5) * 1.6,
+      0.6 + Math.random() * 1.8,
+      d.z * sp * 0.7 + (Math.random() - 0.5) * 1.6,
+    );
+    oilDrops.push({ m, vel: v, age: 0 });
+    m.userData.oilNew = true;
+  }
+}
+
+function landOil(x, z) {
+  const maxR = (DAMAGE.oil && DAMAGE.oil.puddleMaxR) || 0.42;
+  for (const p of puddles) {
+    const dx = x - p.m.position.x;
+    const dz = z - p.m.position.z;
+    const reach = Math.max(0.09, p.target * 1.2);
+    if (dx * dx + dz * dz < reach * reach) {
+      p.target = Math.min(maxR, p.target + 0.016 * (0.12 / Math.max(0.06, p.target)));
+      return;
+    }
+  }
+  const cap = (DAMAGE.oil && DAMAGE.oil.maxPuddles) || 36;
+  if (puddles.length >= cap) {
+    const old = puddles.shift();
+    if (old.m.parent) old.m.parent.remove(old.m);
+  }
+  const mats = getPuddleMats();
+  const m = new THREE.Mesh(PUDDLE_GEO, mats[Math.floor(Math.random() * mats.length)]);
+  m.rotation.x = -Math.PI / 2;
+  m.rotation.z = Math.random() * Math.PI;
+  m.position.set(x, (ARENA.matTop || 0) + 0.0042, z);
+  m.renderOrder = 1;
+  m.receiveShadow = true;
+  const p = { m, r: 0.01, target: 0.05 + Math.random() * 0.03, sx: 0.75 + Math.random() * 0.5 };
+  m.scale.set(p.r * p.sx, p.r, 1);
+  if (oilScene) oilScene.add(m);
+  puddles.push(p);
+}
+
+function stepOil(scene, dt) {
+  oilScene = scene;
+  const floor = (ARENA.matTop || 0) + 0.01;
+  for (let i = oilDrops.length - 1; i >= 0; i--) {
+    const d = oilDrops[i];
+    if (d.m.userData.oilNew) { scene.add(d.m); d.m.userData.oilNew = false; }
+    d.age += dt;
+    d.vel.y -= 13 * dt;
+    d.m.position.addScaledVector(d.vel, dt);
+    // Stretch falling drops along their speed so they read as drips, not pellets.
+    const sp = Math.min(3, 1 + Math.abs(d.vel.y) * 0.25);
+    d.m.scale.set(1 / Math.sqrt(sp), sp, 1 / Math.sqrt(sp));
+    if (d.m.position.y <= floor || d.age > 3) {
+      if (d.m.position.y <= floor) landOil(d.m.position.x, d.m.position.z);
+      scene.remove(d.m);
+      oilDrops.splice(i, 1);
+    }
+  }
+  for (const p of puddles) {
+    if (p.r < p.target) {
+      p.r = Math.min(p.target, p.r + dt * 0.08); // spreads a little after landing
+      p.m.scale.set(p.r * p.sx, p.r, 1);
+    }
+  }
+}
+
+function clearOil(scene) {
+  for (const d of oilDrops) if (d.m.parent) d.m.parent.remove(d.m);
+  oilDrops.length = 0;
+  for (const p of puddles) if (p.m.parent) p.m.parent.remove(p.m);
+  puddles.length = 0;
+  void scene;
+}
+
 function addSparkScene(scene) {
   for (const s of sparks) {
     if (s.m.userData.worldSpark && !s.m.parent) scene.add(s.m);
@@ -600,12 +913,21 @@ export function applyPartHit(f, partId, damage, point, dir, scene, opts = {}) {
   if (part.hp <= 0 && part.canDetach && !part.detached) {
     detachPart(f, part, dir, scene);
     wrecked = true;
+  } else if (f.subs && (partId.startsWith('arm') || partId.startsWith('leg'))) {
+    // Blows that land on (or are blocked with) the hand/foot damage it and its fingers/toes.
+    const id = (partId.startsWith('arm') ? 'hand' : 'foot') + partId.slice(-1);
+    const sub = f.subs[id];
+    if (sub && !sub.detached && point && subWorldPos(sub, _v2).distanceTo(point) < 0.38) {
+      damageSub(f, sub, dmg * (opts.blocked ? 1.1 : 0.75), dir, scene);
+    }
   }
+  if (!part.detached && (1 - part.hp / part.max) > 0.5) emitOil(point, dir, 2, 0.6);
   return { wrecked, point, partId };
 }
 
 export function stepDamage(scene, dt) {
   addSparkScene(scene);
+  stepOil(scene, dt);
   const floor = ARENA.floorY + 0.02;
   for (const d of debrisList) {
     if (d.phys) d.settled = !!d.phys.settled;
@@ -706,6 +1028,73 @@ export function applyMalfunctions(f, dt) {
     }
   }
 
+  // Damaged arms twitch: a constant servo jitter plus random jerks, growing with damage.
+  if (!ragdolled) {
+    for (const side of ['L', 'R']) {
+      const arm = f.parts['arm' + side];
+      if (arm.detached) continue;
+      const frac = 1 - arm.hp / arm.max;
+      if (frac < 0.5) continue; // malfunctions start past half damage
+      const tw = f['twitch' + side] || (f['twitch' + side] = { next: 0.5, amp: 0, bones: null });
+      if (!tw.bones) {
+        const want = side === 'L' ? ['leftarm', 'leftforearm'] : ['rightarm', 'rightforearm'];
+        tw.bones = arm.bones.filter((b) => want.includes(normName(b.name)));
+      }
+      tw.next -= dt;
+      if (tw.next <= 0) {
+        tw.next = 0.4 + Math.random() * (2.2 - frac * 1.6);
+        tw.amp = 0.1 + frac * 0.35;
+        tw.ax = Math.random() - 0.5;
+        tw.az = Math.random() - 0.5;
+      }
+      tw.amp = Math.max(0, tw.amp - dt * 3.5);
+      const jit = (frac - 0.5) * 0.1;
+      for (const b of tw.bones) {
+        b.rotation.x += (Math.random() - 0.5) * jit + tw.ax * tw.amp;
+        b.rotation.z += (Math.random() - 0.5) * jit + tw.az * tw.amp;
+      }
+    }
+  }
+
+  // Oil: torn stumps drip hard (easing off after a few seconds), damaged parts weep.
+  for (const id of DAMAGE.order) {
+    const part = f.parts[id];
+    let rate = 0;
+    if (part.detached) {
+      if (part.stump) {
+        part.lostT = (part.lostT || 0) + dt;
+        rate = part.lostT < 5 ? 7 : 2.2;
+        part.stump.getWorldPosition(_v2);
+      }
+    } else {
+      const frac = 1 - part.hp / part.max;
+      if (frac > 0.5) { rate = (frac - 0.5) * 4; partWorldPos(part, _v2); }
+      // Damaged joints sputter sparks.
+      if (frac > 0.55) {
+        part.sparkAcc = (part.sparkAcc || 0) + dt * (frac - 0.4) * 2.2 * Math.random() * 2;
+        if (part.sparkAcc > 1) {
+          part.sparkAcc = 0;
+          emitSparks(partWorldPos(part, _v3), _v.set(Math.random() - 0.5, -0.3, Math.random() - 0.5).normalize(), 3 + Math.floor(Math.random() * 4));
+        }
+      }
+    }
+    if (rate > 0) {
+      part.oilAcc = (part.oilAcc || 0) + dt * rate;
+      while (part.oilAcc > 1) { part.oilAcc -= 1; emitOil(_v2, null, 1, 0.25); }
+    }
+  }
+  if (f.subs) {
+    for (const sub of Object.values(f.subs)) {
+      if (!sub.detached || !sub.stump || f.parts[sub.limb].detached) continue;
+      sub.lostT += dt;
+      sub.oilAcc += dt * (sub.lostT < 4 ? 3.5 : 1);
+      sub.sparkAcc += dt * Math.random() * 1.2;
+      if (sub.oilAcc > 1 || sub.sparkAcc > 1) sub.stump.getWorldPosition(_v2);
+      while (sub.oilAcc > 1) { sub.oilAcc -= 1; emitOil(_v2, null, 1, 0.2); }
+      if (sub.sparkAcc > 1) { sub.sparkAcc = 0; emitSparks(_v2, _v.set(0, -1, 0), 2); }
+    }
+  }
+
   for (const id of DAMAGE.order) {
     const part = f.parts[id];
     if (part.detached) {
@@ -775,6 +1164,7 @@ export function clearAllDebris(scene) {
     if (s.m.material) s.m.material.dispose();
   }
   smokes.length = 0;
+  clearOil(scene);
 }
 
 export function resetFighterDamage(f, scene) {
@@ -792,6 +1182,27 @@ export function resetFighterDamage(f, scene) {
       else b.scale.set(1, 1, 1);
     }
   }
+  if (f.subs) {
+    for (const sub of Object.values(f.subs)) {
+      sub.hp = sub.max;
+      sub.detached = false;
+      sub.stump = null;
+      sub.oilAcc = 0;
+      sub.sparkAcc = 0;
+      sub.lostT = 0;
+      for (const b of sub.rootBones) {
+        if (b.userData.homeScale) b.scale.copy(b.userData.homeScale);
+        else b.scale.set(1, 1, 1);
+      }
+    }
+  }
+  for (const id of DAMAGE.order) {
+    const part = f.parts[id];
+    part.oilAcc = 0;
+    part.sparkAcc = 0;
+    part.lostT = 0;
+  }
+  f.model.traverse((m) => { if (m.userData && m.userData.subGone) m.userData.subGone.clear(); });
   f.model.rotation.z = 0;
   f.model.position.y = f.baseY;
 }
@@ -800,7 +1211,20 @@ export function syncPartHud(f, el) {
   if (!f || !f.parts || !el) return;
   const nodes = el.querySelectorAll('[data-part]');
   nodes.forEach((n) => {
-    const part = f.parts[n.dataset.part];
+    const key = n.dataset.part;
+    const sub = f.subs && f.subs[key];
+    if (sub) {
+      // Hand / foot pip: worn when hurt or missing fingers/toes, dark when gone.
+      const kids = DAMAGE.subOrder.filter((id) => DAMAGE.sub[id].parent === key);
+      const lost = kids.filter((id) => f.subs[id].detached).length;
+      n.classList.remove('hurt', 'wreck');
+      if (sub.detached) n.classList.add('wreck');
+      else if (lost || sub.hp < sub.max * 0.7) n.classList.add('hurt');
+      const what = key.startsWith('hand') ? 'fingers' : 'toes';
+      n.title = `${DAMAGE.sub[key].label}: ${sub.detached ? 'gone' : `${Math.round(sub.hp)}/${sub.max}${lost ? `, ${lost} ${what} lost` : ''}`}`;
+      return;
+    }
+    const part = f.parts[key];
     if (!part) return;
     n.classList.remove('hurt', 'wreck');
     if (part.detached || part.hp <= 0) n.classList.add('wreck');

@@ -46,6 +46,10 @@ import {
   clearAllDebris,
   syncPartHud,
   previewDamage,
+  applyStrikeWear,
+  strikeMul,
+  debugBreakSub,
+  oilStats,
 } from './damage.js';
 
 const canvas = document.getElementById('c');
@@ -1367,7 +1371,8 @@ function tryBlock(f, heldBlock) {
 // End an attack and start its recovery: short after a clean connect, long after a whiff.
 function endAttack(f, fade = 0.28) {
   const spec = COMBAT[f.state] || COMBAT.punch;
-  const rec = (spec.recover || 0.25) * (f.hitThisAttack ? 1 : (COMBAT.whiffMul || 2)) * ((f.atkMods && f.atkMods.cooldownMul) || 1);
+  const base = (COMBAT.recoverByClip && COMBAT.recoverByClip[f.attackClip]) || spec.recover || 0.25;
+  const rec = base * (f.hitThisAttack ? 1 : (COMBAT.whiffMul || 2)) * ((f.atkMods && f.atkMods.cooldownMul) || 1);
   f.cooldown = Math.max(f.cooldown, rec);
   f.state = 'idle';
   f.atkContact = false;
@@ -1378,9 +1383,10 @@ const _seg = new THREE.Vector3();
 const _bp = new THREE.Vector3();
 // A strike lands when a fist/forearm (punch) or foot/shin (kick) actually reaches the
 // defender's body capsule, so hits fire on visible contact, not on root distance.
+// Returns the bone that made contact (or true without strike bones), else null.
 function strikeContact(atk, def, kind) {
   const bones = atk.strikeBones && atk.strikeBones[kind];
-  if (!bones || !bones.length) return atk.root.position.distanceTo(def.root.position) <= COMBAT[kind].reach;
+  if (!bones || !bones.length) return atk.root.position.distanceTo(def.root.position) <= COMBAT[kind].reach || null;
   const base = def.root.position;
   const y0 = base.y + 0.3;
   const y1 = base.y + 2.15;
@@ -1389,9 +1395,9 @@ function strikeContact(atk, def, kind) {
   for (const b of bones) {
     b.getWorldPosition(_bp);
     _seg.set(base.x, Math.max(y0, Math.min(y1, _bp.y)), base.z);
-    if (_bp.distanceTo(_seg) <= reach) return true;
+    if (_bp.distanceTo(_seg) <= reach) return b;
   }
-  return false;
+  return null;
 }
 
 // Procedural flinch: a damped spring that snaps the spine/neck/head away from the blow and
@@ -1441,11 +1447,12 @@ function hitZone(partId) {
 
 const LOC_MUL = { head: 1.35, torso: 1, armL: 0.8, armR: 0.8, legL: 0.85, legR: 0.85 };
 
-function applyHit(atk, def, spec, kind) {
+function applyHit(atk, def, spec, kind, strikeBone) {
   if (def.state === 'ko' || def.state === 'down' || def.state === 'getup' || def.invuln > 0) return;
   const blocked = def.blocking;
   const hit = pickHit(atk, def, kind || 'punch', toward);
-  const mul = (atk.atkMods && atk.atkMods.damageMul) || 1;
+  // Arm/leg wear (attackMods) times the fist/foot that landed: lost fingers or hand hit weaker.
+  const mul = ((atk.atkMods && atk.atkMods.damageMul) || 1) * strikeMul(atk, kind || 'punch', strikeBone);
   const blockMul = blocked ? (1 - COMBAT.blockReduction * blockReductionMul(def)) : 1;
   const loc = LOC_MUL[hit.partId] || 1;
   const closing = impactVelocity(atk, def, hit.dir);
@@ -1454,14 +1461,17 @@ function applyHit(atk, def, spec, kind) {
   const dmg = Math.max(1, Math.round(spec.damage * mul * blockMul * loc * (0.5 + 0.55 * (force / 5))));
   def.health = Math.max(0, def.health - dmg);
   applyPartHit(def, hit.partId, dmg, hit.point, hit.dir, scene, { blocked, force });
+  applyStrikeWear(atk, kind || 'punch', strikeBone, blocked, force, scene, hit.dir);
   hitLight.color.setHex(blocked ? 0x88ccff : 0xffc060);
   hitLight.intensity = 12 + Math.min(8, force);
   hitLight.position.copy(hit.point);
   playHit({ blocked, heavy: dmg >= 12 || force >= 5, kick: kind === 'kick' });
   const heavy = force >= 5.1 || dmg >= 12;
-  addShake(blocked ? 0.035 : (heavy ? 0.11 + force * 0.012 : 0.045 + dmg * 0.004 + force * 0.006));
-  if (!blocked && heavy) triggerHitStop(0.09);
-  else if (!blocked) triggerHitStop(0.04);
+  // Counter hit: caught mid-swing. Longer hitstun and a sharper freeze.
+  const counter = !blocked && (def.state === 'punch' || def.state === 'kick');
+  const solidHit = !blocked && force >= COMBAT.stumbleForce;
+  addShake(blocked ? 0.035 : (heavy ? Math.min(0.18, 0.12 + force * 0.008) : Math.min(0.08, 0.05 + force * 0.006)));
+  if (!blocked) triggerHitStop(counter ? COMBAT.hitStopCounter : ((heavy || solidHit) ? COMBAT.hitStopHeavy : COMBAT.hitStopLight));
   const fwd = hit.dir;
   // Attacker feels the connect: the drive stops and the torso recoils a touch off the target.
   atk.atkContact = true;
@@ -1473,6 +1483,10 @@ function applyHit(atk, def, spec, kind) {
   // stumble-back whose travel is spread over the clip's own steps (see stepFighter 'hit').
   const solid = !blocked && force >= COMBAT.stumbleForce;
   const stumbleClip = solid && def.actions.StumbleBackwards ? 'StumbleBackwards' : null;
+  if (blocked && !isRagdoll(def)) {
+    // Guard pushback: ~55% of a light hit's, stepped out with the backward walk.
+    def.guardPush = { x: fwd.x, z: fwd.z, dist: COMBAT.hitRock * 0.55 * Math.min(1.4, 0.8 + force * 0.1), t0: 0, t1: 0.22, legs: true, t: 0 };
+  }
   if (!(def.phys && def.phys.body && !isRagdoll(def))) {
     const kb = blocked ? 0 : COMBAT.hitRock * (0.8 + force * 0.08);
     def.root.position.x += fwd.x * kb;
@@ -1493,6 +1507,7 @@ function applyHit(atk, def, spec, kind) {
     if (heavy) {
       def.state = 'down';
       def.stateT = 0;
+      def.kdCount = (def.kdCount || 0) + 1;
       enableRagdoll(def, { x: fwd.x * (4 + force), y: 2.2 + force * 0.15, z: fwd.z * (4 + force) }, { kind: 'down' });
     } else {
       def.state = 'hit';
@@ -1501,10 +1516,12 @@ function applyHit(atk, def, spec, kind) {
       setAnim(def, clip, 0.12);
       const act = def.actions[clip];
       const clipDur = act ? act.getClip().duration / Math.max(0.2, act.timeScale || 1) : COMBAT.hitStun;
-      def.hitDur = stumbleClip ? Math.min(clipDur * 0.9, 1.6) : COMBAT.hitStun;
+      const stun = (stumbleClip ? COMBAT.hitStunHeavy : COMBAT.hitStun) + (counter ? COMBAT.counterExtra : 0);
+      def.hitDur = stumbleClip ? Math.max(stun, Math.min(clipDur * 0.9, 0.9)) : stun;
+      // Knockback travel is walked out: the backward walk plays under the hit clip (see 'hit').
       def.hitPush = stumbleClip
-        ? { x: fwd.x, z: fwd.z, dist: COMBAT.stumbleDist * Math.min(1.3, 0.75 + force * 0.06), t0: 0.06, t1: def.hitDur * 0.8 }
-        : { x: fwd.x, z: fwd.z, dist: COMBAT.hitRock * (0.8 + force * 0.08), t0: 0, t1: 0.14 };
+        ? { x: fwd.x, z: fwd.z, dist: COMBAT.stumbleDist * Math.min(1.25, 0.8 + force * 0.05), t0: 0.06, t1: def.hitDur * 0.85, legs: false }
+        : { x: fwd.x, z: fwd.z, dist: COMBAT.hitRock * Math.min(1.4, 0.8 + force * 0.1), t0: 0.02, t1: Math.max(0.24, stun * 0.85), legs: true };
     }
   }
 }
@@ -1553,7 +1570,8 @@ function ko(loser, winner, info) {
     else sub.textContent = winner && winner.id === 'p1' ? 'You won the fight.' : 'CPU won the fight.';
   }
   playSfx('ko');
-  addShake(0.16);
+  addShake(0.28);
+  match.slowLeft = COMBAT.koSlowMo || 0;
   notifyFightEnd({
     winner: match.winner,
     reason: 'ko',
@@ -1665,8 +1683,8 @@ function stepFighter(f, other, inp, dt) {
     // Play the whole GettingUp clip (by its own playhead), then settle into the guard.
     const action = f.actions.GettingUp || f.actions[resolveClip(f, 'getUp')];
     const clipDur = action ? action.getClip().duration : 2.0;
-    const done = action ? (action.time >= clipDur - 0.14 || !action.isRunning()) : f.stateT > clipDur;
-    if ((done && f.stateT > 0.5) || f.stateT > clipDur + 0.6) {
+    const done = action ? (action.time >= clipDur - 0.1 || !action.isRunning()) : f.stateT > (COMBAT.getupTime || 1.25);
+    if ((done && f.stateT > 0.4) || f.stateT > (COMBAT.getupTime || 1.25) + 0.6) {
       f.state = 'idle';
       f.getupSnap = null;
       f.getupBlend = 0;
@@ -1687,13 +1705,16 @@ function stepFighter(f, other, inp, dt) {
     // so the feet are never dragged across the mat by leftover velocity.
     const hp = f.hitPush;
     if (hp && f.stateT >= hp.t0 && f.stateT <= hp.t1) {
-      const span = Math.max(0.05, hp.t1 - hp.t0);
-      const u = (f.stateT - hp.t0) / span;
-      const v = (hp.dist / span) * (Math.PI / 2) * Math.sin(Math.PI * u);
+      const v = pushSpeed(hp, f.stateT);
       setFighterMove(f, hp.x * v, hp.z * v);
-    } else setFighterMove(f, 0, 0);
+      stepLegs(f, hp.legs ? v : 0, dt);
+    } else {
+      setFighterMove(f, 0, 0);
+      stepLegs(f, 0, dt);
+    }
     if (f.stateT > (f.hitDur || COMBAT.hitStun)) {
       f.hitPush = null;
+      stepLegs(f, 0, 1);
       f.state = 'idle';
       setAnim(f, idleClipFor(f), 0.16);
     }
@@ -1715,9 +1736,10 @@ function stepFighter(f, other, inp, dt) {
       const v = lunge / Math.max(0.1, a0) * ((f.atkMods && f.atkMods.timeScale) || 1);
       setFighterMove(f, fwd.x * v, fwd.z * v);
     } else setFighterMove(f, 0, 0);
-    if (!f.hitThisAttack && f.stateT >= a0 && f.stateT <= a1 && gap <= spec.range && strikeContact(f, other, f.state)) {
+    const contact = !f.hitThisAttack && f.stateT >= a0 && f.stateT <= a1 && gap <= spec.range ? strikeContact(f, other, f.state) : null;
+    if (contact) {
       f.hitThisAttack = true;
-      applyHit(f, other, spec, f.state);
+      applyHit(f, other, spec, f.state, contact.isBone || contact.type === 'Bone' ? contact : null);
     }
     if (f.stateT > dur + 0.05 && f.state !== 'ko') endAttack(f);
     return;
@@ -1725,6 +1747,16 @@ function stepFighter(f, other, inp, dt) {
 
   f.blockClip = inp.blockClip || null;
   tryBlock(f, inp.block);
+  if (f.guardPush) {
+    // Blockstun: the guard soaks the blow and is stepped back a little; no other action.
+    const gp = f.guardPush;
+    gp.t += dt;
+    const v = pushSpeed(gp, gp.t);
+    setFighterMove(f, gp.x * v, gp.z * v);
+    stepLegs(f, v, dt);
+    if (gp.t > gp.t1 + COMBAT.blockStunTail) { f.guardPush = null; stepLegs(f, 0, 1); }
+    return;
+  }
   if (inp.punch) tryAttack(f, 'punch', inp.punchClip);
   else if (inp.kick) tryAttack(f, 'kick', inp.kickClip);
   if (f.state === 'punch' || f.state === 'kick' || f.state === 'hit' || f.state === 'ko') return;
@@ -1764,6 +1796,36 @@ function stepFighter(f, other, inp, dt) {
 }
 
 const LOCO_KEYS = ['idle', 'idleB', 'injured', 'walkFwd', 'walkBack', 'strafeL', 'strafeR'];
+
+// Sine-shaped push speed inside [t0, t1] (zero outside) so travel starts and ends at rest.
+function pushSpeed(hp, t) {
+  const span = Math.max(0.05, hp.t1 - hp.t0);
+  const u = (t - hp.t0) / span;
+  if (u < 0 || u > 1) return 0;
+  return (hp.dist / span) * (Math.PI / 2) * Math.sin(Math.PI * u);
+}
+
+// Walk a knockback / guard pushback out with the (lower-body) backward walk layered under the
+// current clip, its playback matched to the travel speed so the feet don't skate.
+function stepLegs(f, speed, dt) {
+  const act = locoActions(f).walkBack;
+  if (!act) return;
+  const clipV = clipWorldSpeed(f, 'WalkingBackwards') || 0.6;
+  const target = speed > 0.03 ? Math.min(1.4, 0.5 + speed / clipV * 0.5) : 0;
+  f._legW = (f._legW || 0) + (target - (f._legW || 0)) * Math.min(1, dt * 18);
+  if (f._legW > 0.01) {
+    if (!act.isRunning()) act.reset().play();
+    act.enabled = true;
+    act.setEffectiveWeight(f._legW);
+    act.timeScale = Math.max(0.6, Math.min(2.6, speed / clipV));
+    if (f._locoW) f._locoW.walkBack = Math.min(1, f._legW);
+  } else if (act.isRunning() && f.state !== 'walk') {
+    act.setEffectiveWeight(0);
+    act.stop();
+    f._legW = 0;
+    if (f._locoW) f._locoW.walkBack = 0;
+  }
+}
 
 function locoActions(f) {
   if (f._loco) return f._loco;
@@ -1964,6 +2026,16 @@ function updateCamera(dt) {
   );
   camera.position.lerp(camT, dt <= 0 ? 1 : 1 - Math.pow(orbit.drag ? 1e-6 : 0.001, dt));
   camera.lookAt(lookT);
+  // A human player's damaged head (optics) makes the view drift and wobble.
+  const head = p1.parts && p1.parts.head;
+  const hd = head && !head.detached ? 1 - head.hp / head.max : 0;
+  if (hd > 0.5 && !shellCall('cpuControls', 'p1')) {
+    const t = performance.now() / 1000;
+    const a = (hd - 0.5) * 0.12;
+    camera.position.x += Math.sin(t * 1.7) * a;
+    camera.position.y += Math.sin(t * 2.3 + 1) * a * 0.5;
+    camera.rotation.z += Math.sin(t * 1.3) * a * 0.15;
+  }
   if (shakeAmp > 0) {
     camera.position.x += (Math.random() - 0.5) * shakeAmp;
     camera.position.y += (Math.random() - 0.5) * shakeAmp * 0.5;
@@ -2103,13 +2175,14 @@ function beginGetUp(f) {
   if (f.mixer) f.mixer.timeScale = 1;
   const clip = f.actions.GettingUp ? 'GettingUp' : (MODEL.animations.getUp || 'GettingUp');
   const act = setAnim(f, clip, 0.18);
-  if (act) act.timeScale = 1; // the full get-up at its authored pace
+  // The whole clip, paced to COMBAT.getupTime.
+  if (act) act.timeScale = act.getClip().duration / Math.max(0.6, COMBAT.getupTime || 1.25);
 }
 
-// Ease from the ragdoll's final pose into the GettingUp clip (smoothstep over 0.55 s).
+// Ease from the ragdoll's final pose into the GettingUp clip (smoothstep over 0.45 s).
 function applyGetupBlend(f, dt) {
   if (!f.getupSnap) return;
-  f.getupBlend = Math.max(0, (f.getupBlend || 0) - dt / 0.55);
+  f.getupBlend = Math.max(0, (f.getupBlend || 0) - dt / 0.45);
   const w = f.getupBlend;
   if (w <= 0) {
     f.getupSnap = null;
@@ -2175,6 +2248,10 @@ function resetMatch() {
     f.groundY = 0;
     f.getupSnap = null;
     f.getupBlend = 0;
+    f.kdCount = 0;
+    f.guardPush = null;
+    f.hitPush = null;
+    f.flinch = null;
     resetFighterPhysics(f, f.startX, 0);
     f.atkMods = null;
     resetFighterDamage(f, scene);
@@ -2201,6 +2278,7 @@ function resetMatch() {
   match.orbitT = 0;
   match.overlayAt = 0;
   hitStopLeft = 0;
+  match.slowLeft = 0;
   paintRound();
   const banner = document.getElementById('banner');
   banner.style.opacity = '';
@@ -2217,6 +2295,10 @@ function tick() {
   if (dt > 0 && hitStopLeft > 0 && !match.over) {
     hitStopLeft = Math.max(0, hitStopLeft - rawDt);
     dt = rawDt * 0.16;
+  }
+  if (dt > 0 && match.slowLeft > 0) { // brief mild slow motion on the KO
+    match.slowLeft = Math.max(0, match.slowLeft - rawDt);
+    dt *= 0.4;
   }
   if (match.over && match.overlayAt && performance.now() >= match.overlayAt) showKoOverlay();
   if (match.phase === 'getup') {
@@ -2252,9 +2334,11 @@ function tick() {
     if (!f || f.state !== 'down' || !isRagdoll(f)) continue;
     const stayDown = f.health <= 0 || isCatastrophic(f);
     if (stayDown) continue;
-    // Stay down a believable time: at least downMin, and lying still for downRest.
+    // Stay down until the body is nearly still, then lie there a beat (longer on later
+    // knockdowns in the round) before the get-up.
     f._stillT = isRagdollSettled(f) ? (f._stillT || 0) + dt : 0;
-    if ((f.stateT >= COMBAT.downMin && f._stillT >= COMBAT.downRest) || f.stateT > COMBAT.downMax) {
+    const rest = (f.kdCount || 1) > 1 ? COMBAT.downRest[1] : COMBAT.downRest[0];
+    if (f._stillT >= rest || f.stateT > COMBAT.downMax) {
       f._stillT = 0;
       beginGetUp(f);
     }
@@ -2485,6 +2569,8 @@ function onLoad(gltf) {
     camera.position.set(c.x + 2.6, 1.3, c.z + 3.2);
     camera.lookAt(c.x, 0.5, c.z);
   };
+  window.__rfBreak = (id, sub) => debugBreakSub(id === 'p1' ? p1 : p2, sub, scene);
+  window.__rfDamageProbe = () => ({ oil: oilStats(), p1: Object.values(p1.subs || {}).filter((x) => x.detached).map((x) => x.id), p2: Object.values(p2.subs || {}).filter((x) => x.detached).map((x) => x.id), hud: document.getElementById('parts2').innerHTML.length });
   window.__rfForceKnockdown = (id) => {
     const f = id === 'p1' ? p1 : p2;
     const o = f === p1 ? p2 : p1;
