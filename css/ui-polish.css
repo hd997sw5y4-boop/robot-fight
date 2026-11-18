@@ -106,25 +106,26 @@
 
 /* ---------- main menu ---------- */
 .rfs-screen[data-screen="main"] { background: linear-gradient(90deg, rgba(6,8,14,.86) 0%, rgba(6,8,14,.45) 42%, rgba(6,8,14,.1) 68%, rgba(6,8,14,.5) 100%); }
-.rfs-menu { gap: 7px; counter-reset: rfm; }
-.rfs-menu .rfs-btn {
+nav.rfs-menu { gap: 7px; counter-reset: rfm; }
+nav.rfs-menu .rfs-btn {
   padding: 11px 16px 11px 50px; min-height: 52px; border-left: 3px solid transparent;
   transition: transform .2s var(--ww-ease), background-color .2s, border-color .2s, box-shadow .2s;
 }
-.rfs-menu .rfs-btn::before {
+nav.rfs-menu .rfs-btn::before {
   counter-increment: rfm; content: counter(rfm, decimal-leading-zero);
   position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
   font: 800 italic 15px/1 var(--ww-font); color: rgba(154,171,255,.45); letter-spacing: .02em; transition: color .2s;
 }
-.rfs-menu .rfs-btn:focus { transform: translateX(8px); border-left-color: var(--ww-accent); box-shadow: 0 0 0 1px rgba(154,171,255,.6), 0 0 26px rgba(126,148,255,.3); }
-.rfs-menu .rfs-btn:focus::before { color: #fff; }
-.rfs-screen.on .rfs-menu .rfs-btn { animation: rf-slide .45s var(--ww-ease) both; }
-.rfs-screen.on .rfs-menu .rfs-btn:nth-child(2) { animation-delay: .04s; }
-.rfs-screen.on .rfs-menu .rfs-btn:nth-child(3) { animation-delay: .08s; }
-.rfs-screen.on .rfs-menu .rfs-btn:nth-child(4) { animation-delay: .12s; }
-.rfs-screen.on .rfs-menu .rfs-btn:nth-child(5) { animation-delay: .16s; }
-.rfs-screen.on .rfs-menu .rfs-btn:nth-child(6) { animation-delay: .2s; }
-.rfs-screen.on .rfs-menu .rfs-btn:nth-child(7) { animation-delay: .24s; }
+.rfs-btn:focus { transform: none; }
+nav.rfs-menu .rfs-btn:focus { transform: translateX(8px); border-left-color: var(--ww-accent); box-shadow: 0 0 0 1px rgba(154,171,255,.6), 0 0 26px rgba(126,148,255,.3); }
+nav.rfs-menu .rfs-btn:focus::before { color: #fff; }
+.rfs-screen.on nav.rfs-menu .rfs-btn { animation: rf-slide .45s var(--ww-ease) both; }
+.rfs-screen.on nav.rfs-menu .rfs-btn:nth-child(2) { animation-delay: .04s; }
+.rfs-screen.on nav.rfs-menu .rfs-btn:nth-child(3) { animation-delay: .08s; }
+.rfs-screen.on nav.rfs-menu .rfs-btn:nth-child(4) { animation-delay: .12s; }
+.rfs-screen.on nav.rfs-menu .rfs-btn:nth-child(5) { animation-delay: .16s; }
+.rfs-screen.on nav.rfs-menu .rfs-btn:nth-child(6) { animation-delay: .2s; }
+.rfs-screen.on nav.rfs-menu .rfs-btn:nth-child(7) { animation-delay: .24s; }
 @keyframes rf-slide { from { opacity: 0; transform: translateX(-18px); } }
 
 /* controls panel (main menu) */
@@ -149,7 +150,7 @@
 .rfs-screen.rfs-dim { background: radial-gradient(ellipse at center, rgba(6,8,14,.45), rgba(6,8,14,.82)); -webkit-backdrop-filter: blur(3px) saturate(.8); backdrop-filter: blur(3px) saturate(.8); }
 .rfs-pause { padding: 20px 22px; gap: 14px; }
 .rfs-pause .rfs-selhead { text-align: center; }
-.rfs-pause .rfs-menu .rfs-btn { padding-left: 50px; align-items: flex-start; }
+.rfs-pause nav.rfs-menu .rfs-btn { padding-left: 50px; align-items: flex-start; }
 .rfs-keys { font-size: 12px; line-height: 1.55; color: #b7bdd0; }
 
 /* ---------- results / ending ---------- */
@@ -273,7 +274,7 @@
 @media (min-width: 1900px) {
   .rfs { font-size: 17px; }
   .rfs-col { width: min(460px, 44vw); }
-  .rfs-menu .rfs-btn { min-height: 60px; font-size: 18px; }
+  nav.rfs-menu .rfs-btn { min-height: 60px; font-size: 18px; }
   .rfs-controls { width: min(460px, 30vw); font-size: 14px; }
 }
 @media (prefers-reduced-motion: reduce) {

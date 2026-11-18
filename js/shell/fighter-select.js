@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { COMBAT, DAMAGE, MODEL } from '../config.js';
+import { aiConfig, AI_PROVIDERS } from '../api-brain.js'; // read-only: public config + provider list
 
 const S = window.RFShell;
 
@@ -43,6 +44,74 @@ const H = () => S.selectHooks;
 const mode = () => S.state.mode;
 // Control per side: fight = P1 player / P2 CPU, versus = both players, watch (Bot vs Bot) = both CPU.
 const isCpu = (side) => (side === 'p2' ? mode() !== 'versus' : mode() === 'watch');
+/* ---------- AI API brain (same keys as Settings > AI API Brain) ----------
+   Writes go through the Settings controls' own change handlers (js/api-brain.js initApiBrainUI),
+   so both screens stay in sync; reads use the exported aiConfig(). The key is never shown or logged. */
+const LS = { on: 'rf_ai_on', provider: 'rf_ai_provider', model: 'rf_ai_model', key: 'rf_ai_key', p1: 'rf_ai_brain_p1', p2: 'rf_ai_brain_p2' };
+const SET_ID = { on: 'aiOn', provider: 'aiProvider', model: 'aiModel', key: 'aiKey', p1: 'aiBrainP1', p2: 'aiBrainP2' };
+function aiWrite(k, v) {
+  const el = document.getElementById(SET_ID[k]);
+  if (el) {
+    if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return;
+  }
+  try { // Settings sheet missing: same keys, same encoding
+    if (k === 'on') localStorage.setItem(LS.on, v ? '1' : '0');
+    else if (v === '' || v == null) localStorage.removeItem(LS[k]);
+    else localStorage.setItem(LS[k], v);
+  } catch (_) { /* storage blocked */ }
+}
+const apiAllowed = (side) => (side === 'p1' ? !['arcade', 'training'].includes(mode()) : mode() !== 'training');
+function brainOf(side) {
+  if (!isCpu(side)) return 'player';
+  const c = aiConfig();
+  return c.on && c.brain[side] === 'api' ? 'api' : 'cpu';
+}
+function apiStatus(side) {
+  const c = aiConfig();
+  const f = S.fighters()[side === 'p1' ? 0 : 1];
+  const bs = f && f.brain && f.brain.kind === 'api' ? f.brain.stats : null;
+  if (bs && bs.errors > 0 && bs.lastError) return { cls: 'err', txt: 'Last request failed: ' + String(bs.lastError).slice(0, 48) };
+  if (!c.key) return { cls: 'warn', txt: 'Add an API key to use the AI brain' };
+  if (!c.base || !c.model) return { cls: 'warn', txt: 'Set a base URL and model in Settings' };
+  return { cls: 'ok', txt: 'Ready · key saved in this browser' };
+}
+function apiPanel(side) {
+  const c = aiConfig();
+  let model = '';
+  try { model = localStorage.getItem(LS.model) || ''; } catch (_) { /* ignore */ }
+  const st0 = apiStatus(side);
+  return `<div class="fs-api" data-side="${side}">
+    <div class="fs-apistat"><i class="fs-dot ${st0.cls}"></i><span>${esc(st0.txt)}</span></div>
+    <label><span>Provider</span><select class="fs-in" data-api="provider">${Object.entries(AI_PROVIDERS).map(([k, p]) => `<option value="${k}"${k === c.provider ? ' selected' : ''}>${esc(p.label)}</option>`).join('')}</select></label>
+    <label><span>Model</span><input class="fs-in" data-api="model" list="fsModels-${side}" value="${esc(model)}" placeholder="${esc(AI_PROVIDERS[c.provider].model || 'model name')}" autocomplete="off" spellcheck="false">
+      <datalist id="fsModels-${side}">${Object.values(AI_PROVIDERS).filter((p) => p.model).map((p) => `<option value="${esc(p.model)}"></option>`).join('')}</datalist></label>
+    <label><span>API key</span><input class="fs-in" type="password" data-api="key" autocomplete="off" spellcheck="false" placeholder="${c.key ? 'Saved · type to replace' : 'Paste key'}"></label>
+  </div>`;
+}
+function paintApi() {
+  if (!st.host) return;
+  st.host.querySelectorAll('.fs-api').forEach((el) => {
+    const r = apiStatus(el.dataset.side);
+    const dot = el.querySelector('.fs-dot');
+    dot.className = 'fs-dot ' + r.cls;
+    el.querySelector('.fs-apistat span').textContent = r.txt;
+    const key = el.querySelector('[data-api="key"]');
+    if (key && document.activeElement !== key) key.placeholder = aiConfig().key ? 'Saved · type to replace' : 'Paste key';
+  });
+}
+function onChange(e) {
+  const t = e.target;
+  if (!t.dataset || !t.dataset.api) return;
+  const k = t.dataset.api;
+  if (k === 'provider') { aiWrite('provider', t.value); render(); return; }
+  if (k === 'model') aiWrite('model', t.value.trim());
+  else if (k === 'key') { const v = t.value.trim(); if (v) aiWrite('key', v); t.value = ''; t.blur(); }
+  S.sfx('click');
+  paintApi();
+}
+
 const presetName = (side) => H().paintName(H().sel[side]);
 
 function oppList() { return ['random'].concat(S.ROSTER.map((o) => o.id)); }
@@ -68,18 +137,18 @@ function statRows(robot, side) {
 
 function ctrlToggle(side) {
   const m = mode();
-  const cpu = isCpu(side);
+  const cur = brainOf(side);
   let lockP = false;
   let lockC = false;
   let note = '';
   if (side === 'p1' && (m === 'arcade' || m === 'training')) { lockC = true; note = m === 'arcade' ? 'Arcade is played by you.' : 'Training is played by you.'; }
-  else if (side === 'p1' && m === 'watch') note = 'Bot vs Bot: both robots run on the CPU brain.';
-  else if (side === 'p1') { /* CPU here switches to Bot vs Bot */ }
-  else if (m === 'arcade') { lockP = true; note = 'Arcade is a solo ladder.'; }
-  else if (m === 'training') { lockP = true; note = 'Training uses a dummy.'; }
-  const b = (v, label, locked) => `<button type="button" class="rfs-f fs-tog" data-fs="ctrl" data-side="${side}" data-v="${v}" aria-pressed="${(v === 'cpu') === cpu}"${locked ? ' aria-disabled="true"' : ''}>${label}${locked ? LOCK_SVG : ''}</button>`;
-  return `<div class="fs-ctrl" role="group" aria-label="${side.toUpperCase()} control">${b('player', 'Player', lockP)}${b('cpu', m === 'training' && side === 'p2' ? 'Dummy' : 'CPU', lockC)}</div>
-    ${note ? `<p class="fs-note">${note}</p>` : ''}`;
+  else if (side === 'p1' && m === 'watch') note = 'Bot vs Bot: both robots run on a CPU or AI brain.';
+  else if (side === 'p2' && m === 'arcade') { lockP = true; note = 'Arcade is a solo ladder.'; }
+  else if (side === 'p2' && m === 'training') { lockP = true; note = 'Training uses a dummy (no brain).'; }
+  const lockA = !apiAllowed(side);
+  const b = (v, label, locked) => `<button type="button" class="rfs-f fs-tog" data-fs="ctrl" data-side="${side}" data-v="${v}" aria-pressed="${cur === v}"${locked ? ' aria-disabled="true"' : ''}>${label}${locked ? LOCK_SVG : ''}</button>`;
+  return `<div class="fs-ctrl fs-ctrl3" role="group" aria-label="${side.toUpperCase()} brain">${b('player', 'Player', lockP)}${b('cpu', m === 'training' && side === 'p2' ? 'Dummy' : 'CPU', lockC)}${b('api', 'AI API', lockA)}</div>
+    ${note ? `<p class="fs-note">${note}</p>` : ''}${cur === 'api' ? apiPanel(side) : ''}`;
 }
 
 function chips(side) {
@@ -111,7 +180,7 @@ function p2Extra() {
 
 function sidePanel(side) {
   const r = robotById(st.pick[side]);
-  const who = side === 'p1' ? (isCpu('p1') ? 'Blue corner CPU' : 'Player 1') : (isCpu(side) ? (mode() === 'training' ? 'Training dummy' : 'CPU') : 'Player 2');
+  const who = brainOf(side) === 'api' ? (side === 'p1' ? 'Blue corner · AI API' : 'AI API') : side === 'p1' ? (isCpu('p1') ? 'Blue corner CPU' : 'Player 1') : (isCpu(side) ? (mode() === 'training' ? 'Training dummy' : 'CPU') : 'Player 2');
   return `<section class="fs-side" data-side="${side}" style="--pc:${SIDE_COLOR[side]}">
     <header class="fs-head"><span class="fs-tag">${side.toUpperCase()}</span>
       <div><small>${who}</small><b>${esc(r.name)}</b><em>${esc(r.cls)}</em></div>
@@ -128,7 +197,7 @@ function rosterGrid() {
     ? `<button type="button" class="rfs-f fs-tile locked" data-fs="tile" data-id="${r.id}" aria-disabled="true" aria-label="Locked slot, coming soon"><span class="fs-lockic">${LOCK_SVG}</span><small>Soon</small></button>`
     : `<button type="button" class="rfs-f fs-tile" data-fs="tile" data-id="${r.id}" aria-label="${esc(r.name)}"${r.id === 'robot' ? ' data-autofocus' : ''}>
         <span class="fs-portrait">${st.portrait ? `<img src="${st.portrait}" alt="">` : ''}</span><small>${esc(r.name)}</small>
-        <i class="fs-cur p1">${isCpu('p1') ? 'CPU' : '1P'}</i><i class="fs-cur p2">${isCpu('p2') ? 'CPU' : '2P'}</i></button>`).join('')}</div>
+        <i class="fs-cur p1">${brainOf('p1') === 'api' ? 'AI' : isCpu('p1') ? 'CPU' : '1P'}</i><i class="fs-cur p2">${brainOf('p2') === 'api' ? 'AI' : isCpu('p2') ? 'CPU' : '2P'}</i></button>`).join('')}</div>
     <div class="fs-caption" aria-live="polite"></div>`;
 }
 
@@ -144,6 +213,9 @@ function render() {
     scr.appendChild(host);
     host.addEventListener('click', onClick);
     host.addEventListener('focusin', onFocus);
+    host.addEventListener('change', onChange);
+    // Typing in the AI fields must not reach the game (camera key, restart, etc.).
+    host.addEventListener('keydown', (e) => { if (e.target.matches && e.target.matches('input, select')) e.stopPropagation(); });
     host.addEventListener('pointermove', () => { st.ptr = true; });
     host.addEventListener('keydown', () => { st.ptr = false; }, true);
   }
@@ -174,7 +246,7 @@ function paint() {
     const ready = st.ready[side];
     el.classList.toggle('is-ready', ready);
     const lock = el.querySelector('.fs-lock');
-    lock.innerHTML = ready ? 'Ready <small>click to change</small>' : (isCpu(side) ? 'Lock CPU' : 'Lock in');
+    lock.innerHTML = ready ? 'Ready <small>click to change</small>' : (brainOf(side) === 'api' ? 'Lock AI' : isCpu(side) ? 'Lock CPU' : 'Lock in');
     lock.setAttribute('aria-pressed', String(ready));
     el.querySelectorAll('.fs-chip').forEach((b) => b.setAttribute('aria-pressed', String(presetName(side) === (S.PRESETS.find((p) => p.id === b.dataset.preset) || {}).name)));
     const pn = el.querySelector('.fs-pname');
@@ -195,6 +267,7 @@ function paint() {
     const b = S.state.padSwap ? 'P1' : 'P2';
     pt.textContent = n === 0 ? 'Keyboard only' : n === 1 ? `Pad → ${a}` : `Pad 1 → ${a} · Pad 2 → ${b}`;
   }
+  paintApi();
   if (stage) stage.paintRobots();
 }
 
@@ -261,18 +334,27 @@ function onClick(e) {
       return st.ready[side] ? setReady(side, false) : (side === 'p1' ? lockNext() : setReady(side, true));
     case 'ctrl': {
       if (b.getAttribute('aria-disabled') === 'true') {
-        return deny(b, side === 'p1' ? 'P1 is you in this mode.' : (mode() === 'arcade' ? 'Arcade is solo: P2 is always the CPU ladder.' : 'Training always uses the dummy.'));
+        const v0 = b.dataset.v;
+        return deny(b, v0 === 'api' ? (side === 'p1' ? 'P1 is you in this mode, so it has no brain to swap.' : 'The training dummy has no brain.')
+          : side === 'p1' ? 'P1 is you in this mode.' : (mode() === 'arcade' ? 'Arcade is solo: P2 is always the CPU ladder.' : 'Training always uses the dummy.'));
       }
-      const cpuPick = b.dataset.v === 'cpu';
-      // fight <-> versus from P2, fight/versus <-> watch from P1 (Bot vs Bot needs both on CPU).
-      const want = side === 'p2' ? (cpuPick ? (mode() === 'watch' ? 'watch' : 'fight') : 'versus') : (cpuPick ? 'watch' : 'fight');
-      if (mode() === want) return;
+      const v = b.dataset.v;
+      const m0 = mode();
+      const before = brainOf(side);
+      if (before === v) return;
+      // Player/CPU keep their mode rules: P2 picks Fight or Versus, P1 CPU (or AI) picks Bot vs Bot.
+      let want = m0;
+      if (v === 'player') want = side === 'p2' ? 'versus' : (m0 === 'watch' ? 'fight' : m0);
+      else if (side === 'p2') want = (m0 === 'versus') ? 'fight' : m0;
+      else want = 'watch';
       S.sfx('click');
       S.state.mode = want;
+      if (v === 'api') { aiWrite(side, 'api'); if (!aiConfig().on) aiWrite('on', true); }
+      else if (v === 'cpu') aiWrite(side, 'cpu');
       st.ready = { p1: false, p2: false };
       render();
-      H().previewSelect();
-      const nb = st.host.querySelector(`[data-fs="ctrl"][data-side="${side}"][data-v="${b.dataset.v}"]`);
+      if (want !== m0) H().previewSelect();
+      const nb = st.host.querySelector(`[data-fs="ctrl"][data-side="${side}"][data-v="${v}"]`);
       if (nb) nb.focus({ preventScroll: true });
       return;
     }
@@ -339,8 +421,8 @@ function go() {
     el.querySelector('b').textContent = big;
     el.querySelector('span').textContent = sub;
   };
-  set('.fs-vs-l', isCpu('p1') ? 'Blue CPU' : 'Player 1', robotById(st.pick.p1).name, presetName('p1'));
-  set('.fs-vs-r', m === 'versus' ? 'Player 2' : m === 'training' ? 'Training' : 'CPU', m === 'training' ? 'Dummy' : robotById(st.pick.p2).name,
+  set('.fs-vs-l', brainOf('p1') === 'api' ? 'Blue · AI API' : isCpu('p1') ? 'Blue CPU' : 'Player 1', robotById(st.pick.p1).name, presetName('p1'));
+  set('.fs-vs-r', m === 'versus' ? 'Player 2' : m === 'training' ? 'Training' : brainOf('p2') === 'api' ? 'AI API' : 'CPU', m === 'training' ? 'Dummy' : robotById(st.pick.p2).name,
     m === 'versus' ? presetName('p2') : (o ? o.name : (m === 'fight' || m === 'watch' ? 'Random' : '')));
   ov.className = 'fs-vs';
   void ov.offsetWidth;

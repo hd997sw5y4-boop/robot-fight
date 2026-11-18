@@ -231,3 +231,26 @@ body.fs-open #c { visibility: hidden; }
 @media (prefers-reduced-motion: reduce) {
   .fs *, .fs-vs * { animation-duration: .01s !important; transition-duration: .01s !important; }
 }
+
+/* brain choice: Player / CPU / AI API */
+.fs-ctrl.fs-ctrl3 { grid-template-columns: repeat(3, 1fr); }
+.fs-ctrl3 .fs-tog { padding-left: calc(4 * var(--u)); padding-right: calc(4 * var(--u)); font-size: calc(12 * var(--u)); }
+.fs-api {
+  display: flex; flex-direction: column; gap: calc(6 * var(--u)); padding: calc(9 * var(--u)) calc(10 * var(--u));
+  border-radius: calc(12 * var(--u)); border: 1px solid color-mix(in srgb, var(--pc) 40%, transparent);
+  background: linear-gradient(180deg, rgba(30,34,48,.8), rgba(16,18,26,.85)); animation: fs-apiin .3s var(--ww-ease);
+}
+@keyframes fs-apiin { from { opacity: 0; transform: translateY(-4px); } }
+.fs-api label { display: grid; grid-template-columns: calc(62 * var(--u)) 1fr; align-items: center; gap: calc(8 * var(--u)); }
+.fs-api label > span { font: 700 calc(10.5 * var(--u))/1 var(--ww-font); letter-spacing: .14em; text-transform: uppercase; color: var(--ww-text-2); }
+.fs-in {
+  min-width: 0; width: 100%; min-height: calc(30 * var(--u)); padding: calc(4 * var(--u)) calc(8 * var(--u)); border-radius: calc(8 * var(--u));
+  border: 1px solid rgba(154,171,255,.35); background: #10121a; color: var(--ww-text); font: 600 calc(12.5 * var(--u)) var(--ww-font);
+}
+.fs-in:focus { outline: none; border-color: var(--ww-accent); box-shadow: 0 0 0 2px rgba(154,171,255,.4); }
+select.fs-in { appearance: none; padding-right: calc(24 * var(--u)); background: #10121a url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%239AABFF' stroke-width='2'/%3E%3C/svg%3E") no-repeat right 8px center; cursor: pointer; }
+.fs-apistat { display: flex; align-items: center; gap: calc(8 * var(--u)); font-size: calc(11.5 * var(--u)); color: #c5cbe0; }
+.fs-dot { flex: none; width: calc(10 * var(--u)); height: calc(10 * var(--u)); border-radius: 50%; background: #6b7186; }
+.fs-dot.ok { background: #3ddc84; box-shadow: 0 0 10px #3ddc84; }
+.fs-dot.warn { background: #f5b83d; box-shadow: 0 0 10px #f5b83d; }
+.fs-dot.err { background: #ff4d4d; box-shadow: 0 0 10px #ff4d4d; animation: rfs-blink 1s steps(2) infinite; }
