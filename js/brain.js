@@ -183,10 +183,11 @@ export function createPacedBrain(getProfile) {
 
     switch (s.mode) {
       case 'read': {
-        // Tactical pause: planted in the fighting stance, guard up, watching just outside
-        // range. Then a sudden burst in (run) with a fast combo.
-        if (dist < punchR + 0.05) intent.move = -0.7; // too close to just stand there
-        else if (dist > kickR + 1.0) intent.move = 0.6;
+        // Short look, still moving: circle and step in/out rather than planting.
+        intent.strafe = 0.7 * s.circleDir;
+        if (dist < punchR + 0.15) intent.move = -0.85;
+        else if (dist > kickR + 0.45) intent.move = 0.75;
+        else intent.move = 0.2 * Math.sin(s.t * 2.4);
         if (s.modeT > s.modeLen) { startApproach(prof, self); s.burst = true; }
         break;
       }
@@ -196,7 +197,7 @@ export function createPacedBrain(getProfile) {
         intent.run = dist > 2.6 || (s.burst && dist > want + 0.2);
         // Cut the angle a little while closing, unless the target is on the ropes: then
         // walk straight in and keep it there.
-        intent.strafe = opp.edge > 0.7 || s.burst ? 0 : 0.25 * s.circleDir * Math.sin(s.t * 1.9);
+        intent.strafe = opp.edge > 0.7 ? 0 : (s.burst ? 0.4 : 0.75) * s.circleDir;
         if (dist <= want + 0.06 && self.cooldown <= 0) {
           if (Math.random() < (s.tempo < 0.9 ? 0.22 : 0.1)) { // feints, more in patient phases
             setMode('feint', rand(0.3, 0.42));
@@ -230,9 +231,9 @@ export function createPacedBrain(getProfile) {
         break;
       }
       case 'reset': {
-        // Short step out of range after a combo (spacing, not resting).
-        intent.move = dist < 1.9 && !cornered ? -1 : 0;
-        intent.strafe = cornered ? 0.9 * s.circleDir : 0;
+        // Short step out of range after a combo (spacing, not resting), still circling.
+        intent.move = dist < 1.9 && !cornered ? -1 : 0.15;
+        intent.strafe = 0.8 * s.circleDir;
         if (s.modeT > s.modeLen) {
           if (s.readNext) startRead(aggr);
           else startApproach(prof, self);
@@ -273,21 +274,20 @@ export function createPacedBrain(getProfile) {
     setMode('approach', 0);
   }
 
-  // After an exchange: step out, then mostly a planted read; sometimes circle or go straight
-  // back in. Stillness between exchanges, bursts of strikes (robots don't tire: these are
-  // tactical pauses, never rests).
+  // After an exchange: step out or circle, then come back in. Reads are short and mobile
+  // (robots don't tire: these are spacing resets, never rests).
   function endCombo(prof, aggr, self) {
     const r = Math.random();
     s.circleDir = Math.random() < 0.5 ? -1 : 1;
-    if (r < (prof.block || 0.15)) setMode('guard', rand(0.3, 0.55));
-    else if (r < 0.7) setMode('reset', rand(0.2, 0.4));
-    else if (r < 0.85) setMode('circle', rand(0.35, 0.7) / Math.sqrt(aggr));
+    if (r < (prof.block || 0.12)) setMode('guard', rand(0.25, 0.45));
+    else if (r < 0.32) setMode('reset', rand(0.18, 0.35));
+    else if (r < 0.82) setMode('circle', rand(0.7, 1.3) / Math.sqrt(aggr));
     else startApproach(prof, self); // straight back in
-    s.readNext = r >= (prof.block || 0.15) && r < 0.85;
+    s.readNext = r < 0.16;
   }
 
   function startRead(aggr) {
-    setMode('read', rand(0.7, 1.6) / Math.sqrt(aggr));
+    setMode('read', rand(0.22, 0.5) / Math.sqrt(aggr));
   }
 
   return { kind: 'paced', think, state: s };

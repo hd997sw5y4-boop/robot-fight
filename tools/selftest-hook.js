@@ -143,21 +143,26 @@
   }
 
   function hookClock(a) {
-    if (installedClock || !a || !a.clock) return;
+    if (!a || !a.clock) return;
     const clock = a.clock;
-    if (clock && typeof clock.getDelta === 'function' && !clock.__rfTestWrapped) {
+    if (typeof clock.getDelta === 'function' && !clock.__rfTestScaled) {
       const gd = clock.getDelta.bind(clock);
-      clock.getDelta = function () { return gd(); };
-      clock.__rfTestWrapped = true;
+      clock.getDelta = function () { return gd() * timeScale; };
+      clock.__rfTestScaled = true;
     }
     installedClock = true;
   }
 
+  function xzOf(f) {
+    if (!f) return null;
+    if (f.root && f.root.position) return f.root.position;
+    if (f.x != null && f.z != null) return f;
+    return null;
+  }
   function xzSpeed(f, prevF, dt) {
-    if (!prevF || dt <= 0) return 0;
-    const dx = f.root.position.x - prevF.x;
-    const dz = f.root.position.z - prevF.z;
-    return Math.hypot(dx, dz) / dt;
+    const a = xzOf(f), b = xzOf(prevF);
+    if (!a || !b || dt <= 0) return 0;
+    return Math.hypot(a.x - b.x, a.z - b.z) / dt;
   }
 
   function torsoXZ(f, THREE) {

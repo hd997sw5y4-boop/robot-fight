@@ -110,7 +110,7 @@ export const COMBAT = {
   maxHealth: 100,
   moveSpeed: 3.4 * SIZE,
   runMul: 1.5, // Shift: forward speed multiplier (on top of footworkMul)
-  footworkMul: 1.5, // base forward/back stepping speed vs the clip; walk anim speeds up to match
+  footworkMul: 2.0, // base forward/back stepping speed vs the clip; walk anim speeds up to match
   runBackMul: 1.35, // Shift: backward speed multiplier
   blockMoveSpeed: 1.4 * SIZE,
   // reach: root-to-root distance where the strike visibly lands (the AI fights from here).
@@ -128,23 +128,23 @@ export const COMBAT = {
     MeiaLuaDeFrente: 0.44, FlipKick: 0.5, ChapaGiratoria: 0.5, SpinFlipKick: 0.55, MeiaLuaDeCompasso: 0.55,
   },
   whiffMul: 1.6,
-  punchSpeed: 1.3,       // punch clip playback (damage slows it again)
-  kickSpeed: 1.15,
+  punchSpeed: 1.45,      // punch clip playback (damage slows it again)
+  kickSpeed: 1.28,
   playerRecoverMul: 0.55, // the player's post-attack pause vs the table above
   cpuRecoverMul: 0.85,    // CPU stays readable, a little snappier than the table
   inputBuffer: 0.3,      // seconds an early attack press is remembered
   contactHold: 0.1,      // after a fist/foot connects it is pulled back this soon
   knockdownForce: 4.6,   // a heavy blow at least this hard knocks down (heavy counters always do)
   kickKnockChance: 0.25,  // other heavy kicks knock down this often
-  punchLunge: 0.12 * SIZE, // metres a strike steps in when slightly out of reach (small enough to hide)
-  kickLunge: 0.1 * SIZE,
-  strikeGap: 1.3 * SIZE,   // no lunge inside this gap; it would drive the body into the opponent
+  punchLunge: 0.62 * SIZE, // metres a strike steps forward into the swing (stops on contact)
+  kickLunge: 0.55 * SIZE,
+  strikeGap: 1.3 * SIZE,   // chest-gap guard; lunges no longer wait for a wide opening
   bodyRadius: 0.27 * SIZE, // striking distance to the body surface (contact itself uses skeleton capsules, game.js CAPS)
   fistShell: 0.16 * SIZE,  // fist surface beyond the hand bone (contact tolerance)
   kickShell: 0.15 * SIZE,
   blockReduction: 0.82,
   hitStun: 0.34,       // light hitstun
-  hitStunHeavy: 0.58,  // hooks, body shots, most kicks
+  hitStunHeavy: 1.05,  // hooks, body shots, most kicks: a few stumble steps before recover
   counterExtra: 0.17,  // caught mid-swing: +10f
   blockStunTail: 0.08, // guard stays locked this long after its pushback
   hitInvuln: 0.08,     // only stops one blow registering twice; combos can land
@@ -182,12 +182,13 @@ export const COMBAT = {
 
 export const GFX_PRESETS = {
   // minScale: how far auto-resolution may drop below the cap to hold frame rate.
-  // bloom: UnrealBloom on High only (visors, sparks, LED rings, light shafts).
-  low: { pixelCap: 1, shadows: false, shadowSize: 512, exposure: 1.4, bloom: false, minScale: 0.6 },
+  // bloom: UnrealBloom on High only (visors, sparks, LED rings). Exposure stays modest
+  // so the mat and overhead spots do not clip the cage centre to white.
+  low: { pixelCap: 1, shadows: false, shadowSize: 512, exposure: 1.08, bloom: false, minScale: 0.6 },
   // medium: Macs / Retina / integrated GPUs. Jumbotron at
   // 10 fps, medium crowd (stadium-config quality.medium); debris and HDRI as High.
-  medium: { pixelCap: 1.5, shadows: true, shadowSize: 1024, exposure: 1.55, bloom: false, minScale: 0.55 },
-  high: { pixelCap: 2, shadows: true, shadowSize: 2048, exposure: 1.55, bloom: true, minScale: 0.5 },
+  medium: { pixelCap: 1.5, shadows: true, shadowSize: 1024, exposure: 1.12, bloom: false, minScale: 0.55 },
+  high: { pixelCap: 2, shadows: true, shadowSize: 2048, exposure: 1.15, bloom: true, minScale: 0.5 },
   // phones/tablets (js/mobile.js): applied on top of low/high: pixel ratio and shadow caps.
   mobile: { pixelCap: 1.5, shadowSize: 1024 }, // Low on a phone uses 1.25
 };

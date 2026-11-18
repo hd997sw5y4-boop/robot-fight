@@ -187,15 +187,15 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
   const floorGeo = new THREE.CylinderGeometry(r, r, ARENA.floorThickness, 8);
   uvWorldXZ(floorGeo, 2.15); // ~2.15 m per tile across the ~13 m octagon
   const floorMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    metalness: 1,
-    roughness: 1,
+    color: 0xc2c6cc,
+    metalness: 0.2,
+    roughness: 0.78,
     map: matMaps.map,
     normalMap: matMaps.normalMap,
-    normalScale: new THREE.Vector2(0.85, 0.85),
+    normalScale: new THREE.Vector2(0.4, 0.4),
     roughnessMap: matMaps.roughnessMap,
     metalnessMap: matMaps.metalnessMap,
-    envMapIntensity: 0.85,
+    envMapIntensity: 0.28,
   });
   const floor = new THREE.Mesh(floorGeo, floorMat);
   floor.position.y = -ARENA.floorThickness / 2;
@@ -208,11 +208,11 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
     new THREE.MeshStandardMaterial({
       map: logoTexture(),
       transparent: true,
-      metalness: 0.55,
-      roughness: 0.35,
-      envMapIntensity: 0.9,
-      emissive: 0xffffff,
-      emissiveIntensity: 0.06,
+      metalness: 0.12,
+      roughness: 0.62,
+      envMapIntensity: 0.22,
+      emissive: 0x000000,
+      emissiveIntensity: 0,
       depthWrite: false,
     }),
   );
@@ -222,11 +222,11 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
   group.add(logo);
 
   const ringMat = new THREE.MeshStandardMaterial({
-    color: 0xf2f4f7,
-    metalness: 0.15,
-    roughness: 0.35,
-    emissive: 0x888c92,
-    emissiveIntensity: 0.12,
+    color: 0xd5d8de,
+    metalness: 0.08,
+    roughness: 0.55,
+    emissive: 0x44464c,
+    emissiveIntensity: 0.04,
   });
   const inner = new THREE.Mesh(new THREE.RingGeometry(a - 0.2, a - 0.04, 8), ringMat);
   inner.rotation.x = -Math.PI / 2;
@@ -263,8 +263,8 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
     new THREE.MeshStandardMaterial({
       map: paint.tex,
       transparent: true,
-      roughness: 0.55,
-      metalness: 0.15,
+      roughness: 0.7,
+      metalness: 0.06,
       depthWrite: false,
       polygonOffset: true,
       polygonOffsetFactor: -1,
@@ -279,9 +279,8 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
 
   const strip = new THREE.Mesh(
     new THREE.RingGeometry(a - 0.035, a - 0.005, 8),
-    new THREE.MeshBasicMaterial({ color: 0x9fc4ff, toneMapped: false }),
+    new THREE.MeshStandardMaterial({ color: 0x6e8cb4, emissive: 0x3a5478, emissiveIntensity: 0.45, roughness: 0.5, metalness: 0.1 }),
   );
-  strip.material.color.multiplyScalar(2.2);
   strip.rotation.x = -Math.PI / 2;
   strip.rotation.z = Math.PI / 8;
   strip.position.y = 0.01;
@@ -336,7 +335,7 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
       pad.castShadow = true;
       const cap = new THREE.Mesh(capGeo, pm);
       cap.position.set(x, capY, z);
-      const led = new THREE.Mesh(ledGeo, new THREE.MeshBasicMaterial({ color: new THREE.Color(col).multiplyScalar(3.2), toneMapped: false }));
+      const led = new THREE.Mesh(ledGeo, new THREE.MeshStandardMaterial({ color: col, emissive: new THREE.Color(col), emissiveIntensity: 0.7, roughness: 0.45, metalness: 0.15 }));
       led.rotation.x = Math.PI / 2;
       led.position.set(x, ledTopY, z);
       const led2 = led.clone();
@@ -427,7 +426,7 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
   group.add(railMesh, kickMesh, merged(kickTrim, trimMat));
 
   const fixtureMat = new THREE.MeshStandardMaterial({
-    color: 0xfff4dc, emissive: 0xffe7b0, emissiveIntensity: 2.4, roughness: 0.3,
+    color: 0xfff4dc, emissive: 0xffe7b0, emissiveIntensity: 0.7, roughness: 0.45,
   });
   const fixturePos = [];
   const beamAlpha = beamTexture();
@@ -449,7 +448,7 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
     const beam = new THREE.Mesh(
       new THREE.ConeGeometry(Math.tan(Math.PI / 6.5) * dist * 0.6, dist, 24, 1, true),
       new THREE.MeshBasicMaterial({
-        color: 0xfff1d0, alphaMap: beamAlpha, transparent: true, opacity: 0.022,
+        color: 0xfff1d0, alphaMap: beamAlpha, transparent: true, opacity: 0.004,
         blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false,
       }),
     );
@@ -487,11 +486,11 @@ export function updateCageFade(panels, camera, dt) {
 }
 
 export function addArenaLights(scene, fixturePos) {
-  const hemi = new THREE.HemisphereLight(0xc5d6ee, 0x1a120c, 0.48);
+  const hemi = new THREE.HemisphereLight(0xc5d6ee, 0x1a120c, 0.62);
   scene.add(hemi);
   const spots = [];
   for (const p of fixturePos) {
-    const s = new THREE.SpotLight(0xfff1d0, 20, 20, Math.PI / 6.2, 0.5, 1.05);
+    const s = new THREE.SpotLight(0xfff1d0, 9, 20, Math.PI / 6.2, 0.55, 1.15);
     s.position.copy(p);
     s.target.position.set(0, 0.4, 0);
     s.userData.wantsShadow = spots.length === 0;
@@ -505,11 +504,11 @@ export function addArenaLights(scene, fixturePos) {
     spots.push(s);
   }
   hemi.userData.baseIntensity = hemi.intensity;
-  const fill = new THREE.DirectionalLight(0x8ea4c4, 0.42);
+  const fill = new THREE.DirectionalLight(0x8ea4c4, 0.52);
   fill.position.set(-6, 6, 8);
   fill.userData.baseIntensity = fill.intensity;
   scene.add(fill);
-  const fill2 = new THREE.DirectionalLight(0x6d7c92, 0.22);
+  const fill2 = new THREE.DirectionalLight(0x6d7c92, 0.28);
   fill2.position.set(5, 4, 3);
   fill2.userData.baseIntensity = fill2.intensity;
   scene.add(fill2);

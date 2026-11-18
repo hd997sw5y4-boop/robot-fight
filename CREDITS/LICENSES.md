@@ -41,6 +41,12 @@ No attribution required. Optional credit is appreciated: [Kenney](https://kenney
   UI clicks, ticks, confirm, and close.  
   Game files: `ui_click.ogg`, `ui_click_2.ogg`, `ui_tick.ogg`, `ui_confirm.ogg`, `ui_close.ogg`.
 
+- **Furniture Kit** — https://kenney.nl/assets/furniture-kit  
+  Desk, office chair, laptop, keyboard, monitor and mouse used in the pit-crew corners (`models/pit-crew/desk.glb`, `chairDesk.glb`, `laptop.glb`, `computerKeyboard.glb`, `computerScreen.glb`, `computerMouse.glb`).
+
+- **Factory Kit** — https://kenney.nl/assets/factory-kit  
+  Floor crane, hoist, tall frame, crate, cog, robot arm and lever used as the pit-crew lifting rack and tools (`models/pit-crew/crane.glb`, `crane-lift.glb`, `structure-tall.glb`, `box-small.glb`, `cog-a.glb`, `robot-arm-a.glb`, `lever-single.glb`).
+
 - **Impact Sounds** — https://kenney.nl/assets/impact-sounds  
   Fight bells, plus heavy-robot impact layers. The impact layers are pitched down 20–38% with a
   low-shelf boost (ffmpeg) so they read as human-size machines: `impactMetal_heavy` → `clank_h_*`
@@ -85,10 +91,15 @@ Walking footsteps layer existing CC0 Kenney `thud_*` + `clank_h_*` (and sometime
 ## ambientCG textures — CC0 1.0
 
 - **Metal001** — https://ambientcg.com/view?id=Metal001 — octagon fighting mat base (1K JPG color, OpenGL normal, roughness, metalness; `textures/mat_metal_*.jpg`), tiled in world XZ. Painted start lines, corner wedges, ROBOT FIGHT text and the LED edge are a transparent decal layered on top (`matDecalTexture` in `js/arena.js`).
-- **Metal009** — https://ambientcg.com/view?id=Metal009 — cage/post metal (`textures/metal_*.jpg`).
+- **Metal009** — https://ambientcg.com/view?id=Metal009 — cage/post metal (`textures/metal_*.jpg`); also applied to pit-crew racks and tools.
+- **Wood062** — https://ambientcg.com/view?id=Wood062 — pit-crew desks and chairs (1K JPG color, OpenGL normal, roughness, resized to 512; `textures/pit-crew/wood_*.jpg`).
 - **Metal008** (scratched metal) — https://ambientcg.com/view?id=Metal008 — previously the chrome mat; files remain at `textures/chrome_*.jpg` but are no longer used as the mat material.
 - **Rust004** — https://ambientcg.com/view?id=Rust004 — rust and grunge masks previously mixed into the chrome mat (`textures/rust_*.jpg`); unused by the current Metal001 mat.
 - **Concrete034** — https://ambientcg.com/view?id=Concrete034 — stadium stands, walls and arena floor (`textures/stadium/concrete_*.jpg`; 1K color + normal, roughness resized to 512).
+
+## Quaternius — CC0 1.0
+
+[Ultimate Modular Men Pack](https://quaternius.com/packs/ultimatemodularcharacters.html) (CC0 1.0). Worker, Casual and Casual2 characters used as the blue and red pit-crew figures (`models/pit-crew/Worker.glb`, `Casual.glb`, `Casual2.glb`). Idle, typing and cheer poses are applied on the pack's CharacterArmature at runtime. No attribution required; credit is given anyway.
 
 ## Poly Haven HDRI — CC0 1.0
 

@@ -340,6 +340,7 @@ async function main() {
       window.__rfTestConfig = { timeScale: ${JSON.stringify(opt.timeScale)} };
       try {
         localStorage.setItem('rf_gfx', ${JSON.stringify(opt.gfx)});
+        localStorage.setItem('rf_gfx_picked', '1');
         localStorage.setItem('rf_hdri', ${opt.hdri ? "'1'" : "'0'"});
         localStorage.setItem('rf_vol_master', '0');
         localStorage.setItem('rf_vol_sfx', '0');
@@ -368,18 +369,24 @@ async function main() {
 
     const clk = async (sel) => cdp.ev(clickExpr(sel));
     // Title → main → Bot vs Bot → Start. Retry a few times; the title card can lag.
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 14; i++) {
       const screen = await cdp.ev('window.RFShell && RFShell.state && RFShell.state.screen');
+      if (screen === 'fight') break;
       if (screen === 'title' || screen === 'boot') await clk('[data-act=start]');
       else if (screen === 'main') await clk('[data-mode=watch]');
-      else if (screen === 'select') { await clk('[data-act=go]'); break; }
-      else if (screen === 'fight') break;
+      else if (screen === 'select') {
+        const go = await clk('[data-fs=go]');
+        if (!go) await clk('[data-act=go]');
+        await sleep(500);
+        const now = await cdp.ev('window.RFShell && RFShell.state && RFShell.state.screen');
+        if (now === 'fight') break;
+      }
       await sleep(400);
     }
     // If still not in a watch fight, try the public shell call with a roster CPU.
     await sleep(600);
     let snap = await cdp.ev('window.__rfTest.snapshot()');
-    if (!snap || snap.mode !== 'watch') {
+    if (!snap || snap.screen === 'select' || snap.mode !== 'watch' || snap.shellPhase === 'idle') {
       const started = await cdp.ev(`(() => {
         const S = window.RFShell;
         if (!S || !S.startMatch || !S.ROSTER) return 'no-shell';

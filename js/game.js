@@ -132,7 +132,7 @@ const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, 
   type: THREE.HalfFloatType, samples: IS_MOBILE ? 0 : 4,
 }));
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.4, 0.4, 0.9);
+const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.18, 0.35, 1.55);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 let useBloom = false;
@@ -1950,10 +1950,10 @@ function tryAttack(f, kind, clipName, exact = false) {
     // otherwise the foot teleports between frames.
     const cap = st && st.vpk > 0 ? STRIKE_VMAX / st.vpk : Infinity;
     let base = Math.min(speed * mods.timeScale * statOf(f, 'speed'), cap);
-    // No sluggish strikes: if the played part (lead-in skipped) would take longer than a snappy
-    // budget, play it faster (still under the limb-speed cap, so nothing teleports).
+    // Normalize the played window (lead-in skipped) so punches and kicks feel equally snappy
+    // (specials keep their longer wind-ups). Still under the limb-speed cap, so nothing teleports.
     if (st && !SPECIAL_STRIKES.has(clip)) {
-      const budget = kind === 'punch' ? 0.5 : 0.7;
+      const budget = kind === 'punch' ? 0.42 : 0.58;
       const played = (st.end - st.start) / Math.max(0.2, base);
       if (played > budget) base = Math.min(cap, base * played / budget);
     }
@@ -1987,7 +1987,7 @@ function strikeTip(name) {
 function fitStrikeClip(f, kind, clip, other) {
   if (!STRIKE_T || !other) return clip;
   const gap = f.root.position.distanceTo(other.root.position);
-  const lunge = gap > (COMBAT.strikeGap || 1.2) ? ((kind === 'kick' ? COMBAT.kickLunge : COMBAT.punchLunge) || 0) : 0;
+  const lunge = (kind === 'kick' ? COMBAT.kickLunge : COMBAT.punchLunge) || 0;
   const fits = (n) => {
     const tip = strikeTip(n);
     return tip != null && tip + lunge >= gap - 0.02 && tip <= gap + 0.3;
@@ -2455,17 +2455,14 @@ function applyHit(atk, def, spec, kind, strikeBone, contact) {
       const clip = stumbleClip || pickHitClip(def, hit.partId);
       setAnim(def, clip, 0.07);
       const act = def.actions[clip];
-      const clipDur = act ? act.getClip().duration / Math.max(0.2, act.timeScale || 1) : COMBAT.hitStun;
       const stun = ((stumbleClip ? COMBAT.hitStunHeavy : COMBAT.hitStun) + (counter ? COMBAT.counterExtra : 0)) / statOf(def, 'recovery');
-      def.hitDur = stumbleClip ? Math.max(stun, Math.min(clipDur * 0.9, 0.65)) : stun; // short, clear stun windows
-      // Knockback travel is walked out: the backward walk plays under the hit clip (see 'hit').
-      def.hitPush = stumbleClip
-        ? { x: fwd.x, z: fwd.z, dist: COMBAT.stumbleDist * Math.min(1.35, 0.85 + force * 0.06), t0: 0, t1: def.hitDur * 0.85, legs: false }
-        : { x: fwd.x, z: fwd.z, dist: COMBAT.hitRock * Math.min(1.55, 0.9 + force * 0.12), t0: 0, t1: Math.max(0.24, stun * 0.85), legs: true };
-      if (def.hitPush) {
-        const v0 = (def.hitPush.dist / Math.max(0.05, def.hitPush.t1)) * (Math.PI / 2) * 0.35;
-        setFighterMove(def, def.hitPush.x * v0, def.hitPush.z * v0);
-      }
+      def.hitDur = stun;
+      // Travel at the clip's foot speed so backward walk / stumble / knockback never slide in place.
+      const gaitName = stumbleClip ? 'StumbleBackwards' : 'WalkingBackwards';
+      const gait = clipGait(def, gaitName) * Math.max(0.2, (act && act.timeScale) || 1);
+      const t1 = stumbleClip ? def.hitDur * 0.92 : Math.max(0.24, stun * 0.85);
+      def.hitPush = { x: fwd.x, z: fwd.z, dist: gait * t1, gait, t0: 0, t1, legs: !stumbleClip };
+      setFighterMove(def, fwd.x * gait, fwd.z * gait);
     }
   }
 }
@@ -2693,10 +2690,10 @@ function playVictory(f) {
 // Robots always take blows from the front (they face each other), so the clip is chosen by
 // where the blow landed: a torso/body shot folds the robot to its knees (LivershotKnockdown,
 // which also contains its own recovery); anything else knocks it over backwards
-// (StumbleBackwards played from its stagger into the fall), it lies there for
+// (StumbleBackwards played from the first stumble steps into the fall), it lies there for
 // COMBAT.downRest, then GettingUp (whose first frame is StumbleBackwards' last frame).
 const FALL = {
-  backward: { clip: 'StumbleBackwards', from: 0.35, speed: 1.25, lieAt: 0.55 },
+  backward: { clip: 'StumbleBackwards', from: 0, speed: 1.2, lieAt: 0.55 },
   body: { clip: 'LivershotKnockdown', from: 0.1, speed: 1.2, lieAt: null },
 };
 
@@ -2715,15 +2712,21 @@ function knockDown(def, fwd, force, partId) {
   def.downLieT = 0;
   def.landed = false;
   def.groundY = def.groundY || 0;
-  // The stagger back before the fall is walked out by the clip's own steps; the root follows
-  // with a short sine push (no velocity is left over afterwards).
-  def.hitPush = { x: fwd.x, z: fwd.z, dist: Math.min(0.75, (body ? 0.15 : 0.4) + force * 0.03), t0: 0.03, t1: body ? 0.35 : 0.7, legs: false };
-  setFighterMove(def, 0, 0);
+  // Stumble steps play from the start of the clip; the root travels at that gait so the feet don't slide.
   const act = setAnim(def, spec.clip, 0.1);
   if (act) {
     act.time = spec.from;
     act.timeScale = spec.speed;
   }
+  const dur = act ? act.getClip().duration : 1;
+  const fallT = spec.lieAt != null
+    ? Math.max(0.2, (dur * spec.lieAt - (spec.from || 0)) / Math.max(0.2, spec.speed))
+    : (body ? 0.35 : 0.7);
+  const gait = body
+    ? Math.min(0.55, 0.2 + force * 0.04)
+    : clipGait(def, 'StumbleBackwards') * (spec.speed || 1);
+  def.hitPush = { x: fwd.x, z: fwd.z, dist: gait * fallT, gait, t0: 0, t1: fallT, legs: false };
+  setFighterMove(def, fwd.x * gait, fwd.z * gait);
   announce('knockdown', { delay: 0.35 }); // [announcer hook]
 }
 
@@ -3090,7 +3093,7 @@ function stepFighter(f, other, inp, dt) {
     if (action && f.strikeBase && !f.retract && f.contactT < 0 && action.timeScale > 0 && !(f.airMove && f.airMove.action === action)) {
       const st0 = tm.start, pk = tm.peak != null ? tm.peak : tm.a0;
       const u = (ct - st0) / Math.max(0.05, pk - st0);
-      const mul = u < 0.3 ? 0.85 : (ct <= tm.a1 ? 1.3 : 0.92);
+      const mul = u < 0.3 ? 0.95 : (ct <= tm.a1 ? 1.2 : 0.95);
       action.timeScale = Math.min(f.strikeCap || Infinity, f.strikeBase * mul);
     }
     // A small step into the strike when just out of reach; it stops on contact and never
@@ -3098,15 +3101,11 @@ function stepFighter(f, other, inp, dt) {
     const gap = f.root.position.distanceTo(other.root.position);
     const airKick = f.airMove && f.airMove.action === action ? f.airMove : null;
     if (airKick) stepAirMove(f, dt); // jump kick: travels only while airborne, lands still
-    else if (!f.atkContact && ct < tm.a0 && gap > (COMBAT.strikeGap || 1.2) * 0.9 && chestGap(f, other) > 0.72 * SIZE && !limbInside(f, other, f.state)) {
+    else if (!f.atkContact && ct < tm.a0 && chestGap(f, other) > 0.72 * SIZE && !limbInside(f, other, f.state)) {
+      // Step into every swing; chestGap / limbInside stop the body driving through the opponent.
       const lunge = (f.state === 'kick' ? COMBAT.kickLunge : COMBAT.punchLunge) || 0;
       const fwd = toward(f, other);
       const v = lunge / Math.max(0.1, (tm.a0 - tm.start) / Math.max(0.2, action ? action.timeScale : 1));
-      setFighterMove(f, fwd.x * v, fwd.z * v);
-    } else if (!f.atkContact && action && ct < tm.a0 && ct > tm.start + (tm.a0 - tm.start) * 0.3 && chestGap(f, other) > 0.72 * SIZE && !limbInside(f, other, f.state)) {
-      // Mass behind it: the body shifts a touch into the blow during the acceleration.
-      const fwd = toward(f, other);
-      const v = 0.32 * SIZE;
       setFighterMove(f, fwd.x * v, fwd.z * v);
     } else setFighterMove(f, 0, 0);
     // Limb contact decides, not root distance: the swept fist/foot test runs through the whole
@@ -3246,11 +3245,24 @@ function stepFighter(f, other, inp, dt) {
 
 const LOCO_KEYS = ['idle', 'idleB', 'injured', 'walkFwd', 'walkBack', 'strafeL', 'strafeR'];
 
-// Sine-shaped push speed inside [t0, t1] (zero outside) so travel starts and ends at rest.
+// Clip foot speed in world metres / second (fallback: backward walk, then moveSpeed).
+function clipGait(f, name) {
+  return clipWorldSpeed(f, name) || clipWorldSpeed(f, 'WalkingBackwards') || COMBAT.moveSpeed * 0.3;
+}
+
+// Travel speed inside [t0, t1] (zero outside). When hp.gait is set, cruise at the clip's foot
+// speed (short ease in/out) so backward walk, stumble and knockback don't slide in place.
 function pushSpeed(hp, t) {
   const span = Math.max(0.05, hp.t1 - hp.t0);
   const u = (t - hp.t0) / span;
   if (u < 0 || u > 1) return 0;
+  if (hp.gait != null && hp.gait > 0) {
+    const ease = Math.min(0.12, span * 0.2) / span;
+    let m = 1;
+    if (u < ease) m = u / Math.max(1e-4, ease);
+    else if (u > 1 - ease) m = (1 - u) / Math.max(1e-4, ease);
+    return hp.gait * m;
+  }
   return (hp.dist / span) * (Math.PI / 2) * Math.sin(Math.PI * u);
 }
 
@@ -4252,7 +4264,7 @@ function onLoad(gltf) {
   applyLight(getSettings().light);
   // [stadium-arena hook] scenery-only; mat, walls and physics stay as built above.
   cagePanels = built.fencePanels;
-  initPitCrew(scene);
+  initPitCrew(scene, gfxKey);
   initStadium({
     scene, renderer, pmrem, industrial: built, gfx: gfxKey,
     applyHdri, getHdri: () => !!(getSettings().hdri || ARENA.hdri),

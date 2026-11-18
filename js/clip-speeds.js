@@ -8,4 +8,6 @@ export const CLIP_SPEEDS = {
   JogStrafeRight: 0.02764,
   LongStepForward: 0.011236,
   StepBackward: 0.006675,
+  // Slightly longer, quicker steps than the backward walk (same local units).
+  StumbleBackwards: 0.00785,
 };
