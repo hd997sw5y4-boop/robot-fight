@@ -1,7 +1,13 @@
 // Mixamo-rigged Sketchfab "Robot character" (assetfactory, Free Standard).
 // Animations from Mixamo. Idle/walk/strafe use real clips; hips XZ root motion is stripped.
-// Robot size: every robot-relative distance (reach, spacing, capsules, cameras, wires) scales by this.
-export const SIZE = 1.12;
+// World scale: the octagon (mat, cage, platform, physics bounds) and both robots grow together
+// so the fight fills more of the screen. Speeds, reach, and capsules already follow SIZE.
+export const WORLD_SCALE = 1.25;
+// Cameras keep a pre-scale standoff so the larger robots fill the frame and the view stays
+// inside the stadium bowl (LED barrier at ~15.6 m). Look-at height still follows SIZE + matTop.
+export const CAM_SIZE = 1.12;
+// Robot size: every robot-relative distance (reach, spacing, capsules, wires) scales by this.
+export const SIZE = 1.12 * WORLD_SCALE;
 
 export const MODEL = {
   url: './models/RobotFighter.glb',
@@ -89,15 +95,16 @@ export const LOOP_CLIPS = ['GuardUpper',
 
 export const ARENA = {
   // Distance from center to a flat side of the cage (world units).
-  apothem: 6.1,
+  apothem: 6.1 * WORLD_SCALE,
   floorY: 0,
   floorThickness: 0.28,
+  // Raised octagon stage: mat top sits 0.9 m above the arena floor (STADIUM.floorY).
   // Visual floor-mesh top and physics plane share this Y so feet and colliders agree.
-  matTop: 0,
+  matTop: 0.9,
   // Short MMA cage (waist-to-chest). Visuals and physics share this height for the
   // visible rail; physics also uses a taller extension of the same wall so jump-outs stay in.
   cage: true,
-  cageHeight: 1.48,
+  cageHeight: 1.48 * WORLD_SCALE,
   // Two-bone stance IK is off: the solver was twisting legs and lifting feet off the mat.
   stanceIK: false,
   // HDRI environment + backdrop (on by default via settings.js; the player's toggle is saved).
@@ -116,7 +123,7 @@ export const COMBAT = {
   // reach: root-to-root distance where the strike visibly lands (the AI fights from here).
   // range: outer gate; the hit itself needs the fist/foot to touch the body (see strikeContact).
   // recover: idle time after the attack ends (x whiffMul when it missed).
-  punch: { damage: 5, reach: 1.36 * SIZE, range: 1.9 * SIZE, recover: 0.2, activeFrac: [0.2, 0.78] },
+  punch: { damage: 5, reach: 1.62 * SIZE, range: 2.25 * SIZE, recover: 0.2, activeFrac: [0.2, 0.78] },
   kick: { damage: 8, reach: 1.68 * SIZE, range: 2.2 * SIZE, recover: 0.36, activeFrac: [0.26, 0.8] },
   // Extra idle after a clip by strike class (60 fps targets: jab 16-20f, hook/elbow 22-28f,
   // knee/kick 28-36f, spinning 36-44f); the clip's own follow-through covers part of it.
@@ -136,7 +143,7 @@ export const COMBAT = {
   contactHold: 0.1,      // after a fist/foot connects it is pulled back this soon
   knockdownForce: 4.6,   // a heavy blow at least this hard knocks down (heavy counters always do)
   kickKnockChance: 0.25,  // other heavy kicks knock down this often
-  punchLunge: 0.62 * SIZE, // metres a strike steps forward into the swing (stops on contact)
+  punchLunge: 0.68 * SIZE, // metres a strike steps forward into the swing (stops on contact)
   kickLunge: 0.55 * SIZE,
   strikeGap: 1.3 * SIZE,   // chest-gap guard; lunges no longer wait for a wide opening
   bodyRadius: 0.27 * SIZE, // striking distance to the body surface (contact itself uses skeleton capsules, game.js CAPS)
@@ -182,13 +189,14 @@ export const COMBAT = {
 
 export const GFX_PRESETS = {
   // minScale: how far auto-resolution may drop below the cap to hold frame rate.
-  // bloom: UnrealBloom on High only (visors, sparks, LED rings). Exposure stays modest
-  // so the mat and overhead spots do not clip the cage centre to white.
-  low: { pixelCap: 1, shadows: false, shadowSize: 512, exposure: 1.08, bloom: false, minScale: 0.6 },
+  // bloom: off. UnrealBloom was smearing leftover additive fixture glow into a white haze
+  // over the cage centre. Exposure stays modest (ACES) so the metal mat stays a sharp mirror.
+  // mirror: planar mat reflection resolution (Medium renders it at half size).
+  low: { pixelCap: 1, shadows: false, shadowSize: 512, exposure: 1.08, bloom: false, mirror: 0, minScale: 0.6 },
   // medium: Macs / Retina / integrated GPUs. Jumbotron at
   // 10 fps, medium crowd (stadium-config quality.medium); debris and HDRI as High.
-  medium: { pixelCap: 1.5, shadows: true, shadowSize: 1024, exposure: 1.12, bloom: false, minScale: 0.55 },
-  high: { pixelCap: 2, shadows: true, shadowSize: 2048, exposure: 1.15, bloom: true, minScale: 0.5 },
+  medium: { pixelCap: 1.5, shadows: true, shadowSize: 1024, exposure: 1.12, bloom: false, mirror: 512, minScale: 0.55 },
+  high: { pixelCap: 2, shadows: true, shadowSize: 2048, exposure: 1.15, bloom: false, mirror: 1024, minScale: 0.5 },
   // phones/tablets (js/mobile.js): applied on top of low/high: pixel ratio and shadow caps.
   mobile: { pixelCap: 1.5, shadowSize: 1024 }, // Low on a phone uses 1.25
 };

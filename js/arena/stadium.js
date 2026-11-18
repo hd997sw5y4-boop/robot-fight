@@ -162,18 +162,6 @@ function lensTex(cols, rows) {
   });
 }
 
-function glareTex() {
-  return canvasTex(128, 128, (g, w) => {
-    const rg = g.createRadialGradient(w / 2, w / 2, 0, w / 2, w / 2, w / 2);
-    rg.addColorStop(0, 'rgba(255,255,255,1)');
-    rg.addColorStop(0.18, 'rgba(235,244,255,0.55)');
-    rg.addColorStop(0.5, 'rgba(160,190,230,0.12)');
-    rg.addColorStop(1, 'rgba(0,0,0,0)');
-    g.fillStyle = rg;
-    g.fillRect(0, 0, w, w);
-  });
-}
-
 function floorMarkTex() {
   return canvasTex(1024, 1024, (g, w) => {
     g.clearRect(0, 0, w, w);
@@ -291,17 +279,22 @@ function build(scene, renderer, pmrem, key) {
   const darkConcrete = concrete.clone();
   darkConcrete.color = new THREE.Color(0x3b3f46);
 
-  // Arena floor (sits just under the mat; mat height / physics unchanged).
+  // Arena floor: square 1K ambientCG Concrete023 (polished dark concrete). Replaces the
+  // stretched non-square Concrete034 maps that tiled as dark wavy/blocky ripples.
+  const floorColor = loadTex('./textures/stadium/floor_color.jpg', true);
+  const floorRough = loadTex('./textures/stadium/floor_rough.jpg', false);
+  const floorNormal = Q.normals ? loadTex('./textures/stadium/floor_normal.jpg', false) : null;
   const floorMat = new THREE.MeshStandardMaterial({
-    color: 0x30343b, map: concColor, roughnessMap: concRough, roughness: 0.55,
-    normalMap: concNormal, metalness: 0.05, envMapIntensity: 0.9,
+    color: 0x2a2c30, map: floorColor, roughnessMap: floorRough, roughness: 0.42,
+    normalMap: floorNormal, metalness: 0.04, envMapIntensity: 0.28,
   });
-  const floor = new THREE.Mesh(planarUv(new THREE.CircleGeometry(STADIUM.barrierR + 0.8, segs).rotateX(-Math.PI / 2), 2.5), floorMat);
+  if (floorNormal) floorMat.normalScale = new THREE.Vector2(0.28, 0.28);
+  const floor = new THREE.Mesh(planarUv(new THREE.CircleGeometry(STADIUM.barrierR + 0.8, segs).rotateX(-Math.PI / 2), 4), floorMat);
   floor.position.y = STADIUM.floorY;
   floor.receiveShadow = true;
   group.add(floor);
   const mark = new THREE.Mesh(
-    new THREE.CircleGeometry(10, 96).rotateX(-Math.PI / 2),
+    new THREE.CircleGeometry(12.5, 96).rotateX(-Math.PI / 2),
     new THREE.MeshBasicMaterial({ map: floorMarkTex(), transparent: true, depthWrite: false, opacity: 0.7, color: 0x8fdfff }),
   );
   mark.position.y = STADIUM.floorY + 0.01;
@@ -529,9 +522,8 @@ function build(scene, renderer, pmrem, key) {
 
   // Fixtures: ring spot cans on the spokes, flood banks on the outer ring truss.
   const housingMat = new THREE.MeshStandardMaterial({ color: 0x15171b, metalness: 0.7, roughness: 0.45 });
-  const lensSpot = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xffffff, emissiveIntensity: 2.4, emissiveMap: lensTex(1, 1) });
-  const lensFlood = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xf4f8ff, emissiveIntensity: 2.0, emissiveMap: lensTex(4, 2) });
-  const glare = Q.glare ? new THREE.SpriteMaterial({ map: glareTex(), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, fog: false, opacity: 0.85 }) : null;
+  const lensSpot = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xffffff, emissiveIntensity: 0.8, emissiveMap: lensTex(1, 1) });
+  const lensFlood = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xf4f8ff, emissiveIntensity: 0.65, emissiveMap: lensTex(4, 2) });
   const ringFix = [];
   const canGeo = new THREE.CylinderGeometry(0.32, 0.4, 0.7, 14, 1, false);
   const lensGeo = new THREE.CircleGeometry(0.3, 18);
@@ -548,12 +540,6 @@ function build(scene, renderer, pmrem, key) {
     const lens = new THREE.Mesh(lensGeo, lensSpot);
     lens.position.z = 0.36;
     holder.add(lens);
-    if (glare) {
-      const sp = new THREE.Sprite(glare);
-      sp.position.z = 0.5;
-      sp.scale.setScalar(2.2);
-      holder.add(sp);
-    }
     group.add(holder);
     ringFix.push({ p, aim });
   }
@@ -577,39 +563,7 @@ function build(scene, renderer, pmrem, key) {
     const lens = new THREE.Mesh(floodLens, lensFlood);
     lens.position.z = 0.235;
     holder.add(lens);
-    if (glare && i % 2 === 0) {
-      const sp = new THREE.Sprite(glare);
-      sp.position.z = 0.6;
-      sp.scale.setScalar(4.2);
-      holder.add(sp);
-    }
     group.add(holder);
-  }
-
-  // Fake volumetric light cones from the ring cans down to the mat.
-  const coneMat = new THREE.ShaderMaterial({
-    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.FrontSide,
-    uniforms: { uColor: { value: new THREE.Color(0xdfe9ff) }, uStrength: { value: key === 'low' ? 0.07 : 0.085 } },
-    vertexShader: `varying vec3 vN; varying vec3 vV; varying float vT;
-      void main(){ vec4 wp = modelMatrix * vec4(position,1.0); vN = normalize(mat3(modelMatrix)*normal);
-      vV = normalize(cameraPosition - wp.xyz); vT = uv.y; gl_Position = projectionMatrix * viewMatrix * wp; }`,
-    fragmentShader: `uniform vec3 uColor; uniform float uStrength; varying vec3 vN; varying vec3 vV; varying float vT;
-      void main(){ float core = pow(abs(dot(normalize(vN), normalize(vV))), 2.0);
-      float fade = smoothstep(0.0, 0.35, vT) * (0.35 + 0.65 * vT);
-      gl_FragColor = vec4(uColor * core * fade * uStrength, 1.0); }`,
-  });
-  const coneStep = Math.max(1, Math.floor(ringFix.length / Q.cones));
-  for (let i = 0; i < ringFix.length; i += coneStep) {
-    const { p, aim } = ringFix[i];
-    const len = p.distanceTo(aim);
-    const cg = new THREE.CylinderGeometry(0.28, 2.6, len, 24, 1, true);
-    // uv.y = 1 at the lamp, 0 at the floor; aim the cone's -Y end at the floor point.
-    cg.translate(0, -len / 2, 0);
-    const cone = new THREE.Mesh(cg, coneMat);
-    cone.position.copy(p);
-    cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), aim.clone().sub(p).normalize());
-    cone.renderOrder = 5;
-    group.add(cone);
   }
 
   // Center-hung scoreboard: four screens, LED rings, cables.
@@ -686,7 +640,7 @@ function build(scene, renderer, pmrem, key) {
   lights.push(hemi);
   for (let i = 0; i < Q.spots; i++) {
     const ang = (i / Q.spots) * Math.PI * 2 + Math.PI / 4;
-    const s = new THREE.SpotLight(0xdfe8ff, 26, 0, Math.PI / 4.2, 0.7, 1.0);
+    const s = new THREE.SpotLight(0xdfe8ff, 10, 0, Math.PI / 4.2, 0.7, 1.0);
     s.position.copy(v(6, ang + Math.PI, T.bottom - 1));
     s.target.position.copy(v(25, ang, 5));
     s.castShadow = false;
@@ -790,6 +744,13 @@ function setIndustrialExtras(visible) {
     for (const o of ctx.industrial.group.children) {
       if (o.position.y > 6.5 && o.visible) { o.visible = false; hiddenIndustrial.push(o); }
     }
+    // Cage-center industrial spots live on the scene, not in the industrial group.
+    ctx.scene.traverse((o) => {
+      if (o.isLight && o.userData && o.userData.industrialOverhead && o.visible) {
+        o.visible = false;
+        hiddenIndustrial.push(o);
+      }
+    });
   } else {
     for (const o of hiddenIndustrial) o.visible = true;
     hiddenIndustrial.length = 0;

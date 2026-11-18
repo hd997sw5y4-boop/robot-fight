@@ -3,11 +3,14 @@
    (see game.js knockDown / ko); there is no ragdoll. */
 import * as CANNON from 'cannon-es';
 import * as THREE from 'three';
-import { ARENA, SIZE } from './config.js';
+import { ARENA, SIZE, WORLD_SCALE } from './config.js';
 
 const G = { ARENA: 1, FIGHTER: 2, DEBRIS: 8 };
 
-const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -16.5, 0) });
+function matY() { return ARENA.matTop || 0; }
+
+// Gravity scales with WORLD_SCALE so hang time (and debris arcs) stay familiar.
+const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -16.5 * WORLD_SCALE, 0) });
 world.broadphase = new CANNON.SAPBroadphase(world);
 world.allowSleep = true;
 world.solver.iterations = 20;
@@ -61,7 +64,7 @@ export function initArenaPhysics() {
   // flush with the mat flats (apothem). A taller invisible extension of that wall
   // keeps jump / knockback from leaving the ring — one cage, not two.
   const visH = ARENA.cageHeight || 1.48;
-  const physH = Math.max(visH, 2.15);
+  const physH = Math.max(visH + 0.67, 2.15 * WORLD_SCALE);
   const halfT = 0.06;
   for (let i = 0; i < 8; i++) {
     const A = corners[i];
@@ -73,7 +76,7 @@ export function initArenaPhysics() {
     mid.addScaledVector(outward, halfT); // inner face at apothem a
     const wall = new CANNON.Body({ mass: 0, material: matCage, type: CANNON.Body.STATIC });
     wall.addShape(new CANNON.Box(new CANNON.Vec3(len / 2, physH / 2, halfT)));
-    wall.position.set(mid.x, physH / 2, mid.z);
+    wall.position.set(mid.x, matY() + physH / 2, mid.z);
     const yaw = Math.atan2(dir.x, dir.z) + Math.PI / 2;
     wall.quaternion.setFromEuler(0, yaw, 0);
     wall.collisionFilterGroup = G.ARENA;
@@ -84,7 +87,7 @@ export function initArenaPhysics() {
   for (const c of corners) {
     const post = new CANNON.Body({ mass: 0, material: matCage, type: CANNON.Body.STATIC });
     post.addShape(new CANNON.Cylinder(0.11, 0.11, physH, 8));
-    post.position.set(c.x, physH / 2, c.z);
+    post.position.set(c.x, matY() + physH / 2, c.z);
     post.collisionFilterGroup = G.ARENA;
     post.collisionFilterMask = G.FIGHTER | G.DEBRIS;
     post.userData = { kind: 'post' };
@@ -106,7 +109,7 @@ export function attachFighter(f) {
   body.addShape(new CANNON.Sphere(0.42 * SIZE), new CANNON.Vec3(0, 0.56 * SIZE, 0)); // clear of the mat (no floor drag)
   body.addShape(new CANNON.Sphere(0.48 * SIZE), new CANNON.Vec3(0, 1.1 * SIZE, 0));
   body.addShape(new CANNON.Sphere(0.44 * SIZE), new CANNON.Vec3(0, 1.72 * SIZE, 0));
-  body.position.set(f.root.position.x, 0, f.root.position.z);
+  body.position.set(f.root.position.x, matY(), f.root.position.z);
   body.collisionFilterGroup = G.FIGHTER;
   // Standing robots only touch the cage and each other: a downed body or loose parts on the
   // mat used to shove the standing robot's root around (sliding while idle).
@@ -131,7 +134,7 @@ export function setFighterMove(f, vx, vz) {
   body.velocity.z = vz;
   // Keep the capsule standing on the mat.
   body.velocity.y = 0;
-  body.position.y = 0;
+  body.position.y = matY();
   body.wakeUp();
 }
 
@@ -140,8 +143,8 @@ export function syncFightersFromPhysics() {
     if (!f.phys || !f.phys.body) continue;
     f.root.position.x = f.phys.body.position.x;
     f.root.position.z = f.phys.body.position.z;
-    f.root.position.y = 0;
-    f.phys.body.position.y = 0;
+    f.phys.body.position.y = matY();
+    // groundFeet in game.js owns root.y (root-at-zero measurement, then lift to the mat).
   }
 }
 
@@ -234,14 +237,14 @@ function capDebris() {
   if (chips.length > maxChips) {
     const old = chips.sort((a, b) => b.live - a.live).slice(0, chips.length - maxChips);
     for (const d of old) {
-      d.body.position.y = Math.min(d.body.position.y, (ARENA.matTop || 0) + 0.02);
+      d.body.position.y = Math.min(d.body.position.y, matY() + 0.02);
       d.mesh.position.set(d.body.position.x, d.body.position.y, d.body.position.z);
       world.removeBody(d.body); d.settled = true; d.frozen = true;
     }
   }
   const moving = live.filter((d) => !d.settled && !d.small);
   if (moving.length > cap.dynamic) {
-    const cand = moving.filter((d) => d.live > 0.6 && d.body.position.y < 0.62 * SIZE)
+    const cand = moving.filter((d) => d.live > 0.6 && d.body.position.y < matY() + 0.62 * SIZE)
       .sort((a, b) => (a.mass - b.mass) || (b.live - a.live));
     for (let i = 0; i < Math.min(cand.length, moving.length - cap.dynamic); i++) settle(cand[i]);
   }
@@ -265,7 +268,7 @@ function syncDebris(dt) {
     if (!d.settled) {
       const v = d.body.velocity.length();
       const w = d.body.angularVelocity.length();
-      const onMat = d.body.position.y < 0.62 * SIZE;
+      const onMat = d.body.position.y < matY() + 0.62 * SIZE;
       if (onMat && v < 0.32 && w < 0.85) {
         d.still += dt;
         if (d.still > 0.4) {
@@ -293,7 +296,7 @@ export function stepPhysics(dt) {
 
 export function resetFighterPhysics(f, x, z) {
   if (f.phys && f.phys.body) {
-    f.phys.body.position.set(x, 0, z);
+    f.phys.body.position.set(x, matY(), z);
     f.phys.body.velocity.setZero();
     f.phys.body.angularVelocity.setZero();
     f.phys.body.wakeUp();

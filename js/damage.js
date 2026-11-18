@@ -3,6 +3,7 @@ import { announce } from './announcer.js';
 import { spawnDebris, clearPhysicsDebris, PART_MASS, stepPhysics } from './physics.js';
 import * as THREE from 'three';
 import { DAMAGE, ARENA, SIZE } from './config.js';
+import { getDamageLevel } from './settings.js';
 import { IS_MOBILE } from './mobile.js';
 import { addWires, clearWires, stepWires } from './wires.js';
 
@@ -18,6 +19,19 @@ const sparks = [];
 const smokes = [];
 
 const SPARK_GEO = new THREE.BoxGeometry(0.03, 0.03, 0.1);
+
+// Settings → Damage scales the existing dent / detach / debris system. Low is today's
+// behavior or a touch lighter; Medium dents and bends more and sheds the odd plate; Max
+// is heavy wear, frequent plates, earlier breaks, and pieces that fly farther.
+const DAMAGE_FX = {
+  low:    { dent: 0.9, dentMax: 1.00, bend: 0.9, dmg: 1.00, subDmg: 1.00, plateForce: 5.2, plateDmg: 12, plateChance: 0.28, guardPlate: 0,    chipMul: 0.85, heavyForce: 5.2, headGrace: 0.50, legGate: 0.20, legFinal: 0.50, midLeg: 0,    impulse: 1.00, skinMax: 10 },
+  medium: { dent: 1.45, dentMax: 1.18, bend: 1.4, dmg: 1.18, subDmg: 1.25, plateForce: 3.1, plateDmg:  7, plateChance: 0.55, guardPlate: 0.16, chipMul: 1.15, heavyForce: 3.1, headGrace: 0.38, legGate: 0.30, legFinal: 0.70, midLeg: 0.18, impulse: 1.18, skinMax: 14 },
+  max:    { dent: 2.45, dentMax: 1.65, bend: 2.50, dmg: 1.90, subDmg: 2.15, plateForce: 1.4, plateDmg:  3, plateChance: 0.95, guardPlate: 0.62, chipMul: 1.7, heavyForce: 1.4, headGrace: 0.08, legGate: 0.55, legFinal: 0.95, midLeg: 0.82, impulse: 2.20, skinMax: 16 },
+};
+export function damageFx() {
+  return DAMAGE_FX[getDamageLevel()] || DAMAGE_FX.medium;
+}
+
 const SMOKE_GEO = new THREE.SphereGeometry(0.07, 6, 5);
 const sparkMat = new THREE.MeshBasicMaterial({ color: 0xffe189, toneMapped: false });
 const sparkMatHot = new THREE.MeshBasicMaterial({ color: 0xfff6de, toneMapped: false });
@@ -313,6 +327,7 @@ export function oilStats() {
 // the final leg hit (applyPartHit, opts.final).
 function damageSub(f, sub, dmg, dir, scene) {
   if (!sub || sub.detached || dmg <= 0) return;
+  dmg *= damageFx().subDmg;
   const breaks = sub.limb && sub.limb.startsWith('arm');
   sub.hp = Math.max(0, sub.hp - dmg);
   const kids = DAMAGE.subOrder.filter((id) => DAMAGE.sub[id].parent === sub.id && !f.subs[id].detached);
@@ -526,9 +541,10 @@ function dentMesh(mesh, worldPoint, worldDir, amount, partCode, pm = null) {
   else localDir.normalize();
   mesh.getWorldScale(_v);
   const scale = Math.max(_v.x, 0.08);
+  const fx = damageFx();
   const radius = (DAMAGE.dent.radius * (pm ? pm.radius : 1)) / scale;
-  const depth = (DAMAGE.dent.depth * (pm ? pm.depth : 1) * amount) / scale;
-  const maxDepth = (DAMAGE.dent.maxDepth * (pm ? pm.maxDepth : 1)) / scale;
+  const depth = (DAMAGE.dent.depth * (pm ? pm.depth : 1) * amount * fx.dent) / scale;
+  const maxDepth = (DAMAGE.dent.maxDepth * (pm ? pm.maxDepth : 1) * fx.dentMax) / scale;
   const darken = Math.min(0.92, DAMAGE.dent.colorDarken * (pm ? pm.darken : 1));
   const hidden = mesh.userData.hiddenVerts;
   for (let i = 0; i < pos.count; i++) {
@@ -781,10 +797,11 @@ function detachPart(f, part, dir, scene) {
   const pivot = attachPivot(pieces, scene);
   if (!pivot) return;
   const impulse = dir.clone().normalize();
+  const fly = damageFx().impulse;
   const vel = new THREE.Vector3(
-    impulse.x * 3.2 + (Math.random() - 0.5) * 1.4,
-    2.4 + Math.random() * 1.3,
-    impulse.z * 3.2 + (Math.random() - 0.5) * 1.4,
+    (impulse.x * 3.2 + (Math.random() - 0.5) * 1.4) * fly,
+    (2.4 + Math.random() * 1.3) * fly,
+    (impulse.z * 3.2 + (Math.random() - 0.5) * 1.4) * fly,
   );
   const ang = new THREE.Vector3(
     (Math.random() - 0.5) * 10,
@@ -1139,17 +1156,19 @@ function fingerBone(f, partId) {
 }
 function launchPiece(f, mesh, mass, point, d, force, scene) {
   scene.add(mesh);
-  const sp = 1.6 + force * 0.35 + Math.random() * 1.2;
+  const fly = damageFx().impulse;
+  const sp = (1.6 + force * 0.35 + Math.random() * 1.2) * fly;
   return spawnDebris({
     mesh, small: true, mass,
-    velocity: new THREE.Vector3(d.x * sp + (Math.random() - 0.5) * 2.2, 1.2 + Math.random() * 2.2, d.z * sp + (Math.random() - 0.5) * 2.2),
+    velocity: new THREE.Vector3(d.x * sp + (Math.random() - 0.5) * 2.2 * fly, (1.2 + Math.random() * 2.2) * fly, d.z * sp + (Math.random() - 0.5) * 2.2 * fly),
     angularVelocity: new THREE.Vector3((Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30),
     ownerId: f && f.id,
   });
 }
 function keepSkinPiece(scene, mesh) {
   skinRing.push(mesh);
-  while (skinRing.length > SKIN_MAX) {
+  const skinCap = Math.min(SKIN_MAX + 4, damageFx().skinMax);
+  while (skinRing.length > skinCap) {
     const old = skinRing.shift();
     if (old.parent) old.parent.remove(old);
     old.visible = false;
@@ -1179,14 +1198,17 @@ export function shedChips(f, partId, point, dir, force, scene, opts = {}) {
   // by the model's materials. Generic PCB / wire / gear / bolt chips are no longer spawned.
   // Real limbs (head, arm, hand) come off through detachPart / detachSub, not a chip shower.
   if (!point || !scene) return 0;
-  if (opts.blocked) return 0;
-  const heavy = force >= 4.2 || !!opts.plate;
+  const fx = damageFx();
+  if (opts.blocked && !fx.guardPlate) return 0;
+  const heavy = force >= fx.heavyForce || !!opts.plate;
   let n;
   if (opts.count != null) n = opts.count;
-  else if (force < 2.2) n = Math.random() < 0.35 ? 1 : 0;
-  else if (heavy) n = 1 + (Math.random() < 0.4 ? 1 : 0);
-  else n = 1;
+  else if (opts.blocked) n = Math.random() < fx.guardPlate ? 1 : 0;
+  else if (force < 2.2) n = Math.random() < (0.35 * fx.chipMul) ? 1 : 0;
+  else if (heavy) n = 1 + (Math.random() < (0.4 * fx.chipMul) ? 1 : 0);
+  else n = Math.random() < Math.min(1, fx.chipMul) ? 1 : 0;
   if (IS_MOBILE) n = Math.min(n, 1);
+  n = Math.min(n, 2); // keep debris looking like real parts, not a shower
   const d = dir ? dir.clone().setY(0).normalize() : new THREE.Vector3(0, 0, 1);
   let skins = 0;
   for (let k = 0; k < n; k++) {
@@ -1420,19 +1442,22 @@ export function blowEye(f, e, dir) {
 export function applyPartHit(f, partId, damage, point, dir, scene, opts = {}) {
   const part = f.parts[partId];
   if (!part || part.detached) return { wrecked: false, point };
+  const fx = damageFx();
   const amount = opts.blocked ? 0.45 : 1;
-  const dmg = Math.max(1, Math.round(damage * amount));
+  const dmg = Math.max(1, Math.round(damage * amount * fx.dmg));
   const force = opts.force != null ? opts.force : (dmg / 8);
   const hpBefore = part.hp;
   part.hp = Math.max(0, part.hp - dmg);
-  // The head comes off only once it is already badly beaten (at or under half health before
-  // the blow): never in a single hit from a healthy head.
-  if (partId === 'head' && part.hp <= 0 && hpBefore > part.max * 0.5) part.hp = 1;
+  // The head comes off only once it is already badly beaten: Low keeps today's half-health
+  // grace; Medium/Max lower that floor so the head can tear off sooner.
+  if (partId === 'head' && part.hp <= 0 && hpBefore > part.max * fx.headGrace) part.hp = 1;
   part.wear = (part.wear || 0) + force;
   const dentAmt = (opts.blocked ? 0.4 : 1) * Math.min(2.6, (0.4 + force * 0.32) * (1 + Math.min(1.2, part.wear * 0.08)));
   dentPart(part, point, dir, dentAmt);
   emitSparks(point, dir, opts.blocked ? 8 : 18 + Math.min(16, Math.round(force * 3)));
-  shedChips(f, partId, point, dir, force, scene, { blocked: opts.blocked, plate: !opts.blocked && (force >= 4.2 || dmg >= 10) });
+  const wantPlate = !opts.blocked && (force >= fx.plateForce || dmg >= fx.plateDmg) && Math.random() < fx.plateChance;
+  const wantGuard = opts.blocked && fx.guardPlate && Math.random() < fx.guardPlate;
+  shedChips(f, partId, point, dir, force, scene, { blocked: opts.blocked, plate: wantPlate || wantGuard });
   if (partId === 'head' && !opts.blocked && point) maybeBlowEye(f, point, dir, force);
   addSparkScene(scene);
   let wrecked = false;
@@ -1442,8 +1467,9 @@ export function applyPartHit(f, partId, damage, point, dir, scene, opts = {}) {
   // damaged before it (at or under 20% health), and then only about half the time. A final hit near the foot takes the foot;
   // otherwise the whole leg goes. (Tearing any emptied or KO-hit leg off made nearly every
   // match end on a leg finisher.)
-  const legFinal = isLeg && !opts.blocked && opts.final && hpBefore <= part.max * 0.2 && Math.random() < 0.5;
-  if (legFinal && part.canDetach && !part.detached) {
+  const legFinal = isLeg && !opts.blocked && opts.final && hpBefore <= part.max * fx.legGate && Math.random() < fx.legFinal;
+  const legMid = isLeg && !opts.blocked && !opts.final && part.hp <= 0 && fx.midLeg > 0 && Math.random() < fx.midLeg;
+  if ((legFinal || legMid) && part.canDetach && !part.detached) {
     const foot = f.subs && f.subs['foot' + partId.slice(-1)];
     if (part.hp > 0 && foot && !foot.detached && point && subWorldPos(foot, _v2).distanceTo(point) < 0.38) detachSub(f, foot, dir, scene);
     else detachPart(f, part, dir, scene);
@@ -1510,7 +1536,7 @@ export function stepDamage(scene, dt) {
 }
 
 function clampXZ(x, z, pad) {
-  const a = 6.1 - pad;
+  const a = (ARENA.apothem || 6.1) - pad;
   x = Math.max(-a, Math.min(a, x));
   z = Math.max(-a, Math.min(a, z));
   const m = a * Math.SQRT2;

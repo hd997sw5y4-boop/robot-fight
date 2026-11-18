@@ -24,6 +24,7 @@ const KEYS = {
   cam: 'rf_cam',
   autoRematch: 'rf_autorematch',
   match: 'rf_match',
+  damage: 'rf_damage',
 };
 
 // Camera views, in the order the V key cycles them. 'arena' is the original orbit camera.
@@ -67,6 +68,7 @@ const defaults = {
   cam: 'arena',
   autoRematch: false, // Bot vs Bot: start the next match by itself after the results
   match: 3, // best-of 1 / 3 / 5
+  damage: 'medium', // low / medium / max: scales the existing dent / detach / debris system
 };
 
 function read() {
@@ -103,6 +105,8 @@ function read() {
     s.autoRematch = localStorage.getItem(KEYS.autoRematch) === '1';
     const mt = localStorage.getItem(KEYS.match);
     if (mt === '1' || mt === '3' || mt === '5') s.match = +mt;
+    const dmg = localStorage.getItem(KEYS.damage);
+    if (dmg === 'low' || dmg === 'medium' || dmg === 'max') s.damage = dmg;
   } catch (_) {}
   return s;
 }
@@ -125,6 +129,7 @@ function write(s) {
     localStorage.setItem(KEYS.cam, s.cam);
     localStorage.setItem(KEYS.autoRematch, s.autoRematch ? '1' : '0');
     localStorage.setItem(KEYS.match, String(s.match));
+    localStorage.setItem(KEYS.damage, s.damage);
   } catch (_) {}
 }
 
@@ -134,6 +139,11 @@ let hooks = {};
 
 export function getSettings() {
   return settings;
+}
+
+export function getDamageLevel() {
+  const v = settings.damage;
+  return (v === 'low' || v === 'max') ? v : 'medium';
 }
 
 export function isSettingsOpen() {
@@ -186,6 +196,8 @@ function paint() {
   if (arEl) arEl.checked = !!settings.autoRematch;
   const matchEl = $('setMatch');
   if (matchEl) matchEl.value = String(settings.match);
+  const dmgEl = $('setDamage');
+  if (dmgEl) dmgEl.value = settings.damage === 'low' || settings.damage === 'max' ? settings.damage : 'medium';
   applyChrome();
 }
 
@@ -318,6 +330,11 @@ export function initSettings(nextHooks) {
   document.getElementById('setMatch')?.addEventListener('change', (e) => {
     const v = +e.target.value;
     if (v === 1 || v === 3 || v === 5) settings.match = v;
+    persist();
+  });
+  document.getElementById('setDamage')?.addEventListener('change', (e) => {
+    const v = e.target.value;
+    settings.damage = (v === 'low' || v === 'max') ? v : 'medium';
     persist();
   });
   document.getElementById('setAutoRematch')?.addEventListener('change', (e) => {

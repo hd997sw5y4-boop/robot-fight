@@ -6,7 +6,7 @@ import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { ARENA } from '../config.js';
 import { STADIUM } from './stadium-config.js';
 
-const CHAR_FILES = { Worker: 'Worker.glb', Casual: 'Casual.glb', Casual2: 'Casual2.glb' };
+const CHAR_FILES = { Worker: 'Worker.glb', Casual: 'Casual.glb', Casual2: 'Casual2.glb', Suit: 'Suit.glb' };
 const PROP_FILES = {
   desk: 'desk.glb',
   chair: 'chairDesk.glb',
@@ -104,8 +104,8 @@ function tintClothes(obj, hex) {
   obj.traverse((o) => {
     if (!o.isMesh) return;
     const name = o.name || '';
-    const cloth = /Body|Legs|Shirt|Pants|Torso/i.test(name);
-    if (!cloth && !/Worker|Casual/i.test(name)) return;
+    const cloth = /Body|Legs|Shirt|Pants|Torso|Suit|Jacket|Coat/i.test(name);
+    if (!cloth && !/Worker|Casual|Suit/i.test(name)) return;
     const src = [].concat(o.material);
     const out = src.map((m) => {
       const mat = m.clone();
@@ -142,17 +142,46 @@ function screenGlow(obj, hex) {
 }
 
 function boneMap(rootObj) {
+  // Prefer skeleton.bones: some GLTF joints are not flagged isBone after clone,
+  // which left the crew stuck in the bind T-pose.
   const map = {};
   rootObj.traverse((o) => {
-    if (o.isBone) map[o.name] = o;
+    if (o.name) map[o.name] = o;
+    if (o.isSkinnedMesh && o.skeleton) {
+      for (const b of o.skeleton.bones) if (b && b.name) map[b.name] = b;
+    }
   });
   return map;
 }
+
+function pickBones(raw) {
+  return {
+    Hips: raw.Hips,
+    Chest: raw.Chest || raw.Torso || raw.Abdomen,
+    Head: raw.Head,
+    UpperArmL: raw['UpperArm.L'] || raw.UpperArmL,
+    UpperArmR: raw['UpperArm.R'] || raw.UpperArmR,
+    LowerArmL: raw['LowerArm.L'] || raw.LowerArmL,
+    LowerArmR: raw['LowerArm.R'] || raw.LowerArmR,
+  };
+}
+
+const BONE_TRACK = {
+  Hips: 'Hips', Chest: 'Chest', Head: 'Head',
+  UpperArmL: 'UpperArm.L', UpperArmR: 'UpperArm.R',
+  LowerArmL: 'LowerArm.L', LowerArmR: 'LowerArm.R',
+};
 
 function storeRest(bones) {
   for (const b of Object.values(bones)) {
     if (b && b.quaternion) b.userData.restQ = b.quaternion.clone();
   }
+}
+
+function qFromRest(bone, x, y, z) {
+  _euler.set(x, y, z);
+  const q = new THREE.Quaternion().setFromEuler(_euler);
+  return bone.userData.restQ.clone().multiply(q);
 }
 
 function applyLocal(bone, x, y, z) {
@@ -162,13 +191,86 @@ function applyLocal(bone, x, y, z) {
   bone.quaternion.copy(bone.userData.restQ).multiply(_quat);
 }
 
+// Looping quaternion clips on the CharacterArmature (showcase GLBs ship with animations: []).
+function makePoseClip(bones, name, keys, duration) {
+  const channels = {};
+  for (const k of keys) {
+    for (const [bk, eul] of Object.entries(k.pose)) {
+      (channels[bk] ||= []).push({ t: k.t, e: eul });
+    }
+  }
+  const tracks = [];
+  for (const [bk, samples] of Object.entries(channels)) {
+    const bone = bones[bk];
+    if (!bone || !bone.userData.restQ) continue;
+    const times = [];
+    const values = [];
+    for (const s of samples) {
+      times.push(s.t);
+      const q = qFromRest(bone, s.e[0], s.e[1], s.e[2]);
+      values.push(q.x, q.y, q.z, q.w);
+    }
+    const trackName = `${BONE_TRACK[bk] || bone.name}.quaternion`;
+    tracks.push(new THREE.QuaternionKeyframeTrack(trackName, times, values));
+  }
+  if (!tracks.length) return null;
+  return new THREE.AnimationClip(name, duration, tracks);
+}
+
+function clipForStyle(bones, style) {
+  // Local Euler offsets from the T-pose bind. Z on UpperArm swings the arm
+  // down (idle / crossed) or up (cheer); typing leans the arms forward.
+  if (style === 'type') {
+    return makePoseClip(bones, 'type', [
+      { t: 0,    pose: { Head: [0.28, 0, 0], UpperArmL: [-0.85, 0, 0.35], UpperArmR: [-0.85, 0, -0.35], LowerArmL: [-0.55, 0, 0], LowerArmR: [-0.50, 0, 0], Hips: [0, 0, 0], Chest: [0, 0, 0] } },
+      { t: 0.25, pose: { Head: [0.28, 0, 0], UpperArmL: [-0.85, 0, 0.35], UpperArmR: [-0.85, 0, -0.35], LowerArmL: [-0.37, 0, 0], LowerArmR: [-0.62, 0, 0], Hips: [0, 0, 0], Chest: [0.02, 0, 0] } },
+      { t: 0.50, pose: { Head: [0.28, 0, 0], UpperArmL: [-0.85, 0, 0.35], UpperArmR: [-0.85, 0, -0.35], LowerArmL: [-0.55, 0, 0], LowerArmR: [-0.50, 0, 0], Hips: [0, 0, 0], Chest: [0, 0, 0] } },
+      { t: 0.75, pose: { Head: [0.28, 0, 0], UpperArmL: [-0.85, 0, 0.35], UpperArmR: [-0.85, 0, -0.35], LowerArmL: [-0.68, 0, 0], LowerArmR: [-0.32, 0, 0], Hips: [0, 0, 0], Chest: [0.02, 0, 0] } },
+      { t: 1.00, pose: { Head: [0.28, 0, 0], UpperArmL: [-0.85, 0, 0.35], UpperArmR: [-0.85, 0, -0.35], LowerArmL: [-0.55, 0, 0], LowerArmR: [-0.50, 0, 0], Hips: [0, 0, 0], Chest: [0, 0, 0] } },
+    ], 1.0);
+  }
+  if (style === 'clap') {
+    return makePoseClip(bones, 'clap', [
+      { t: 0,    pose: { Head: [0.05, 0, 0], UpperArmL: [-1.15, 0, 0.55], UpperArmR: [-1.15, 0, -0.55], LowerArmL: [-0.7, 0, 0.2], LowerArmR: [-0.7, 0, -0.2], Hips: [0, 0, 0], Chest: [0, 0, 0] } },
+      { t: 0.22, pose: { Head: [0.05, 0, 0], UpperArmL: [-1.15, 0, 1.10], UpperArmR: [-1.15, 0, -1.10], LowerArmL: [-0.7, 0, 0.2], LowerArmR: [-0.7, 0, -0.2], Hips: [0, 0, 0], Chest: [0.04, 0, 0] } },
+      { t: 0.44, pose: { Head: [0.05, 0, 0], UpperArmL: [-1.15, 0, 0.55], UpperArmR: [-1.15, 0, -0.55], LowerArmL: [-0.7, 0, 0.2], LowerArmR: [-0.7, 0, -0.2], Hips: [0, 0, 0], Chest: [0, 0, 0] } },
+    ], 0.44);
+  }
+  if (style === 'cross') {
+    // Arms folded, managers / owners standing at the pads.
+    return makePoseClip(bones, 'cross', [
+      { t: 0,    pose: { Head: [0.04, 0, 0], UpperArmL: [0.25, 0.45, 1.05], UpperArmR: [0.25, -0.45, -1.05], LowerArmL: [-1.35, 0.15, 0.45], LowerArmR: [-1.35, -0.15, -0.45], Hips: [0, 0, 0], Chest: [0, 0, 0] } },
+      { t: 1.6,  pose: { Head: [0.06, 0.08, 0], UpperArmL: [0.25, 0.45, 1.05], UpperArmR: [0.25, -0.45, -1.05], LowerArmL: [-1.35, 0.15, 0.45], LowerArmR: [-1.35, -0.15, -0.45], Hips: [0, 0.05, 0], Chest: [0.03, 0, 0] } },
+      { t: 3.2,  pose: { Head: [0.04, 0, 0], UpperArmL: [0.25, 0.45, 1.05], UpperArmR: [0.25, -0.45, -1.05], LowerArmL: [-1.35, 0.15, 0.45], LowerArmR: [-1.35, -0.15, -0.45], Hips: [0, 0, 0], Chest: [0, 0, 0] } },
+    ], 3.2);
+  }
+  if (style === 'idle') {
+    // Natural stand: arms down at the sides, light sway. Never a T-pose.
+    return makePoseClip(bones, 'idle', [
+      { t: 0,    pose: { Head: [0.04, 0, 0], UpperArmL: [0.08, 0, 1.48], UpperArmR: [0.08, 0, -1.48], LowerArmL: [0.12, 0, 0.08], LowerArmR: [0.12, 0, -0.08], Hips: [0, 0, 0], Chest: [0, 0, 0] } },
+      { t: 1.5,  pose: { Head: [0.05, 0.06, 0], UpperArmL: [0.10, 0, 1.48], UpperArmR: [0.06, 0, -1.48], LowerArmL: [0.12, 0, 0.08], LowerArmR: [0.12, 0, -0.08], Hips: [0, 0.04, 0], Chest: [0.03, 0, 0.02] } },
+      { t: 3.0,  pose: { Head: [0.04, 0, 0], UpperArmL: [0.08, 0, 1.48], UpperArmR: [0.08, 0, -1.48], LowerArmL: [0.12, 0, 0.08], LowerArmR: [0.12, 0, -0.08], Hips: [0, 0, 0], Chest: [0, 0, 0] } },
+    ], 3.0);
+  }
+  // Cheer: arms up, slight wave — facing the cage and their robot.
+  return makePoseClip(bones, 'cheer', [
+    { t: 0,    pose: { Head: [-0.08, 0, 0], UpperArmL: [-0.25, 0, 2.15], UpperArmR: [-0.25, 0, -2.15], LowerArmL: [-0.35, 0, 0.15], LowerArmR: [-0.35, 0, -0.15], Hips: [0, 0, 0], Chest: [0, 0, 0] } },
+    { t: 0.40, pose: { Head: [-0.08, 0.08, 0], UpperArmL: [-0.25, 0, 2.31], UpperArmR: [-0.25, 0, -1.99], LowerArmL: [-0.35, 0, 0.15], LowerArmR: [-0.35, 0, -0.15], Hips: [0, 0.04, 0], Chest: [0.04, 0, 0] } },
+    { t: 0.80, pose: { Head: [-0.08, 0, 0], UpperArmL: [-0.25, 0, 2.15], UpperArmR: [-0.25, 0, -2.15], LowerArmL: [-0.35, 0, 0.15], LowerArmR: [-0.35, 0, -0.15], Hips: [0, 0, 0], Chest: [0, 0, 0] } },
+  ], 0.80);
+}
+
 function poseCrew(p, t) {
+  // Fallback if a mixer clip could not be built: apply the pose procedurally so we never T-pose.
   const b = p.bones;
-  if (!b) return;
+  if (!b || !b.Hips) {
+    if (b) {
+      applyLocal(b.UpperArmL, 0.08, 0, 1.48);
+      applyLocal(b.UpperArmR, 0.08, 0, -1.48);
+    }
+    return;
+  }
   const ph = p.phase;
-  const bob = Math.sin(t * 2.6 + ph) * 0.012;
-  if (p._baseY == null) p._baseY = p.group.position.y;
-  p.group.position.y = p._baseY + bob;
   const sway = Math.sin(t * 1.5 + ph) * 0.04;
   applyLocal(b.Hips, 0, sway * 0.4, 0);
   applyLocal(b.Chest, Math.sin(t * 1.7 + ph) * 0.03, 0, sway * 0.3);
@@ -185,8 +287,19 @@ function poseCrew(p, t) {
     applyLocal(b.LowerArmL, -0.7, 0, 0.2);
     applyLocal(b.LowerArmR, -0.7, 0, -0.2);
     applyLocal(b.Head, 0.05, sway * 0.4, 0);
+  } else if (p.style === 'cross') {
+    applyLocal(b.Head, 0.04, sway * 0.3, 0);
+    applyLocal(b.UpperArmL, 0.25, 0.45, 1.05);
+    applyLocal(b.UpperArmR, 0.25, -0.45, -1.05);
+    applyLocal(b.LowerArmL, -1.35, 0.15, 0.45);
+    applyLocal(b.LowerArmR, -1.35, -0.15, -0.45);
+  } else if (p.style === 'idle') {
+    applyLocal(b.Head, 0.04, sway * 0.4, 0);
+    applyLocal(b.UpperArmL, 0.08, 0, 1.48);
+    applyLocal(b.UpperArmR, 0.08, 0, -1.48);
+    applyLocal(b.LowerArmL, 0.12, 0, 0.08);
+    applyLocal(b.LowerArmR, 0.12, 0, -0.08);
   } else {
-    // Cheer: arms up, slight wave — facing the cage and their robot.
     applyLocal(b.UpperArmL, -0.25, 0, 2.15 + Math.sin(t * 4 + ph) * 0.16);
     applyLocal(b.UpperArmR, -0.25, 0, -2.15 + Math.cos(t * 4.2 + ph) * 0.16);
     applyLocal(b.LowerArmL, -0.35, 0, 0.15);
@@ -204,25 +317,24 @@ function wrapProp(gltf, maps, kind, teamHex) {
   return obj;
 }
 
-function makePerson(gltf, teamHex, seed, style) {
+function makePerson(gltf, teamHex, seed, style, { tint = true } = {}) {
   const group = new THREE.Group();
   const model = cloneScene(gltf);
   enableShadows(model);
-  tintClothes(model, teamHex);
+  if (tint) tintClothes(model, teamHex);
   fitOnFloor(model, { height: 1.72 });
   group.add(model);
-  const raw = boneMap(model);
-  const bones = {
-    Hips: raw.Hips,
-    Chest: raw.Chest || raw.Torso || raw.Abdomen,
-    Head: raw.Head,
-    UpperArmL: raw['UpperArm.L'],
-    UpperArmR: raw['UpperArm.R'],
-    LowerArmL: raw['LowerArm.L'],
-    LowerArmR: raw['LowerArm.R'],
-  };
+  const bones = pickBones(boneMap(model));
   storeRest(bones);
-  return { group, bones, phase: seed * 1.7, style };
+  const mixer = new THREE.AnimationMixer(model);
+  const clip = clipForStyle(bones, style) || clipForStyle(bones, 'idle');
+  if (clip) {
+    const act = mixer.clipAction(clip);
+    act.setLoop(THREE.LoopRepeat, Infinity);
+    act.play();
+    act.time = (seed * 0.37) % Math.max(0.01, clip.duration);
+  }
+  return { group, bones, mixer, hasClip: !!clip, phase: seed * 1.7, style };
 }
 
 function makeDesk(assets, maps, teamHex) {
@@ -317,7 +429,7 @@ function makeSide(sign, teamHex, assets, maps) {
   g.position.set(sign * (r + 1.85), 0, 0);
   g.rotation.y = sign > 0 ? -Math.PI / 2 : Math.PI / 2;
 
-  const floorY = STADIUM.floorY != null ? STADIUM.floorY : -0.3;
+  const floorY = STADIUM.floorY != null ? STADIUM.floorY : 0;
   const top = -0.04;
   const thick = top - (floorY - 0.02);
   const pad = new THREE.Mesh(
@@ -355,6 +467,19 @@ function makeSide(sign, teamHex, assets, maps) {
     g.add(p.group);
     p._baseY = p.group.position.y;
     people.push(p);
+  }
+  // One or two suited owners/managers per side, on the floor beside the crew (hidden on Low with the rest).
+  if (assets.Suit) {
+    const suitSpots = [[1.45, -0.45, 'cross'], [-1.50, -0.62, 'idle']];
+    for (let i = 0; i < suitSpots.length; i++) {
+      const [x, z, style] = suitSpots[i];
+      const p = makePerson(assets.Suit, teamHex, sign * 20 + i + 7, style);
+      p.group.position.set(x, top, z);
+      p.group.rotation.y = 0;
+      g.add(p.group);
+      p._baseY = p.group.position.y;
+      people.push(p);
+    }
   }
   return { group: g, people };
 }
@@ -423,7 +548,13 @@ export function setPitCrewGfx(key) {
 export function updatePitCrew(dt) {
   if (!root || !root.visible) return;
   const t = performance.now() / 1000;
-  for (const p of cheerers) poseCrew(p, t);
+  for (const p of cheerers) {
+    const bob = Math.sin(t * 2.6 + p.phase) * 0.012;
+    if (p._baseY == null) p._baseY = p.group.position.y;
+    p.group.position.y = p._baseY + bob;
+    if (p.mixer && p.hasClip) p.mixer.update(dt);
+    else poseCrew(p, t);
+  }
 }
 
 export function disposePitCrew() {

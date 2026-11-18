@@ -1,7 +1,7 @@
 'use strict';
 /* [stadium-broadcast] Live TV feed on the hanging scoreboard + end-wall screens.
    - A separate broadcast camera renders into a small render target at a capped fps,
-     auto-cutting between wide / ringside low / overhead / fighter close-ups.
+     auto-cutting between wide / ringside / overhead / fighter close-ups.
    - Instant replay: a ring buffer of fighter node transforms (not frames). Big hits,
      knockdowns, parts tearing off and the KO are detected by watching game state
      (read-only polling: health, state, parts[].detached, match.over), then replayed in slow
@@ -9,7 +9,7 @@
      broadcast render and the live pose is restored right after, so gameplay never sees them.
    - Low graphics or the Industrial arena: feed off, static screen art restored. */
 import * as THREE from 'three';
-import { SIZE } from '../config.js';
+import { SIZE, ARENA } from '../config.js';
 import { stadiumScreens, stadiumGfx, getArena } from './stadium.js';
 import { xrPresenting } from './crowdcam.js';
 import { isSettingsOpen } from '../settings.js';
@@ -267,6 +267,8 @@ function pickShot(not, weights) {
 }
 
 // Shot framing from fighter root positions a, b (world). Writes _tp (camera) and _tl (look).
+function matTopY() { return ARENA.matTop || 0; }
+
 function frameShot(shot, a, b, t, seed, victim) {
   _mid.addVectors(a, b).multiplyScalar(0.5);
   _dir.subVectors(b, a).setY(0);
@@ -274,28 +276,30 @@ function frameShot(shot, a, b, t, seed, victim) {
   _dir.divideScalar(dist);
   _side.set(-_dir.z, 0, _dir.x);
   if (Math.sin(seed) < 0) _side.negate();
+  const mt = matTopY();
   let fov = 38;
   switch (shot) {
     case 'wide': {
       const ang = seed + t * 0.035;
       const r = 12.5 + dist * 0.3;
-      _tp.set(_mid.x + Math.sin(ang) * r, 6.2, _mid.z + Math.cos(ang) * r);
-      _tl.set(_mid.x, 1.2 * SIZE, _mid.z);
+      _tp.set(_mid.x + Math.sin(ang) * r, mt + 6.2, _mid.z + Math.cos(ang) * r);
+      _tl.set(_mid.x, mt + 1.55 * SIZE, _mid.z);
       fov = 40;
       break;
     }
     case 'ringside': {
-      const r = 6.2 + dist * 0.45;
+      // Raised off the apron and pulled back so the 25% larger robots' heads stay in frame.
+      const r = 7.6 + dist * 0.45;
       _tp.copy(_mid).addScaledVector(_side, r).addScaledVector(_dir, Math.sin(t * 0.25 + seed) * 1.2);
-      _tp.y = 0.75;
-      _tl.set(_mid.x, 1.35 * SIZE, _mid.z);
-      fov = 42;
+      _tp.y = mt + 1.85 * SIZE;
+      _tl.set(_mid.x, mt + 1.8 * SIZE, _mid.z); // upper chest / neck, headroom above
+      fov = 40;
       break;
     }
     case 'overhead': {
       const ang = seed + t * 0.08;
-      _tp.set(_mid.x + Math.sin(ang) * 1.2, 11.5, _mid.z + Math.cos(ang) * 1.2);
-      _tl.set(_mid.x, 0.4, _mid.z);
+      _tp.set(_mid.x + Math.sin(ang) * 1.2, mt + 11.5, _mid.z + Math.cos(ang) * 1.2);
+      _tl.set(_mid.x, mt + 0.4, _mid.z);
       fov = 44;
       break;
     }
@@ -304,10 +308,11 @@ function frameShot(shot, a, b, t, seed, victim) {
       const s = subjectIsP1 ? a : b;
       const o = subjectIsP1 ? b : a;
       _b.subVectors(o, s).setY(0).normalize();
-      _tp.copy(o).addScaledVector(_b, 1.6).addScaledVector(_side, 1.5 + Math.sin(t * 0.3) * 0.2);
-      _tp.y = 1.85 * SIZE;
-      _tl.set(s.x, 1.55 * SIZE, s.z);
-      fov = 27;
+      // Pull back and sit near head height so heads are never cropped at the new scale.
+      _tp.copy(o).addScaledVector(_b, 2.2).addScaledVector(_side, 1.9 + Math.sin(t * 0.3) * 0.2);
+      _tp.y = mt + 2.15 * SIZE;
+      _tl.set(s.x, mt + 1.85 * SIZE, s.z); // chest-to-head, with headroom in a slightly wider fov
+      fov = 32;
     }
   }
   return fov;

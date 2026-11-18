@@ -8,7 +8,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { IS_MOBILE } from './mobile.js';
-import { SIZE, MODEL, ARENA, COMBAT, DAMAGE, GFX_PRESETS, LOOP_CLIPS, getFighterStats } from './config.js';
+import { SIZE, CAM_SIZE, MODEL, ARENA, COMBAT, DAMAGE, GFX_PRESETS, LOOP_CLIPS, getFighterStats } from './config.js';
 import { CLIP_SPEEDS } from './clip-speeds.js';
 import { applyChrome, setChromeLow } from './chrome.js';
 import { initJointLimits, applyJointLimits } from './joints.js';
@@ -19,7 +19,7 @@ import { broadcastMain } from './arena/broadcast.js';
 let prevCamMode = null;
 import { unlockAudio, playSfx, playHit, setBuzz, startCrowd } from './audio.js';
 import { announce, announceIntroSeconds } from './announcer.js';
-import { buildArena as buildArenaVisual, addArenaLights, updateCageFade } from './arena.js';
+import { buildArena as buildArenaVisual, addArenaLights, updateCageFade, addFloorReflection } from './arena.js';
 // [stadium-arena hook] stadium scenery lives in its own module.
 import { initStadium, stadiumOwnsEnv, stadiumApplyEnv, stadiumSetGfx, updateStadium } from './arena/stadium.js';
 import { initPitCrew, setPitCrewGfx, updatePitCrew } from './arena/pit-crew.js';
@@ -66,6 +66,7 @@ import {
   debugBreakSub,
   oilStats,
   shedChips,
+  damageFx,
 } from './damage.js';
 
 const canvas = document.getElementById('c');
@@ -124,7 +125,7 @@ function clampFov(v) {
 let fovTarget = clampFov(getSettings().fov);
 let fovLive = fovTarget;
 const camera = new THREE.PerspectiveCamera(fovLive, 1, 0.1, 80);
-camera.position.set(0, 3.2 * SIZE, 12.5 * SIZE);
+camera.position.set(0, (ARENA.matTop || 0) + 3.2 * CAM_SIZE, 12.5 * CAM_SIZE);
 
 // Bloom on High: visors, sparks, LED rings and light shafts. Multisampled target
 // keeps anti-aliasing, which a plain composer would lose.
@@ -628,6 +629,7 @@ function makeFighter(gltf, color, side) {
   const _sz = new THREE.Vector3();
   model.traverse((o) => {
     if (!o.isMesh) return;
+    o.frustumCulled = false;
     _b.setFromObject(o).getSize(_sz);
     if (Math.max(_sz.x, _sz.y, _sz.z) < 0.22) o.castShadow = false;
   });
@@ -671,7 +673,7 @@ function makeFighter(gltf, color, side) {
   if (box3) model.position.y = -box3.min.y + MODEL.footOffset;
 
   const startX = side === 'p1' ? -2.15 * SIZE : 2.15 * SIZE;
-  root.position.set(startX, 0, 0);
+  root.position.set(startX, ARENA.matTop || 0, 0);
 
   let hips = null;
   let spine = null;
@@ -703,6 +705,7 @@ function makeFighter(gltf, color, side) {
     hips,
     spine,
     hipsBind: hips ? hips.position.clone() : null,
+    hipsBindQ: hips ? hips.quaternion.clone() : null,
     config: defaultFighterConfig(side),
     modelScale: scale,
   };
@@ -1068,7 +1071,8 @@ function findHips(f) {
 function cacheFeet(f) {
   f.footBones = [];
   f.ikLegs = { L: {}, R: {} };
-  f.groundY = 0;
+  f.ikArms = { L: {}, R: {} };
+  f.groundY = matTopY();
   f.model.traverse((o) => {
     if (!o.isBone && o.type !== 'Bone') return;
     const n = boneKey(o.name);
@@ -1085,6 +1089,14 @@ function cacheFeet(f) {
     if (n === 'RightLeg') f.ikLegs.R.shin = o;
     if (n === 'RightFoot') f.ikLegs.R.foot = o;
     if (n === 'RightToeBase') f.ikLegs.R.toe = o;
+    if (n === 'LeftShoulder') f.ikArms.L.shoulder = o;
+    if (n === 'LeftArm') f.ikArms.L.upper = o;
+    if (n === 'LeftForeArm') f.ikArms.L.lower = o;
+    if (n === 'LeftHand') f.ikArms.L.hand = o;
+    if (n === 'RightShoulder') f.ikArms.R.shoulder = o;
+    if (n === 'RightArm') f.ikArms.R.upper = o;
+    if (n === 'RightForeArm') f.ikArms.R.lower = o;
+    if (n === 'RightHand') f.ikArms.R.hand = o;
   });
   // The foot/toe joints sit inside the mesh; the visible sole and toe tips are lower. Keep a
   // small sample of the skinned vertices driven by the foot/toe bones so grounding can put the
@@ -1127,6 +1139,11 @@ const _ikFwd = new THREE.Vector3();
 const _ikKnee = new THREE.Vector3();
 const _ikQ = new THREE.Quaternion();
 const _ikQ2 = new THREE.Quaternion();
+const _ikD = new THREE.Vector3();
+const _ikAxis = new THREE.Vector3();
+const _ikWQ = new THREE.Quaternion();
+const _ikPQ = new THREE.Quaternion();
+const _ikWant = new THREE.Quaternion();
 const _ikM = new THREE.Matrix4();
 const _ikInv = new THREE.Matrix4();
 const _ikOne = new THREE.Vector3(1, 1, 1);
@@ -1841,7 +1858,7 @@ function separate(a, b, dt = 0) {
       f.root.position.x += sgn * nx * push;
       f.root.position.z += sgn * nz * push;
       placeInOctagon(f.root.position, 0.55, true);
-      if (f.phys && f.phys.body) f.phys.body.position.set(f.root.position.x, 0, f.root.position.z);
+      if (f.phys && f.phys.body) f.phys.body.position.set(f.root.position.x, matTopY(), f.root.position.z);
     }
   }
 }
@@ -1869,7 +1886,15 @@ function faceToward(f, other, dt, snap) {
   const dz = other.root.position.z - f.root.position.z;
   // Bodies (nearly) on top of each other (a flip passing over, a push-out): the direction is
   // noise, so keep the last target instead of chasing it.
-  if (dx * dx + dz * dz > (0.35 * SIZE) ** 2 || f.faceWant == null) f.faceWant = Math.atan2(dx, dz);
+  if (dx * dx + dz * dz > (0.35 * SIZE) ** 2) {
+    const raw = Math.atan2(dx, dz);
+    if (f.faceWant == null) f.faceWant = raw;
+    else {
+      // Keep the target heading continuous so a ±π wrap cannot flip the turn mid-way.
+      const d = Math.atan2(Math.sin(raw - f.faceWant), Math.cos(raw - f.faceWant));
+      f.faceWant += d;
+    }
+  }
   steerYaw(f, f.faceWant, dt, rate, snap, maxRate);
 }
 
@@ -1886,8 +1911,13 @@ function steerYaw(f, want, dt, rate = 9, snap = false, maxRate = YAW_MAX_RATE) {
     if (snap) { f.root.rotation.set(0, cur + diff, 0); f.yawVel = 0; }
     return;
   }
-  if (Math.abs(diff) > 2.7 && f.turnSign && Math.sign(diff) !== f.turnSign) diff += f.turnSign * 2 * Math.PI; // keep turning the same way
-  if (Math.abs(diff) > 0.3) f.turnSign = Math.sign(diff);
+  // Keep the current turn direction at large headings so a ±π wrap cannot reverse mid-turn.
+  if (Math.abs(diff) > Math.PI * 0.5) {
+    const sign = f.turnSign || Math.sign(f.yawVel || 0);
+    if (sign && Math.sign(diff) !== sign) diff += sign * 2 * Math.PI;
+  }
+  if (Math.abs(diff) > 0.2) f.turnSign = Math.sign(diff);
+  else if (Math.abs(diff) < YAW_DEADZONE) f.turnSign = 0;
   let v = f.yawVel || 0;
   if (Math.abs(diff) < YAW_DEADZONE && Math.abs(v) < 0.2) { f.yawVel = 0; return; }
   const w = rate * 0.9;
@@ -1976,13 +2006,21 @@ function tryAttack(f, kind, clipName, exact = false) {
   return true;
 }
 
+// Jabs, straights (Punching / PunchCombo) and hooks get a peak arm-extension IK so the
+// punching arm is almost fully straight and the fist actually reaches the longer punch range.
+// Elbows and uppercuts stay the short in-fighting clips.
+const PUNCH_EXTEND_CLIPS = new Set(['LeadJab', 'Punching', 'PunchCombo', 'RightHook']);
+
 // Choose a strike whose measured reach fits the gap: the fist/foot should just reach the
 // body surface (short elbows and uppercuts up close, jabs and long kicks from further out),
 // so strikes neither whiff short nor bury themselves in the other robot's chest.
 function strikeTip(name) {
   const st = STRIKE_T && STRIKE_T[name];
   if (!st) return null;
-  return Math.min(1.65 * SIZE, st.reach) + COMBAT.bodyRadius;
+  // Jabs, straights and hooks get a little extra reach so the almost-straight arm IK
+  // is accounted for when choosing a clip and gating the hit (elbows / uppercuts stay short).
+  const extra = PUNCH_EXTEND_CLIPS.has(name) ? (name === 'RightHook' ? 0.18 : 0.30) * SIZE : 0;
+  return Math.min(2.05 * SIZE, st.reach + extra) + COMBAT.bodyRadius;
 }
 function fitStrikeClip(f, kind, clip, other) {
   if (!STRIKE_T || !other) return clip;
@@ -2646,7 +2684,7 @@ const _bowFwd = new THREE.Vector3();
 function applyGroundBow(f) {
   const w = f.state === 'ground' ? (f.groundBow || 0) : 0;
   if (w <= 0.001) return;
-  const amt = f.groundKind === 'stomp' ? COMBAT.ground.stompBow : COMBAT.ground.poundBow;
+  const amt = (f.groundKind === 'stomp' ? COMBAT.ground.stompBow : COMBAT.ground.poundBow) * Math.min(1.85, damageFx().bend);
   _bowFwd.set(Math.sin(f.root.rotation.y), 0, Math.cos(f.root.rotation.y));
   _bowAxis.copy(_UP).cross(_bowFwd).normalize();
   const share = { Spine: 0.4, Spine1: 0.33, Spine2: 0.27 };
@@ -2660,10 +2698,138 @@ function applyGroundBow(f) {
   }
 }
 
+// At the peak of a jab, straight or hook, blend a two-bone arm IK so the punching arm is
+// almost fully straight (elbow nearly locked) and the fist reaches toward the target. The
+// body still lunges in; this only extends the arm on top of the clip. Hooks keep a little
+// elbow bend so they still read as hooks.
+function punchExtendWeight(f) {
+  if (f.state !== 'punch' || f.retract || !PUNCH_EXTEND_CLIPS.has(f.attackClip)) return 0;
+  const action = f.actions[f.attackClip];
+  if (!action) return 0;
+  const tm = strikeTiming(f, action);
+  const ct = action.time;
+  const peak = tm.peak != null ? tm.peak : tm.a0;
+  const rise = Math.max(0.05, peak - tm.start);
+  let w = 0;
+  if (ct <= tm.start) w = 0;
+  else if (ct <= peak) {
+    const u = Math.max(0, Math.min(1, (ct - (peak - rise * 0.85)) / (rise * 0.85)));
+    w = u * u * (3 - 2 * u);
+  } else if (ct <= tm.a1) w = 1;
+  else {
+    const u = Math.max(0, Math.min(1, (ct - tm.a1) / Math.max(0.06, (tm.end || tm.a1 + 0.1) - tm.a1)));
+    w = 1 - u * u * (3 - 2 * u);
+  }
+  if (f.attackClip === 'RightHook') w *= 0.72;
+  if (f.contactT >= 0 || f.atkContact || f.hitThisAttack) w *= 0.28;
+  return w;
+}
+
+function punchingArmSide(f) {
+  const bones = f.strikeBones && f.strikeBones.punch;
+  if (!bones || !bones.length) return 'R';
+  let best = bones[0], bestZ = -Infinity;
+  for (const b of bones) {
+    b.getWorldPosition(_ikA);
+    f.root.worldToLocal(_ikA);
+    if (_ikA.z > bestZ) { bestZ = _ikA.z; best = b; }
+  }
+  const n = boneKey(best.name);
+  if (/^Left/.test(n)) return 'L';
+  if (/^Right/.test(n)) return 'R';
+  return 'R';
+}
+
+function aimBoneY(bone, worldDir, weight) {
+  if (!bone || !bone.parent || weight <= 0 || worldDir.lengthSq() < 1e-8) return;
+  bone.parent.updateWorldMatrix(true, false);
+  bone.parent.getWorldQuaternion(_ikPQ);
+  bone.getWorldQuaternion(_ikWQ);
+  _ikB.set(0, 1, 0).applyQuaternion(_ikWQ).normalize();
+  _ikC.copy(worldDir).normalize();
+  const dot = THREE.MathUtils.clamp(_ikB.dot(_ikC), -1, 1);
+  if (dot > 0.9999) return;
+  _ikQ.setFromUnitVectors(_ikB, _ikC);
+  _ikWant.copy(_ikQ).multiply(_ikWQ);
+  _ikWant.copy(_ikPQ).invert().multiply(_ikWant);
+  bone.quaternion.slerp(_ikWant, weight);
+}
+
+function applyPunchReach(f) {
+  const w = punchExtendWeight(f);
+  if (w < 0.02) return;
+  const other = f === p1 ? p2 : p1;
+  if (!other || !f.ikArms) return;
+  const hook = f.attackClip === 'RightHook';
+  const side = punchingArmSide(f);
+  const arm = f.ikArms[side];
+  if (!arm || !arm.upper || !arm.lower || !arm.hand) return;
+  if (arm.upper.scale.x < 0.01) return; // missing / torn-off arm
+
+  f.model.updateWorldMatrix(true, true);
+  arm.upper.getWorldPosition(_ikA); // shoulder / upper origin
+  arm.lower.getWorldPosition(_ikB); // elbow
+  arm.hand.getWorldPosition(_ikC);  // hand
+  const len1 = _ikA.distanceTo(_ikB);
+  const len2 = _ikB.distanceTo(_ikC);
+  if (len1 < 0.02 || len2 < 0.02) return;
+  const full = len1 + len2;
+  const lock = hook ? 0.90 : 0.975; // nearly straight; hooks keep a visible bend
+  const curLen = _ikA.distanceTo(_ikC);
+
+  // Aim: blend the clip's punch direction with a line to the opponent's chest.
+  _ikD.copy(_ikC).sub(_ikA);
+  if (_ikD.lengthSq() < 1e-6) return;
+  _ikD.normalize();
+  const chestY = other.root.position.y + 1.25 * SIZE;
+  _ikT.set(other.root.position.x, chestY, other.root.position.z).sub(_ikA);
+  if (_ikT.lengthSq() > 1e-6) _ikT.normalize();
+  else _ikT.copy(_ikD);
+  const aimMix = hook ? 0.25 : 0.55;
+  _ikD.lerp(_ikT, aimMix * w).normalize();
+
+  const wantLen = curLen + (full * lock - curLen) * w;
+  // Don't drive the fist through the opponent; the body lunge still closes the rest of the gap.
+  const toChest = Math.hypot(other.root.position.x - _ikA.x, other.root.position.z - _ikA.z);
+  const maxToBody = Math.max(0.1, toChest - (COMBAT.bodyRadius || 0.27 * SIZE) - 0.06);
+  const reach = Math.min(wantLen, maxToBody);
+  _ikT.copy(_ikA).addScaledVector(_ikD, reach);
+
+  // Keep the clip's elbow plane (pole = current elbow offset from the shoulder).
+  arm.lower.getWorldPosition(_ikB);
+  _ikC.copy(_ikB).sub(_ikA);
+  const d = _ikA.distanceTo(_ikT);
+  const dist = THREE.MathUtils.clamp(d, Math.abs(len1 - len2) + 0.004, len1 + len2 - 0.012);
+  _ikD.copy(_ikT).sub(_ikA);
+  if (_ikD.lengthSq() < 1e-8) return;
+  _ikD.setLength(dist);
+
+  let cosA = (len1 * len1 + dist * dist - len2 * len2) / (2 * len1 * dist);
+  cosA = THREE.MathUtils.clamp(cosA, -1, 1);
+  const angA = Math.acos(cosA);
+  _ikAxis.crossVectors(_ikD, _ikC);
+  if (_ikAxis.lengthSq() < 1e-8) {
+    _ikAxis.set(0, 1, 0).cross(_ikD);
+    if (_ikAxis.lengthSq() < 1e-8) _ikAxis.set(1, 0, 0).cross(_ikD);
+  }
+  _ikAxis.normalize();
+  // Upper-arm direction: rotate the shoulder→target line by angA around the pole axis.
+  const upperDir = _ikD.clone().normalize().applyAxisAngle(_ikAxis, angA);
+  const elbowPos = _ikA.clone().addScaledVector(upperDir, len1);
+  const lowerDir = _ikA.clone().add(_ikD).sub(elbowPos);
+  if (lowerDir.lengthSq() < 1e-8) return;
+  lowerDir.normalize();
+  aimBoneY(arm.upper, upperDir, w);
+  arm.upper.updateMatrixWorld(true);
+  aimBoneY(arm.lower, lowerDir, w);
+  arm.lower.updateMatrixWorld(true);
+}
+
 // Structural damage (not tiredness): a torso past 70% damage folds on any heavy blow.
 function torsoWrecked(f) {
   const t = f.parts && f.parts.torso;
-  return !!(t && 1 - t.hp / t.max >= 0.7);
+  const fold = damageFx().bend >= 1.7 ? 0.55 : damageFx().bend >= 1.2 ? 0.62 : 0.7;
+  return !!(t && 1 - t.hp / t.max >= fold);
 }
 
 function isCatastrophic(f) {
@@ -3653,12 +3819,14 @@ function updateFightingCamera(dt) {
   const vHalf = THREE.MathUtils.degToRad(camera.fov) / 2;
   const hHalf = Math.atan(Math.tan(vHalf) * camera.aspect);
   const span = dist / 2 + 1.25 * SIZE;
-  const want = Math.max(3.4 * SIZE, Math.min(13 * SIZE, Math.max(span / Math.tan(hHalf), 2.1 * SIZE / Math.tan(vHalf))));
+  // Standoff uses CAM_SIZE so the view stays inside the stadium bowl and the larger robots fill more of the frame.
+  const want = Math.max(3.4 * CAM_SIZE, Math.min(13 * CAM_SIZE, Math.max(span / Math.tan(hHalf), 2.1 * SIZE / Math.tan(vHalf))));
   fightCamDist = snap || !fightCamDist ? want : fightCamDist + (want - fightCamDist) * (1 - Math.pow(0.05, dt));
   const mx = (a.x + b.x) / 2;
   const mz = (a.z + b.z) / 2;
-  camT.set(mx + _fcN.x * fightCamDist, 1.4 * SIZE + fightCamDist * 0.04, mz + _fcN.z * fightCamDist);
-  _cvB.set(mx, 1.3 * SIZE, mz); // a little above the chest: the fighters sit under the round titles
+  const mt = matTopY();
+  camT.set(mx + _fcN.x * fightCamDist, mt + 1.4 * SIZE + fightCamDist * 0.04, mz + _fcN.z * fightCamDist);
+  _cvB.set(mx, mt + 1.3 * SIZE, mz); // a little above the chest: the fighters sit under the round titles
   if (snap) { camera.position.copy(camT); lookT.copy(_cvB); } else {
     camera.position.lerp(camT, 1 - Math.pow(0.002, dt));
     lookT.lerp(_cvB, 1 - Math.pow(0.0005, dt));
@@ -3680,10 +3848,11 @@ function updateFollowCamera(dt, mode) {
   _cvR.set(-_cvF.z, 0, _cvF.x); // P1's right when facing the opponent (+Z facing -> -X)
   const k = dt <= 0 ? 1 : 1 - Math.pow(mode === 'first' ? 1e-7 : 0.0008, dt);
   if (mode === 'third') {
-    const back = 2.25 * SIZE + dist * 0.28;
-    camT.set(a.x - _cvF.x * back + _cvR.x * 0.62 * SIZE, 1.95 * SIZE + dist * 0.05, a.z - _cvF.z * back + _cvR.z * 0.62 * SIZE);
+    const back = 2.25 * CAM_SIZE + dist * 0.28;
+    const mt = matTopY();
+    camT.set(a.x - _cvF.x * back + _cvR.x * 0.62 * SIZE, mt + 1.95 * SIZE + dist * 0.05, a.z - _cvF.z * back + _cvR.z * 0.62 * SIZE);
     placeInOctagon(camT, -1.5, false);
-    lookT.set(a.x + _cvF.x * dist * 0.62, 1.12 * SIZE, a.z + _cvF.z * dist * 0.62);
+    lookT.set(a.x + _cvF.x * dist * 0.62, mt + 1.12 * SIZE, a.z + _cvF.z * dist * 0.62);
     camera.position.lerp(camT, k);
     camera.lookAt(lookT);
   } else {
@@ -3691,11 +3860,11 @@ function updateFollowCamera(dt, mode) {
     // riding the head bone so the view moves with the body; aimed at the opponent's chest.
     const head = p1.flinchBones && p1.flinchBones.Head;
     p1.model.updateWorldMatrix(true, true);
-    if (head) head.getWorldPosition(_cvA); else _cvA.set(a.x, 1.65 * SIZE, a.z);
+    if (head) head.getWorldPosition(_cvA); else _cvA.set(a.x, a.y + 1.65 * SIZE, a.z);
     _cvA.addScaledVector(_cvF, 0.2 * SIZE);
     _cvA.y += 0.05 * SIZE;
     camera.position.lerp(_cvA, k);
-    _cvB.set(b.x, (p2.state === 'down' || p2.state === 'ko') ? 0.35 * SIZE : 1.2 * SIZE, b.z);
+    _cvB.set(b.x, b.y + ((p2.state === 'down' || p2.state === 'ko') ? 0.35 * SIZE : 1.2 * SIZE), b.z);
     lookT.lerp(_cvB, dt <= 0 ? 1 : 1 - Math.pow(0.002, dt));
     camera.lookAt(lookT);
   }
@@ -3783,26 +3952,26 @@ function updateCamera(dt) {
   const a = p1.root.position;
   const b = p2.root.position;
   // Over: aim above the bodies so the fighters sit in the lower frame, under the title.
-  const midY = (match.over ? 1.55 : 1.15) * SIZE;
+  const midY = matTopY() + (match.over ? 1.55 : 1.15) * SIZE;
   lookT.set((a.x + b.x) / 2, midY, (a.z + b.z) / 2);
   if (match.over) {
     match.orbitT = (match.orbitT || 0) + dt;
-    const radius = 8.2 * SIZE;
+    const radius = 8.2 * CAM_SIZE;
     const ang = match.orbitT * 0.22;
-    const y = 3.7 * SIZE + Math.sin(match.orbitT * 0.18) * 0.3;
+    const y = matTopY() + 3.7 * CAM_SIZE + Math.sin(match.orbitT * 0.18) * 0.3;
     camT.set(lookT.x + Math.sin(ang) * radius, y, lookT.z + Math.cos(ang) * radius);
     camera.position.lerp(camT, dt <= 0 ? 0 : 1 - Math.pow(0.015, dt));
     camera.lookAt(lookT);
     return;
   }
   const dist = a.distanceTo(b);
-  const r = Math.max(0.7, Math.hypot(2.3 * SIZE, 8.6 * SIZE + dist * 0.3) * orbit.zoom);
+  const r = Math.max(0.7, Math.hypot(2.3 * CAM_SIZE, 8.6 * CAM_SIZE + dist * 0.3) * orbit.zoom);
   // Zoomed in close, aim a little lower so the feet and mat stay in frame.
   lookT.y = midY - (1 - Math.min(1, orbit.zoom)) * 0.45 * SIZE;
   const cp = Math.cos(orbit.pitch);
   camT.set(
     lookT.x + Math.sin(orbit.yaw) * cp * r,
-    Math.max(0.08, lookT.y + Math.sin(orbit.pitch) * r),
+    Math.max(matTopY() + 0.08, lookT.y + Math.sin(orbit.pitch) * r),
     lookT.z + Math.cos(orbit.yaw) * cp * r,
   );
   camera.position.lerp(camT, dt <= 0 ? 1 : 1 - Math.pow(orbit.drag ? 1e-6 : 0.001, dt));
@@ -3907,6 +4076,8 @@ function beginGetUp(f) {
 
 const _hpA = new THREE.Vector3();
 const _hpB = new THREE.Vector3();
+const _hpE = new THREE.Euler();
+const _hpBnd = new THREE.Euler();
 // Diagnostics: how far each post-mixer stage turns the foot bones (deg), and the largest
 // frame-to-frame foot turn straight out of the mixer.
 function diagFootStage(f, stage) {
@@ -3937,6 +4108,15 @@ function poseAfterMixer(f, dt = 1 / 60) {
     const w = 1 - f.hipFree;
     f.hips.position.x += (f.hipsBind.x - f.hips.position.x) * w;
     f.hips.position.z += (f.hipsBind.z - f.hips.position.z) * w;
+    // Pin hips yaw to the bind pose so clip root rotation cannot fight steerYaw.
+    // X/Z (lean) and position Y (bounce) stay; hipFree still eases the pin off for strikes.
+    if (f.hipsBindQ && w > 0.01) {
+      const e = _hpE.setFromQuaternion(f.hips.quaternion, 'YXZ');
+      const b = _hpBnd.setFromQuaternion(f.hipsBindQ, 'YXZ');
+      let dy = Math.atan2(Math.sin(b.y - e.y), Math.cos(b.y - e.y));
+      e.y += dy * w;
+      f.hips.quaternion.setFromEuler(e);
+    }
     // Never let the freed hips carry the body into the opponent.
     const opp = f === p1 ? p2 : p1;
     if (f.hipFree > 0.01 && opp && f.hips.parent) {
@@ -3958,6 +4138,7 @@ function poseAfterMixer(f, dt = 1 / 60) {
   applyStumpLeg(f, dt);
   applyFlinch(f, dt);
   applyGroundBow(f);
+  applyPunchReach(f);
 }
 
 // Leg damage fraction (0 intact .. 1 empty); legs bend instead of breaking off.
@@ -4005,15 +4186,17 @@ function applyStumpLeg(f, dt) {
     const w = f.stumpW[side];
     const leg = f.ikLegs && f.ikLegs[side];
     if (!leg || !leg.thigh || !leg.shin) continue;
-    const bend = standing && !lost[side] ? legDamage(f, side) : 0;
+    const fxBend = damageFx().bend;
+    const bend = standing && !lost[side] ? Math.min(1, legDamage(f, side) * fxBend) : 0;
     if (bend > 0.12) {
       f.model.updateWorldMatrix(true, true);
       const b = (bend - 0.12) / 0.88;
+      const ang = Math.min(1.6, 0.85 + 0.3 * fxBend);
       _stFwd.set(Math.sin(f.root.rotation.y), 0, Math.cos(f.root.rotation.y));
-      rotateBoneWorldAxis(leg.thigh, _stFwd, (side === 'L' ? -1 : 1) * 0.1 * b); // knocked out of line
-      rotateBoneWorldAxis(leg.thigh, _stAxis, -0.1 * b);
-      rotateBoneWorldAxis(leg.shin, _stAxis, 0.32 * b);                     // knee stays bent
-      if (leg.foot) rotateBoneWorldAxis(leg.foot, _stFwd, (side === 'L' ? 1 : -1) * 0.12 * b); // ankle rolled
+      rotateBoneWorldAxis(leg.thigh, _stFwd, (side === 'L' ? -1 : 1) * 0.1 * b * ang); // knocked out of line
+      rotateBoneWorldAxis(leg.thigh, _stAxis, -0.1 * b * ang);
+      rotateBoneWorldAxis(leg.shin, _stAxis, 0.32 * b * ang);                     // knee stays bent
+      if (leg.foot) rotateBoneWorldAxis(leg.foot, _stFwd, (side === 'L' ? 1 : -1) * 0.12 * b * ang); // ankle rolled
     }
     if (w < 0.01) continue;
     f.model.updateWorldMatrix(true, true);
@@ -4046,9 +4229,9 @@ function resetMatch(keepDebris = false) {
     f.blocking = false;
     f.hitThisAttack = false;
     f.shield.visible = false;
-    f.root.position.set(f.startX, 0, 0);
+    f.root.position.set(f.startX, matTopY(), 0);
     f.root.scale.set(1, 1, 1);
-    f.groundY = 0;
+    f.groundY = matTopY();
     f.kdCount = 0;
     f.koTip = null;
     f.koHold = null;
@@ -4250,7 +4433,14 @@ function onLoad(gltf) {
   const built = buildArenaVisual(scene, { tiled, metalColor, metalRough, metalMetal });
   const lightRig = addArenaLights(scene, built.fixturePos);
   syncEnvironment(); // the void wall exists now: hide it if the HDRI backdrop is on
-  // Painted Metal001 mat (with decals) replaces the chrome floor, so the planar mirror is not added.
+  // Sharp planar mirror on the metal mat (hidden on Low).
+  addFloorReflection(scene).then((m) => {
+    floorMirror = m;
+    if (floorMirror) {
+      floorMirror.visible = gfxKey !== 'low';
+      setMirrorRes(floorMirror);
+    }
+  });
   if (lightRig) {
     trackLight(lightRig.hemi);
     trackLight(lightRig.fill);
@@ -4325,8 +4515,8 @@ function onLoad(gltf) {
     banner.style.opacity = '0';
     const towardCam = new THREE.Vector3(0.15, 0.05, 1);
     const info = previewDamage(p2, scene, towardCam);
-    const look = new THREE.Vector3(p2.root.position.x - 0.15, 0.75, p2.root.position.z + 0.7);
-    camera.position.set(p2.root.position.x - 0.4, 2.55, p2.root.position.z + 5.1);
+    const look = new THREE.Vector3(p2.root.position.x - 0.15, matTopY() + 0.75, p2.root.position.z + 0.7);
+    camera.position.set(p2.root.position.x - 0.4, matTopY() + 2.55, p2.root.position.z + 5.1);
     camera.lookAt(look);
     window.__rfDebug = info;
     applyMalfunctions(p1, 0);
@@ -4337,6 +4527,24 @@ function onLoad(gltf) {
   };
   window.__rfSetHdri = (on) => applyHdri(!!on);
   window.__rfHdriReady = () => !!hdriEnv;
+  window.__rfCenterShot = () => {
+    startFightFromShell({ skipIntro: true });
+    const banner = document.getElementById('banner');
+    if (banner) { banner.classList.remove('show'); banner.style.opacity = '0'; }
+    const overlay = document.getElementById('overlay');
+    if (overlay) overlay.classList.add('hidden');
+    const fps = document.getElementById('fps');
+    if (fps) fps.classList.add('hidden');
+    match.camLock = true;
+    const mid = new THREE.Vector3().addVectors(p1.root.position, p2.root.position).multiplyScalar(0.5);
+    const mt = matTopY();
+    camera.fov = 38;
+    camera.updateProjectionMatrix();
+    camera.position.set(mid.x, mt + 3.55, mid.z + 11.0);
+    camera.lookAt(mid.x, mt + 1.55 * SIZE, mid.z);
+    renderFrame();
+    return { y: camera.position.y, lookY: mt + 1.55 * SIZE, size: SIZE, matTop: mt, gfx: gfxKey };
+  };
   window.__rfSkipToFight = () => {
     startFightFromShell({ skipIntro: true });
     const banner = document.getElementById('banner');
@@ -4428,10 +4636,10 @@ function onLoad(gltf) {
     const f = id === 'p1' ? p1 : p2;
     match.camLock = true;
     const c = f.root.position;
-    if (close === 'feet') { camera.position.set(c.x + 1.3, 0.55, c.z + 1.3); camera.lookAt(c.x, 0.15, c.z); return; }
-    if (close) { camera.position.set(c.x + 1.1, 1.6, c.z + 1.7); camera.lookAt(c.x, 1.25, c.z); return; }
-    camera.position.set(c.x + 2.6, 1.3, c.z + 3.2);
-    camera.lookAt(c.x, 0.5, c.z);
+    if (close === 'feet') { camera.position.set(c.x + 1.3, matTopY() + 0.55, c.z + 1.3); camera.lookAt(c.x, matTopY() + 0.15, c.z); return; }
+    if (close) { camera.position.set(c.x + 1.1, matTopY() + 1.6, c.z + 1.7); camera.lookAt(c.x, matTopY() + 1.25, c.z); return; }
+    camera.position.set(c.x + 2.6, matTopY() + 1.3, c.z + 3.2);
+    camera.lookAt(c.x, matTopY() + 0.5, c.z);
   };
   window.__rfBreak = (id, sub) => debugBreakSub(id === 'p1' ? p1 : p2, sub, scene);
   window.__rfLegMesh = () => {
@@ -4606,7 +4814,7 @@ function onLoad(gltf) {
     const mid = new THREE.Vector3().addVectors(p1.root.position, p2.root.position).multiplyScalar(0.5);
     camera.fov = 40;
     camera.updateProjectionMatrix();
-    camera.position.set(mid.x + 0.15, 0.28, mid.z + 2.15);
+    camera.position.set(mid.x + 0.15, matTopY() + 0.28, mid.z + 2.15);
     camera.lookAt(mid.x, matTopY() + 0.04, mid.z);
   };
   renderer.setAnimationLoop(tick);

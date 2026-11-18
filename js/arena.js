@@ -2,6 +2,7 @@
 /* Octagon MMA cage, painted metal mat (ambientCG Metal001 + decals), lights, and fade. */
 import * as THREE from 'three';
 import { ARENA, SIZE } from './config.js';
+import { STADIUM } from './arena/stadium-config.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // Woven chain-link: diagonal wires with a bright top edge and a dark underside,
@@ -99,19 +100,6 @@ function matDecalTexture(a) {
   return { tex, size: N / k };
 }
 
-function beamTexture() {
-  const c = document.createElement('canvas');
-  c.width = 4; c.height = 256;
-  const g = c.getContext('2d');
-  const grd = g.createLinearGradient(0, 0, 0, 256);
-  grd.addColorStop(0, '#888');
-  grd.addColorStop(0.06, '#fff');
-  grd.addColorStop(0.55, '#3a3a3a');
-  grd.addColorStop(1, '#000');
-  g.fillStyle = grd; g.fillRect(0, 0, 4, 256);
-  return new THREE.CanvasTexture(c);
-}
-
 function merged(list, mat) {
   const geos = list.map(({ geo, m }) => { const g2 = geo.clone(); g2.applyMatrix4(m); return g2; });
   return new THREE.Mesh(mergeGeometries(geos, false), mat);
@@ -186,16 +174,17 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
   const matMaps = loadMatMetalMaps();
   const floorGeo = new THREE.CylinderGeometry(r, r, ARENA.floorThickness, 8);
   uvWorldXZ(floorGeo, 2.15); // ~2.15 m per tile across the ~13 m octagon
+  // Sharp reflective plate: keep the color + a light normal, drop the roughness/metalness
+  // maps so they cannot dull the mirror. Bloom and additive shafts/cones used to blow this
+  // out into a white haze; those sources are gone, so a low roughness is safe again.
   const floorMat = new THREE.MeshStandardMaterial({
-    color: 0xc2c6cc,
-    metalness: 0.2,
-    roughness: 0.78,
+    color: 0xd4d8de,
+    metalness: 0.88,
+    roughness: 0.15,
     map: matMaps.map,
     normalMap: matMaps.normalMap,
-    normalScale: new THREE.Vector2(0.4, 0.4),
-    roughnessMap: matMaps.roughnessMap,
-    metalnessMap: matMaps.metalnessMap,
-    envMapIntensity: 0.28,
+    normalScale: new THREE.Vector2(0.22, 0.22),
+    envMapIntensity: 1.05,
   });
   const floor = new THREE.Mesh(floorGeo, floorMat);
   floor.position.y = -ARENA.floorThickness / 2;
@@ -429,7 +418,6 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
     color: 0xfff4dc, emissive: 0xffe7b0, emissiveIntensity: 0.7, roughness: 0.45,
   });
   const fixturePos = [];
-  const beamAlpha = beamTexture();
   for (let i = 0; i < 4; i++) {
     const ang = i * Math.PI / 2 + Math.PI / 4;
     const fx = Math.cos(ang) * 3.4;
@@ -442,27 +430,60 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
     can.position.set(fx, fy + 0.2, fz);
     group.add(can);
     fixturePos.push(new THREE.Vector3(fx, fy, fz));
-    const target = new THREE.Vector3(0, 0.4, 0);
-    const from = new THREE.Vector3(fx, fy, fz);
-    const dist = from.distanceTo(target);
-    const beam = new THREE.Mesh(
-      new THREE.ConeGeometry(Math.tan(Math.PI / 6.5) * dist * 0.6, dist, 24, 1, true),
-      new THREE.MeshBasicMaterial({
-        color: 0xfff1d0, alphaMap: beamAlpha, transparent: true, opacity: 0.004,
-        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false,
-      }),
-    );
-    beam.geometry.rotateX(Math.PI);
-    beam.geometry.translate(0, dist / 2, 0);
-    beam.position.copy(from);
-    beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), target.clone().sub(from).normalize());
-    beam.renderOrder = 5;
-    beam.userData.beam = true;
-    group.add(beam);
   }
+
+  // Lift the whole octagon (mat, cage, fixtures) onto the raised stage. Skirt and steps
+  // stay on the arena floor, added as a sibling group.
+  const matTop = ARENA.matTop || 0;
+  group.position.y = matTop;
+  for (const p of fixturePos) p.y += matTop;
+  addOctagonPlatform(scene, r, matTop);
 
   scene.add(group);
   return { group, fixturePos, fencePanels, fenceTop: H };
+}
+
+// Raised-stage skirt and steps (0.8–1 m apron). Steps sit on the ±Z flats so they do not
+// meet the pit-crew bays on ±X or the tunnel mouths on the diagonals.
+function addOctagonPlatform(scene, r, matTop) {
+  const floorY = STADIUM && STADIUM.floorY != null ? STADIUM.floorY : 0;
+  const h = matTop - floorY;
+  if (h < 0.05) return;
+  const apron = new THREE.Group();
+  apron.name = 'octagonPlatform';
+  const skirtMat = new THREE.MeshStandardMaterial({
+    color: 0x1a1d22, metalness: 0.55, roughness: 0.38, envMapIntensity: 0.4,
+  });
+  const lipMat = new THREE.MeshStandardMaterial({ color: 0x2a2e34, metalness: 0.7, roughness: 0.32 });
+  const stepMat = new THREE.MeshStandardMaterial({ color: 0x22262c, metalness: 0.4, roughness: 0.45 });
+  const skirt = new THREE.Mesh(new THREE.CylinderGeometry(r + 0.04, r + 0.06, h, 8, 1, true), skirtMat);
+  skirt.position.y = floorY + h / 2;
+  skirt.rotation.y = Math.PI / 8;
+  skirt.castShadow = true;
+  skirt.receiveShadow = true;
+  apron.add(skirt);
+  const pad = new THREE.Mesh(new THREE.CylinderGeometry(r + 0.06, r + 0.06, 0.08, 8), lipMat);
+  pad.position.y = floorY + 0.04;
+  pad.rotation.y = Math.PI / 8;
+  pad.receiveShadow = true;
+  apron.add(pad);
+  const a = r * Math.cos(Math.PI / 8);
+  const steps = 4;
+  const rise = h / steps;
+  const tread = 0.42;
+  const width = 2.4;
+  for (const sgn of [1, -1]) {
+    for (let i = 0; i < steps; i++) {
+      const y = floorY + rise * (i + 0.5);
+      const z = sgn * (a + 0.08 + tread * (steps - i) - tread / 2);
+      const box = new THREE.Mesh(new THREE.BoxGeometry(width, rise * 0.92, tread - 0.02), stepMat);
+      box.position.set(0, y, z);
+      box.castShadow = true;
+      box.receiveShadow = true;
+      apron.add(box);
+    }
+  }
+  scene.add(apron);
 }
 
 const _cv = new THREE.Vector3();
@@ -492,7 +513,8 @@ export function addArenaLights(scene, fixturePos) {
   for (const p of fixturePos) {
     const s = new THREE.SpotLight(0xfff1d0, 9, 20, Math.PI / 6.2, 0.55, 1.15);
     s.position.copy(p);
-    s.target.position.set(0, 0.4, 0);
+    s.target.position.set(0, (ARENA.matTop || 0) + 0.4, 0);
+    s.userData.industrialOverhead = true;
     s.userData.wantsShadow = spots.length === 0;
     s.castShadow = spots.length === 0;
     s.shadow.mapSize.set(2048, 2048);
@@ -527,14 +549,14 @@ export function addArenaLights(scene, fixturePos) {
   return { hemi, spots, fill, fill2, rim, rimL, rimR };
 }
 
-// Kept for callers that still import it; the painted Metal001 mat does not use a planar mirror.
+// Sharp planar mirror for the metal mat (no blur, modest mix, hidden on Low).
 const FloorReflectShader = {
   name: 'FloorReflectShader',
   uniforms: {
     color: { value: null },
     tDiffuse: { value: null },
     textureMatrix: { value: null },
-    strength: { value: 0.3 },
+    strength: { value: 0.38 },
     knee: { value: 0.35 },
     texel: { value: new THREE.Vector2(1 / 1024, 1 / 576) },
   },
@@ -559,13 +581,10 @@ const FloorReflectShader = {
     void main() {
       #include <logdepthbuf_fragment>
       vec2 uv = vUv.xy / vUv.w;
-      vec3 c = texture2D( tDiffuse, uv ).rgb * 0.36;
-      c += texture2D( tDiffuse, uv + vec2( texel.x * 2.0, 0.0 ) ).rgb * 0.16;
-      c += texture2D( tDiffuse, uv - vec2( texel.x * 2.0, 0.0 ) ).rgb * 0.16;
-      c += texture2D( tDiffuse, uv + vec2( 0.0, texel.y * 3.0 ) ).rgb * 0.16;
-      c += texture2D( tDiffuse, uv - vec2( 0.0, texel.y * 3.0 ) ).rgb * 0.16;
+      // Single sample: a 4-tap blur read as a white veil over the robots. Strength stays modest.
+      vec3 c = texture2D( tDiffuse, uv ).rgb;
       float lum = dot( c, vec3( 0.299, 0.587, 0.114 ) );
-      float a = clamp( strength + max( lum - knee, 0.0 ) * 0.6, 0.0, 0.85 );
+      float a = clamp( strength * (0.32 + lum * 0.45), 0.0, 0.48 );
       gl_FragColor = vec4( c * color, a );
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
@@ -591,7 +610,7 @@ export async function addFloorReflection(scene) {
   mirror.material.depthWrite = false;
   mirror.rotation.x = -Math.PI / 2;
   mirror.rotation.z = Math.PI / 8;
-  mirror.position.y = 0.0015;
+  mirror.position.y = (ARENA.matTop || 0) + 0.0015;
   mirror.renderOrder = 1;
   mirror.name = 'floorReflection';
   scene.add(mirror);

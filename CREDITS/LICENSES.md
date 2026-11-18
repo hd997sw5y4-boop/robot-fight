@@ -95,11 +95,12 @@ Walking footsteps layer existing CC0 Kenney `thud_*` + `clank_h_*` (and sometime
 - **Wood062** — https://ambientcg.com/view?id=Wood062 — pit-crew desks and chairs (1K JPG color, OpenGL normal, roughness, resized to 512; `textures/pit-crew/wood_*.jpg`).
 - **Metal008** (scratched metal) — https://ambientcg.com/view?id=Metal008 — previously the chrome mat; files remain at `textures/chrome_*.jpg` but are no longer used as the mat material.
 - **Rust004** — https://ambientcg.com/view?id=Rust004 — rust and grunge masks previously mixed into the chrome mat (`textures/rust_*.jpg`); unused by the current Metal001 mat.
-- **Concrete034** — https://ambientcg.com/view?id=Concrete034 — stadium stands, walls and arena floor (`textures/stadium/concrete_*.jpg`; 1K color + normal, roughness resized to 512).
+- **Concrete034** — https://ambientcg.com/view?id=Concrete034 — stadium stands and walls (`textures/stadium/concrete_*.jpg`; color and normal are non-square 1024×512, roughness 512). No longer used on the arena floor.
+- **Concrete023** — https://ambientcg.com/view?id=Concrete023 — polished dark concrete arena floor outside the ring (`textures/stadium/floor_*.jpg`; square 1K JPG color, OpenGL normal, roughness), tiled at 4 m.
 
 ## Quaternius — CC0 1.0
 
-[Ultimate Modular Men Pack](https://quaternius.com/packs/ultimatemodularcharacters.html) (CC0 1.0). Worker, Casual and Casual2 characters used as the blue and red pit-crew figures (`models/pit-crew/Worker.glb`, `Casual.glb`, `Casual2.glb`). Idle, typing and cheer poses are applied on the pack's CharacterArmature at runtime. No attribution required; credit is given anyway.
+[Ultimate Modular Men Pack](https://quaternius.com/packs/ultimatemodularcharacters.html) (CC0 1.0). Worker, Casual and Casual2 characters used as the blue and red pit-crew figures (`models/pit-crew/Worker.glb`, `Casual.glb`, `Casual2.glb`). Suit character used as team owners/managers beside each pit (`models/pit-crew/Suit.glb`). Idle, typing, cheer, clap and arms-crossed poses are applied on the pack's CharacterArmature at runtime (the showcase GLBs ship without clips). No attribution required; credit is given anyway.
 
 ## Poly Haven HDRI — CC0 1.0
 
@@ -107,7 +108,7 @@ Walking footsteps layer existing CC0 Kenney `thud_*` + `clank_h_*` (and sometime
 
 ## Stadium arena (original design)
 
-The stadium (`js/arena/stadium.js`) is an original layout built from code: stepped concrete bowls, instanced seats and crowd, roof truss, lights and screens. Screen and LED-board graphics are drawn at runtime on canvases with generic text (Robot Fight / Window Workshop Games); no third-party logos, leagues or brands. Its only file asset is ambientCG Concrete034 (CC0 1.0, above).
+The stadium (`js/arena/stadium.js`) is an original layout built from code: stepped concrete bowls, instanced seats and crowd, roof truss, lights and screens. Screen and LED-board graphics are drawn at runtime on canvases with generic text (Robot Fight / Window Workshop Games); no third-party logos, leagues or brands. File assets: ambientCG Concrete034 on the stands and walls, ambientCG Concrete023 on the arena floor (CC0 1.0, above).
 
 ## Background music — CC0 1.0 (OpenGameArt)
 

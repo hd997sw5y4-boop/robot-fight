@@ -1,6 +1,6 @@
 Pit-crew models (CC0 1.0, public domain):
 
-- Worker.glb, Casual.glb, Casual2.glb — Quaternius Ultimate Modular Men Pack
+- Worker.glb, Casual.glb, Casual2.glb, Suit.glb — Quaternius Ultimate Modular Men Pack
   https://quaternius.com/packs/ultimatemodularcharacters.html
 - desk, chairDesk, laptop, computerKeyboard, computerScreen, computerMouse —
   Kenney Furniture Kit, https://kenney.nl/assets/furniture-kit
