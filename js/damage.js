@@ -1104,6 +1104,34 @@ function addSparkScene(scene) {
   }
 }
 
+// Neon eyes (game.js addVisor): a clean head hit landing on or right by an eye can blow it.
+// Spark burst + glassy pop, a short sputter (game.js stepEyes), then dark for the match.
+const _ev = new THREE.Vector3();
+function maybeBlowEye(f, point, dir, force) {
+  if (!f.eyes || force < 2.4) return;
+  let best = null, bd = Infinity;
+  for (const e of f.eyes) {
+    if (e.blown || !e.mesh.visible) continue;
+    const d = e.mesh.getWorldPosition(_ev).distanceTo(point);
+    if (d < bd) { bd = d; best = e; }
+  }
+  const reach = 0.17 * SIZE;
+  if (!best || bd > reach) return;
+  const chance = Math.min(0.9, 0.35 + (1 - bd / reach) * 0.4 + Math.max(0, force - 3) * 0.06);
+  if (Math.random() > chance) return;
+  blowEye(f, best, dir);
+}
+export function blowEye(f, e, dir) {
+  if (!e || e.blown) return;
+  e.blown = true;
+  e.flick = 1.4;
+  e.tint = e.halo.material.color.clone();
+  const at = e.mesh.getWorldPosition(new THREE.Vector3());
+  const d = dir ? dir.clone().normalize().negate() : new THREE.Vector3(0, 0, 1);
+  emitSparks(at, d.setY(0.4).normalize(), 26);
+  playSfx('eyePop');
+}
+
 export function applyPartHit(f, partId, damage, point, dir, scene, opts = {}) {
   const part = f.parts[partId];
   if (!part || part.detached) return { wrecked: false, point };
@@ -1120,6 +1148,7 @@ export function applyPartHit(f, partId, damage, point, dir, scene, opts = {}) {
   dentPart(part, point, dir, dentAmt);
   emitSparks(point, dir, opts.blocked ? 8 : 18 + Math.min(16, Math.round(force * 3)));
   shedChips(f, partId, point, dir, force, scene, { blocked: opts.blocked });
+  if (partId === 'head' && !opts.blocked && point) maybeBlowEye(f, point, dir, force);
   addSparkScene(scene);
   let wrecked = false;
   const isLeg = partId.startsWith('leg');

@@ -9,7 +9,9 @@ import { applyChrome, setChromeLow } from './chrome.js';
 import { initJointLimits, applyJointLimits } from './joints.js';
 import { setWiresLow } from './wires.js';
 import { createApiBrain, wantsApiBrain, initApiBrainUI } from './api-brain.js';
-import { getSettings, isSettingsOpen, initSettings, updateFps, cycleCameraMode } from './settings.js';
+import { getSettings, isSettingsOpen, initSettings, updateFps, cycleCameraMode, setCameraMode } from './settings.js';
+import { broadcastMain } from './arena/broadcast.js';
+let prevCamMode = null;
 import { unlockAudio, playSfx, playHit, setBuzz, startCrowd } from './audio.js';
 import { announce, announceIntroSeconds } from './announcer.js';
 import { buildArena as buildArenaVisual, addArenaLights, addFloorReflection } from './arena.js';
@@ -45,6 +47,7 @@ import {
   blockReductionMul,
   pickHit,
   applyPartHit,
+  blowEye,
   stepDamage,
   applyMalfunctions,
   resetFighterDamage,
@@ -106,6 +109,7 @@ function applyFov(v) {
 function stepFov(dt) {
   const k = dt <= 0 ? 0.35 : 1 - Math.pow(0.0007, dt);
   fovLive += (fovTarget - fovLive) * k;
+  if (camModeLive === 'broadcast') return; // the TV director sets its own lens
   if (Math.abs(camera.fov - fovLive) > 0.02) {
     camera.fov = fovLive;
     camera.updateProjectionMatrix();
@@ -405,6 +409,26 @@ function meshBox(root) {
   return found && Number.isFinite(box.min.y) ? box : null;
 }
 
+// Neon eyes: two team-tinted emissive lamps on a dark visor band, each with an additive glow
+// halo (a cheap bloom stand-in: there is no post-processing pass). Either eye can be blown out
+// by a hit on that spot (damage.js blowEye) and stays dark for the rest of the match.
+let _glowTex = null;
+function glowTexture() {
+  if (_glowTex) return _glowTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const r = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  r.addColorStop(0, 'rgba(255,255,255,1)');
+  r.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+  r.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = r;
+  g.fillRect(0, 0, 64, 64);
+  _glowTex = new THREE.CanvasTexture(c);
+  _glowTex.colorSpace = THREE.SRGBColorSpace;
+  return _glowTex;
+}
+const eyeTint = (color) => new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.3);
 function addVisor(model, color) {
   let head = null;
   model.traverse((o) => {
@@ -414,35 +438,80 @@ function addVisor(model, color) {
     if (n === 'Head') head = o;
   });
   if (!head) return;
-  const c = new THREE.Color(color);
-  const vis = new THREE.Mesh(
-    new THREE.BoxGeometry(1, 1, 1),
-    new THREE.MeshStandardMaterial({
-      color: c, emissive: c, emissiveIntensity: 3.4, roughness: 0.22, metalness: 0.08, toneMapped: false,
-    }),
-  );
-  vis.name = 'rfVisor';
-  head.add(vis);
   head.updateWorldMatrix(true, false);
   const ws = new THREE.Vector3();
   head.getWorldScale(ws);
-  vis.scale.set(0.2 / Math.max(ws.x, 1e-5), 0.05 / Math.max(ws.y, 1e-5), 0.06 / Math.max(ws.z, 1e-5));
-  vis.position.set(0, 0.07 / Math.max(ws.y, 1e-5), 0.11 / Math.max(ws.z, 1e-5));
+  const sx = 1 / Math.max(ws.x, 1e-5), sy = 1 / Math.max(ws.y, 1e-5), sz = 1 / Math.max(ws.z, 1e-5);
+  const band = new THREE.Mesh(
+    new THREE.BoxGeometry(1, 1, 1),
+    new THREE.MeshStandardMaterial({ color: 0x07090c, roughness: 0.12, metalness: 0.6 }),
+  );
+  band.name = 'rfVisorBand';
+  band.scale.set(0.2 * sx, 0.05 * sy, 0.06 * sz);
+  band.position.set(0, 0.07 * sy, 0.11 * sz);
+  head.add(band);
+  const c = eyeTint(color);
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 14, 10),
+      new THREE.MeshBasicMaterial({ color: c.clone().multiplyScalar(2.2), toneMapped: false }),
+    );
+    eye.name = side < 0 ? 'rfEyeL' : 'rfEyeR';
+    eye.scale.set(0.024 * sx, 0.016 * sy, 0.012 * sz);
+    eye.position.set(side * 0.048 * sx, 0.072 * sy, 0.142 * sz);
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: glowTexture(), color: c, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.85, toneMapped: false,
+    }));
+    halo.name = 'rfEyeGlow';
+    halo.scale.set(0.16 * sx / (0.024 * sx), 0.16 * sy / (0.016 * sy), 1); // in eye space
+    halo.position.set(0, 0, 0.6);
+    halo.renderOrder = 5;
+    eye.add(halo);
+    head.add(eye);
+  }
+}
+
+function collectEyes(f) {
+  f.eyes = [];
+  f.model.traverse((o) => { if (o.name === 'rfEyeL' || o.name === 'rfEyeR') f.eyes.push({ mesh: o, halo: o.children[0], blown: false, flick: 0, side: o.name === 'rfEyeL' ? 'L' : 'R' }); });
+}
+
+// Restore both eyes (new match only: a blown eye stays out across rounds).
+function resetEyes(f) {
+  if (!f.eyes) return;
+  const c = eyeTint(f.id === 'p1' ? MODEL.colors.p1 : MODEL.colors.p2);
+  for (const e of f.eyes) {
+    e.blown = false; e.flick = 0;
+    e.mesh.material.color.copy(c).multiplyScalar(2.2);
+    e.halo.material.color.copy(c); e.halo.visible = true; e.halo.material.opacity = 0.85;
+  }
+}
+
+// A blown eye sputters for a moment, then stays dark.
+function stepEyes(f, dt) {
+  if (!f.eyes) return;
+  for (const e of f.eyes) {
+    if (!e.blown || e.flick <= 0) continue;
+    e.flick -= dt;
+    const on = e.flick > 0 && Math.random() < 0.35 * (e.flick / 1.4) + 0.05;
+    const k = on ? 0.5 + Math.random() * 0.8 : 0.03;
+    e.mesh.material.color.copy(e.tint).multiplyScalar(k);
+    e.halo.visible = on;
+    if (e.flick <= 0) { e.mesh.material.color.setRGB(0.03, 0.03, 0.035); e.halo.visible = false; }
+  }
 }
 
 function retintFighter(f, color) {
   const c = new THREE.Color(color);
   f.model.traverse((o) => {
     if (!o.isMesh) return;
+    if (o.name === 'rfVisorBand') return;
     for (const m of [].concat(o.material)) {
-      if (!m || !m.color) continue;
+      if (!m || !m.color || o.name === 'rfEyeL' || o.name === 'rfEyeR') continue;
       if (!m.userData.baseColor) m.userData.baseColor = m.color.clone();
       m.color.copy(m.userData.baseColor).lerp(c, 0.42);
     }
-    if (o.name === 'rfVisor' && o.material) {
-      o.material.color.copy(c);
-      o.material.emissive.copy(c);
-    }
+    // Eyes keep the team colour (blue / red) whatever the paint.
   });
 }
 
@@ -558,6 +627,7 @@ function makeFighter(gltf, color, side) {
   // config may name another profile. f.stat holds the multipliers fight code applies.
   f.stats = getFighterStats((f.config && f.config.profile) || side);
   f.stat = f.stats.mul;
+  collectEyes(f);
   prepareFighterDamage(f);
   cacheFeet(f);
   cacheBody(f);
@@ -1461,6 +1531,13 @@ window.addEventListener('keydown', (e) => {
     cycleCameraMode(); // saved; shown in the controls overlay
     return;
   }
+  // C: Broadcast view on/off (the jumbotron's TV director as the main camera).
+  if ((e.key === 'c' || e.key === 'C') && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const cur = getSettings().cam;
+    if (cur === 'broadcast') setCameraMode(prevCamMode && prevCamMode !== 'broadcast' ? prevCamMode : 'arena');
+    else { prevCamMode = cur; setCameraMode('broadcast'); }
+    return;
+  }
   keys.add(e.key.toLowerCase());
   if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(e.key.toLowerCase())) e.preventDefault();
 });
@@ -1480,7 +1557,7 @@ function rawInput() {
   inp.ground = keys.has('i');
   inp.run = keys.has('shift');
   inp.flipBack = keys.has('o');
-  inp.flipFront = keys.has('p');
+  inp.flipFront = keys.has('y'); // (P is pause)
   inp.jumpKick = keys.has('u');
 
   const gp = navigator.getGamepads?.()[0];
@@ -2571,6 +2648,7 @@ function brainSnapshot(f, opp, dt) {
     dist: +f.root.position.distanceTo(opp.root.position).toFixed(3),
     strikeRange: { punch: COMBAT.punch.reach * statOf(f, 'reach'), kick: COMBAT.kick.reach * statOf(f, 'reach') },
     self: {
+      quick: statOf(f, 'speed') * statOf(f, 'recovery'), // stat profile: how fast it reads and answers
       health: f.health,
       state: f.state,
       stateT: f.stateT,
@@ -2760,10 +2838,12 @@ function stepFighter(f, other, inp, dt) {
     const done = airKick
       ? (ct >= airKick.air.end - 0.01 || (action && !action.isRunning())) // ends on its feet
       : (f.retract ? retracted : pulled) || (!f.retract && ct >= tm.end - 0.01) || (action && !action.isRunning());
+    // Safety net: no strike may hold the robot longer than this (selftest saw a 3 s kick lock).
+    const overdue = f.stateT > (airKick ? 3.2 : 2.2);
     // The player can cancel the retraction into movement, guard or the next strike.
     const wantsOut = !f.isCpu && !airKick && ct > tm.a1 && (inp.block || inp.punch || inp.kick
       || Math.abs(inp.sidestep) + Math.abs(inp.inout) > 0.3);
-    if ((done || wantsOut) && (f.state === 'punch' || f.state === 'kick')) {
+    if ((done || wantsOut || overdue) && (f.state === 'punch' || f.state === 'kick')) {
       f.retract = false;
       endAttack(f, pulled ? 0.16 : 0.2);
       if (!wantsOut) return;
@@ -3308,7 +3388,9 @@ function placeTitles() {
 function updateCamera(dt) {
   // [stadium-broadcast hook] crowd-watch seat (V-cycle 'crowd') and VR own the camera when active.
   if (updateCrowdCam(camera, dt)) { setFirstPersonHide(false); camModeLive = 'crowd'; return; }
-  const mode = match.over ? 'arena' : cameraMode();
+  const want = cameraMode();
+  // Broadcast keeps directing through the KO (close-ups, cuts); other views go to the arena.
+  const mode = match.over && want !== 'broadcast' ? 'arena' : want;
   if (mode !== camModeLive) {
     camModeLive = mode;
     camera.near = mode === 'first' ? 0.04 : 0.1;
@@ -3316,6 +3398,7 @@ function updateCamera(dt) {
     dt = 0; // snap to the new view
   }
   setFirstPersonHide(mode === 'first');
+  if (mode === 'broadcast' && broadcastMain(camera)) return;
   if (mode === 'fighting') { updateFightingCamera(dt); return; }
   if (mode !== 'arena') { updateFollowCamera(dt, mode); return; }
   const a = p1.root.position;
@@ -3602,6 +3685,7 @@ function resetMatch(keepDebris = false) {
     resetFighterPhysics(f, f.startX, 0);
     f.atkMods = null;
     resetFighterDamage(f, scene);
+    if (!keepDebris) resetEyes(f);
     // Every round starts standing in the guard stance (no get-up). Hard-start the idle at full
     // weight and pose it now, so the first rendered frame never shows the bind (A/T) pose from
     // a cross-fade out of a stopped KO fall action.
@@ -3693,6 +3777,7 @@ function tick() {
     if (window.__rfDiag) diagFootStage(f, 1);
     applyMalfunctions(f, dt);
     if (f.koTip) stepKoTip(f, dt);
+    stepEyes(f, dt);
     if (window.__rfDiag) diagFootStage(f, 2);
     applyJointLimits(f);
     if (window.__rfDiag) diagFootStage(f, 3);
@@ -4102,6 +4187,7 @@ function onLoad(gltf) {
     const f = id === 'p1' ? p1 : p2; const h = f.hipsBone || findHips(f); const v = new THREE.Vector3();
     return { state: f.state, kind: f.koKind, hipsY: +h.getWorldPosition(v).y.toFixed(2), low: +(lowestBodyY(f) ?? 0).toFixed(2), rotZ: +f.model.rotation.z.toFixed(2), held: !!(f.koHold && f.koHold.held), legs: ['legL', 'legR'].filter((k) => f.parts[k].detached), head: f.parts.head.detached };
   };
+  window.__rfBlowEye = (id, side = 'L') => { const f = id === 'p1' ? p1 : p2; const e = f.eyes && f.eyes.find((x) => x.side === side); blowEye(f, e, new THREE.Vector3(0, 0, 1)); return f.eyes.map((x) => x.blown); };
   window.__rfFighterStats = (id) => (id === 'p1' ? p1 : p2).stats;
   window.__rfForceKO = (id) => { const f = id === 'p1' ? p1 : p2; ko(f, f === p1 ? p2 : p1); };
   window.__rfForceKnockdown = (id) => {

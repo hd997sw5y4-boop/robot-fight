@@ -403,6 +403,26 @@ export function playSfx(kind, opts = {}) {
     playGroup('spark', { vol: opts.vol == null ? 0.45 : opts.vol, rateVar: 0.16 });
     return;
   }
+  if (kind === 'eyePop') {
+    // An eye lamp blowing: bright spark crackle pitched up plus a short glassy ping and tinkle.
+    playGroup('spark', { vol: 0.8, rate: 1.6, rateVar: 0.1 });
+    try {
+      const t0 = ctx.currentTime;
+      for (let i = 0; i < 4; i++) {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = 'sine';
+        o.frequency.value = 2600 + Math.random() * 2600;
+        const t = t0 + i * 0.035 + Math.random() * 0.02;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.16 / (i + 1), t + 0.004);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12 + Math.random() * 0.1);
+        o.connect(g); g.connect(sfx);
+        o.start(t); o.stop(t + 0.3);
+      }
+    } catch (_) {}
+    return;
+  }
   if (kind === 'fall') {
     playGroup('crash', { vol: 1, rate: 0.8, rateVar: 0.07 });
     playGroup('thud', { vol: 0.9, delay: 0.02 });

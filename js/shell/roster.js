@@ -59,6 +59,7 @@
     }
     f.model.traverse((o) => {
       if (!o.isMesh) return;
+      if (o.name === 'rfVisorBand' || o.name === 'rfEyeL' || o.name === 'rfEyeR') return; // eyes stay team blue / red
       if (o.name === 'rfVisor') {
         if (o.material && o.material.color) { o.material.color.copy(acc); if (o.material.emissive) o.material.emissive.copy(acc); }
         return;

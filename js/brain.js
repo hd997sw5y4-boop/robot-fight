@@ -58,7 +58,8 @@ export function createPacedBrain(getProfile) {
   function setMode(mode, len) {
     s.mode = mode;
     s.modeT = 0;
-    s.modeLen = len;
+    // A quicker frame (stat profile) spends less time between exchanges.
+    s.modeLen = mode === 'strike' ? len : len / (s.quick || 1);
   }
 
   function planStrike(prof, self) {
@@ -87,9 +88,12 @@ export function createPacedBrain(getProfile) {
     s.tempo += (goal - s.tempo) * Math.min(1, snap.dt * 0.8);
     s.comeback = comeback;
     const aggr = (prof.aggression || 1) * s.tempo;
-    const react = prof.react != null ? prof.react : 0.4;
+    const react = Math.min(0.95, (prof.react != null ? prof.react : 0.4) * (snap.self.quick || 1));
     // Difficulty sets how fast the robot answers what it sees.
-    const reactDelay = prof.think ? prof.think[0] + prof.think[1] * 0.6 : 0.26;
+    // Stat profile: a quicker frame (speed x recovery) reads and answers faster.
+    const quick = snap.self.quick || 1;
+    s.quick = quick;
+    const reactDelay = (prof.think ? prof.think[0] + prof.think[1] * 0.6 : 0.26) / quick;
     const { self, opp } = snap;
     // A damaged head (optics) slows reactions and makes range judgement wobble.
     const headDmg = self.parts && self.parts.head != null ? Math.max(0, 1 - self.parts.head) : 0;

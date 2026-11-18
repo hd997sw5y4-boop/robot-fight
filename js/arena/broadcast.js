@@ -43,6 +43,8 @@ let lastWall = 0;
 // Director state
 const live = { shot: 'wide', t: 0, len: 5, seed: Math.random() * 6.28, pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 40, snap: true };
 let replay = null;   // { type, start, end, t, shot, victim, seed }
+let mainOn = false;  // main camera is in 'broadcast' view this frame (set by broadcastMain)
+let mainAt = 0;
 let pending = null;  // { type, at, playAt, victim, liveShot }
 let lastReplayEnd = -99;
 
@@ -347,7 +349,11 @@ function detectEvents(fighters, match) {
   watch.p1 = s1;
   watch.p2 = s2;
   watch.over = !!(match && match.over);
-  for (const [type, victim] of evs) queueReplay(type, victim);
+  for (const [type, victim] of evs) {
+    queueReplay(type, victim);
+    // Main-screen Broadcast view: cut to a close-up of whoever just took the big moment.
+    if (mainOn && !match?.over) { live.shot = victim === 'p1' ? 'closeP1' : 'closeP2'; live.t = 0; live.len = type === 'hit' ? 1.6 : 2.4; live.snap = true; }
+  }
 }
 
 function queueReplay(type, victim) {
@@ -486,6 +492,20 @@ export function initBroadcast(c) {
   };
 }
 
+/** Main camera 'broadcast' view: the jumbotron director's live shot (auto cuts, close-ups on
+ *  big hits) drives the full-screen camera. Returns false until the director has a shot. */
+export function broadcastMain(camera) {
+  const wall = performance.now() / 1000;
+  const first = wall - mainAt > 0.25;
+  mainAt = wall;
+  if (!ctx || first) { live.snap = true; if (!ctx) return false; }
+  if (!live.pos.lengthSq()) return false;
+  camera.position.copy(live.pos);
+  camera.lookAt(live.look);
+  if (camera.fov !== live.fov) { camera.fov = live.fov; camera.updateProjectionMatrix(); }
+  return true;
+}
+
 /** Called every frame from updateStadium (game loop). Uses wall time, so pauses don't freeze it. */
 export function updateBroadcast() {
   if (!ctx) return;
@@ -497,7 +517,9 @@ export function updateBroadcast() {
   const want = !!(scr && getArena() === 'stadium' && stadiumGfx() !== 'low' && fighters[0] && fighters[1]);
   if (scr && scr.serial !== screensSerial) { screensSerial = scr.serial; staticMaps = new Map(); feedOn = false; }
   if (want !== feedOn) setFeed(want);
-  if (!want) { replay = null; pending = null; return; }
+  // Broadcast view on the main screen keeps the director running even with the feed off.
+  mainOn = wall - mainAt < 0.25 && !!(fighters[0] && fighters[1]);
+  if (!want && !mainOn) { replay = null; pending = null; return; }
 
   // Game time for recording/replay runs only while the game clock runs (dt from the shell clock).
   const paused = isSettingsOpen() || !!(window.RFShell && window.RFShell.state && window.RFShell.state.paused);
@@ -519,6 +541,7 @@ export function updateBroadcast() {
     if (replay.start + replay.t * CFG.slowMo >= replay.end) { replay = null; lastReplayEnd = now; live.t = live.len; }
   }
   stepLive(dt, fighters);
+  if (!want) return;
   const cap = xrPresenting() ? CFG.vrFps : CFG.fps;
   if (wall - lastRender < 1 / cap) return;
   lastRender = wall;

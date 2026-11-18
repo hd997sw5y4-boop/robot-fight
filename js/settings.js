@@ -24,7 +24,7 @@ const KEYS = {
 };
 
 // Camera views, in the order the V key cycles them. 'arena' is the original orbit camera.
-export const CAM_MODES = ['arena', 'fighting', 'third', 'first'];
+export const CAM_MODES = ['arena', 'fighting', 'third', 'first', 'broadcast'];
 
 const defaults = {
   gfx: 'high',

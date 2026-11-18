@@ -166,7 +166,7 @@ export const GFX_PRESETS = {
 // Per-fighter stat profiles. Each stat is a 1-10 rating; every profile spends the same total
 // (STAT_BUDGET), so fighters differ but none is strictly better. A rating maps to a fight-code
 // multiplier around 1.0 (statMul): 6 -> 1.00, each point = 5%.
-//   speed:     walk speeds and strike playback speed
+//   speed:     walk speeds, strike playback speed and (CPU) reaction speed
 //   power:     damage dealt
 //   armor:     damage taken is divided by it
 //   reach:     strike range the fighter (and its AI) works at
@@ -177,10 +177,10 @@ export const STAT_BUDGET = 36;
 export const FIGHTER_PROFILES = {
   striker: { id: 'striker', name: 'Striker', blurb: 'Fast feet, quick hands, recovers fast. Lighter hits and plating.',
     strengths: ['Fast footwork', 'Quick strikes', 'Quick recovery'], weaknesses: ['Light hitter', 'Thin armor'],
-    stats: { speed: 8, power: 5, armor: 5, reach: 6, recovery: 7, toughness: 5 } },
+    stats: { speed: 9, power: 5, armor: 5, reach: 6, recovery: 7, toughness: 4 } },
   bruiser: { id: 'bruiser', name: 'Bruiser', blurb: 'Hits hard, heavy plating, tough parts. Slow to move and to recover.',
     strengths: ['Hard hitter', 'Heavy armor', 'Tough parts'], weaknesses: ['Slow', 'Slow recovery'],
-    stats: { speed: 4, power: 7, armor: 7, reach: 6, recovery: 5, toughness: 7 } },
+    stats: { speed: 4, power: 6, armor: 7, reach: 6, recovery: 5, toughness: 8 } },
 };
 export const SIDE_PROFILE = { p1: 'striker', p2: 'bruiser' };
 export const statMul = (rating) => 1 + (rating - 6) * 0.05;
