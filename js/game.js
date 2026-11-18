@@ -1642,17 +1642,14 @@ function consumeAttacks(inp, dt = 0) {
   const punch = inp.punch && !held.punch;
   const kick = inp.kick && !held.kick;
   const ground = !!inp.ground && !held.ground;
-  const flipBack = !!inp.flipBack && !held.flipBack;
   const flipFront = !!inp.flipFront && !held.flipFront;
   const jumpKick = !!inp.jumpKick && !held.jumpKick;
   held.punch = inp.punch;
   held.kick = inp.kick;
   held.ground = !!inp.ground;
-  held.flipBack = !!inp.flipBack;
   held.flipFront = !!inp.flipFront;
   held.jumpKick = !!inp.jumpKick;
-  if (flipBack) { held.buf = 'flipBack'; held.bufT = COMBAT.inputBuffer || 0.3; }
-  else if (flipFront) { held.buf = 'flipFront'; held.bufT = COMBAT.inputBuffer || 0.3; }
+  if (flipFront) { held.buf = 'flipFront'; held.bufT = COMBAT.inputBuffer || 0.3; }
   else if (jumpKick) { held.buf = 'jumpKick'; held.bufT = COMBAT.inputBuffer || 0.3; }
   else if (ground) { held.buf = 'ground'; held.bufT = COMBAT.inputBuffer || 0.3; }
   else if (punch) { held.buf = 'punch'; held.bufT = COMBAT.inputBuffer || 0.3; }
@@ -1665,7 +1662,7 @@ function consumeAttacks(inp, dt = 0) {
   return {
     sidestep: inp.sidestep, inout: inp.inout, block: inp.block, run: !!inp.run,
     punch: b === 'punch', kick: b === 'kick', ground: b === 'ground',
-    flipBack: b === 'flipBack', flipFront: b === 'flipFront', jumpKick: b === 'jumpKick',
+    flipFront: b === 'flipFront', jumpKick: b === 'jumpKick',
   };
 }
 
@@ -2298,15 +2295,13 @@ function applyHit(atk, def, spec, kind, strikeBone, contact) {
   // Heavy: a hard-hitting blow, a stepped-in strike, or a full kick (measured: a planted kick
   // lands at force ~3.1-3.4, a planted punch ~2.4; stepping in adds ~1).
   const heavy = !blocked && (dmg >= 7 || force >= 4.2 || (kind === 'kick' && force >= 3.3));
-  // Counter hit: caught mid-swing. Longer hitstun and a sharper freeze.
+  // Counter hit: caught mid-swing. Longer hitstun.
   const counter = !blocked && (def.state === 'punch' || def.state === 'kick');
   const solidHit = !blocked && force >= COMBAT.stumbleForce;
-  // Impact weight: a real freeze scaled by how hard it landed (~40 ms light .. 120 ms big /
-  // counter), a shake that follows it (Settings shake toggle respected in addShake) and a bright
-  // flash right at the contact point.
+  // Impact weight: a shake scaled by how hard it landed (Settings shake toggle respected
+  // in addShake) and a bright flash right at the contact point.
   const hard = Math.max(0, Math.min(1, (force - 2) / 4 + (heavy ? 0.25 : 0) + (counter ? 0.25 : 0)));
   addShake(blocked ? 0.03 : 0.04 + hard * 0.12);
-  if (!blocked) triggerHitStop(0.04 + hard * 0.08);
   hitFlash(hit.point, blocked ? 0.4 : 0.55 + hard * 0.75, blocked ? 0x9fd0ff : 0xfff0c8);
   const fwd = hit.dir;
   // Attacker feels the connect: the drive stops and the torso recoils a touch off the target.
@@ -2543,7 +2538,6 @@ function landGroundHit(f, def, t, at) {
   playHit({ heavy: true, kick: stomp });
   playSfx('clank', { vol: 0.9, rate: stomp ? 0.7 : 0.85 });
   addShake(stomp ? 0.16 : 0.12);
-  triggerHitStop(COMBAT.hitStopHeavy);
   startFlinch(f, new THREE.Vector3(-dir.x, 0, -dir.z), 0.06, 'torso');
   if (def.health <= 0) ko(def, f, { dir: new THREE.Vector3(dir.x, 0, dir.z).normalize(), force: 3, partId: t.part, kind: 'ground' });
 }
@@ -2805,7 +2799,6 @@ function ko(loser, winner, info) {
   }
   playSfx('ko');
   addShake(0.28);
-  match.slowLeft = COMBAT.koSlowMo || 0;
   notifyFightEnd({
     winner: match.winner,
     reason: 'ko',
@@ -3416,12 +3409,7 @@ function addShake(amount) {
   shakeAmp = Math.min(0.45, shakeAmp + amount);
 }
 
-let hitStopLeft = 0;
-function triggerHitStop(sec) {
-  hitStopLeft = Math.max(hitStopLeft, sec);
-}
-
-// Contact flash: an additive glow sprite, wall-clock timed so it shows during the hit-stop.
+// Contact flash: an additive glow sprite, timed on wall-clock so it stays visible on impact.
 let _flash = null;
 function hitFlash(point, size, color) {
   if (!point) return;
@@ -3960,8 +3948,6 @@ function resetMatch(keepDebris = false) {
   match.koT = 0;
   match.orbitT = 0;
   match.overlayAt = 0;
-  hitStopLeft = 0;
-  match.slowLeft = 0;
   held.buf = null;
   paintRound();
   const banner = document.getElementById('banner');
@@ -3977,14 +3963,6 @@ function tick() {
   stepFov(rawDt);
   stepFlash(rawDt);
   let dt = isSettingsOpen() ? 0 : rawDt;
-  if (dt > 0 && hitStopLeft > 0 && !match.over) {
-    hitStopLeft = Math.max(0, hitStopLeft - rawDt);
-    dt = rawDt * 0.04; // near-freeze: the impact frame holds
-  }
-  if (dt > 0 && match.slowLeft > 0) { // brief mild slow motion on the KO
-    match.slowLeft = Math.max(0, match.slowLeft - rawDt);
-    dt *= 0.4;
-  }
   if (match.over && match.overlayAt && performance.now() >= match.overlayAt) showKoOverlay();
   if (match.phase === 'intro') {
     if (!match.introT) document.getElementById('banner').classList.add('show');

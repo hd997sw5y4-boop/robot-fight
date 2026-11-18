@@ -24,7 +24,7 @@ export const MODEL = {
     kick: 'Kicking',
     kickVariants: ['Kicking', 'MmaKick', 'RoundhouseKick', 'SideKick', 'MeiaLuaDeFrente', 'LegSweep', 'KneeKickLead'],
     kickSpecial: ['FlipKick', 'ChapaGiratoria', 'SpinFlipKick', 'MeiaLuaDeCompasso'],
-    flipSpecial: ['FlipKick', 'ChapaGiratoria', 'BackFlipToUppercut', 'SpinFlipKick', 'MeiaLuaDeCompasso'],
+    flipSpecial: ['FlipKick', 'ChapaGiratoria', 'SpinFlipKick', 'MeiaLuaDeCompasso'],
     // Airborne moves: the root holds the clip's own height (no grounding pull) until landing.
     jumpKicks: ['FlipKick', 'SpinFlipKick'],
     dodgeBack: null, // 'Backflip' removed (lands on its hands and crawls back up: read as climbing)
@@ -118,10 +118,6 @@ export const COMBAT = {
   hitStunHeavy: 0.53,  // hooks, body shots, most kicks (32f)
   counterExtra: 0.17,  // caught mid-swing: +10f
   blockStunTail: 0.08, // guard stays locked this long after its pushback
-  hitStopLight: 0.05,
-  hitStopHeavy: 0.08,
-  hitStopCounter: 0.12,
-  koSlowMo: 0.3,       // seconds of mild slow motion on a KO
   hitInvuln: 0.08,     // only stops one blow registering twice; combos can land
   hitRock: 0.26 * SIZE,       // metres a light hit knocks a robot back (walked out with the back-step)
   stumbleForce: 3.8,   // impact force that turns a hit into a stepped stumble-back
