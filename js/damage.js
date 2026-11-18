@@ -264,7 +264,11 @@ function detachSub(f, sub, dir, scene) {
     if (baked) pieces.push(baked);
     hideVertices(mesh, lost);
   }
-  // Fold the sub-part's bones away too (the welded vertices no longer follow them anyway).
+  // Fold the sub-part's bones away too, after moving any weight the kept skin still had on
+  // them onto the bones that stay (otherwise wrist/forearm skin stretches after them).
+  const lostBones = new Set();
+  for (const rb of sub.rootBones) rb.traverse((o) => { if (o.isBone || o.type === 'Bone') lostBones.add(o); });
+  releaseBones(f, lostBones);
   for (const b of sub.rootBones) b.scale.set(0.001, 0.001, 0.001);
   sub.stump = sub.rootBones[0] || null;
   const at = subWorldPos(sub, new THREE.Vector3());
@@ -621,40 +625,99 @@ function bakeSkinnedWorld(mesh, keepVertex) {
   return bakedMesh;
 }
 
+// Kept vertices that were partly skinned to bones that just tore off (wrist / forearm verts
+// blended with the hand bone, finger roots, ...) would follow those bones as they are folded
+// away and stretch. Move that weight onto the vertex's remaining bones; if nothing remains,
+// onto the nearest surviving ancestor bone.
+function releaseBones(f, lostBones) {
+  if (!lostBones || !lostBones.size) return;
+  const names = new Set([...lostBones].map((b) => normName(b.name)));
+  for (const mesh of f.skinMeshes || []) {
+    const sk = mesh.skeleton;
+    const si = mesh.geometry.attributes.skinIndex;
+    const sw = mesh.geometry.attributes.skinWeight;
+    if (!sk || !si || !sw) continue;
+    const lost = sk.bones.map((b) => names.has(normName(b.name)));
+    if (!lost.some(Boolean)) continue;
+    const byName = new Map(sk.bones.map((b, k) => [normName(b.name), k]));
+    const fallback = (bi) => {
+      let b = sk.bones[bi];
+      while (b && names.has(normName(b.name))) b = b.parent;
+      const k = b && byName.get(normName(b.name));
+      return k != null && !lost[k] ? k : null;
+    };
+    const hidden = mesh.userData.hiddenVerts;
+    let changed = false;
+    for (let i = 0; i < si.count; i++) {
+      if (hidden && hidden[i]) continue;
+      let lostW = 0, keepW = 0, firstLost = -1;
+      for (let k = 0; k < 4; k++) {
+        const w = sw.getComponent(i, k);
+        if (w <= 0) continue;
+        const b = si.getComponent(i, k);
+        if (lost[b]) { lostW += w; if (firstLost < 0) firstLost = b; } else keepW += w;
+      }
+      if (lostW <= 0) continue;
+      changed = true;
+      if (keepW > 1e-4) {
+        for (let k = 0; k < 4; k++) sw.setComponent(i, k, lost[si.getComponent(i, k)] ? 0 : sw.getComponent(i, k) / keepW);
+      } else {
+        const fb = fallback(firstLost);
+        if (fb == null) continue;
+        si.setComponent(i, 0, fb); sw.setComponent(i, 0, 1);
+        for (let k = 1; k < 4; k++) sw.setComponent(i, k, 0);
+      }
+    }
+    if (changed) { si.needsUpdate = true; sw.needsUpdate = true; }
+  }
+}
+
 // Remove torn-off vertices from the robot for good: each one is welded onto a kept vertex of
 // the same mesh, position AND skin weights, so the leftover triangles are degenerate at a
 // point that is still on the robot. Nothing of the lost piece can be posed by any bone any
 // more (the old "squash toward the mesh axis" left a thin copy that kept walking with the
 // skeleton). A mesh with nothing left is hidden.
 function hideVertices(mesh, removeVertex) {
-  const pos = mesh.geometry.attributes.position;
+  const geo = mesh.geometry;
+  const pos = geo.attributes.position;
   if (!pos) return;
-  const si = mesh.geometry.attributes.skinIndex;
-  const sw = mesh.geometry.attributes.skinWeight;
+  const si = geo.attributes.skinIndex;
+  const sw = geo.attributes.skinWeight;
   const hidden = mesh.userData.hiddenVerts || (mesh.userData.hiddenVerts = new Uint8Array(pos.count));
-  let anchor = -1;
+  const gone = new Uint8Array(pos.count);
+  let keptAny = false;
   for (let i = 0; i < pos.count; i++) {
-    if (!hidden[i] && !removeVertex(i)) { anchor = i; break; }
+    if (hidden[i] || removeVertex(i)) gone[i] = 1;
+    else keptAny = true;
   }
-  if (anchor < 0) {
+  if (!keptAny) {
     mesh.visible = false;
     mesh.userData.hiddenPart = true;
     return;
   }
-  const ax = pos.getX(anchor);
-  const ay = pos.getY(anchor);
-  const az = pos.getZ(anchor);
-  for (let i = 0; i < pos.count; i++) {
-    if (hidden[i] || !removeVertex(i)) continue;
-    hidden[i] = 1;
-    pos.setXYZ(i, ax, ay, az);
-    if (si && sw) {
-      for (let k = 0; k < 4; k++) {
-        si.setComponent(i, k, si.getComponent(anchor, k));
-        sw.setComponent(i, k, sw.getComponent(anchor, k));
-      }
+  // Drop every triangle that touches a lost vertex. (Welding lost vertices onto one arbitrary
+  // kept vertex left the triangles on the tear line spanning from the wrist to that vertex,
+  // often up at the shoulder: the long elastic strips on damaged hands.) The tear stays a
+  // clean open edge; the stump wires cover it.
+  const idx = geo.index;
+  const copy = (dst, src) => {
+    pos.setXYZ(dst, pos.getX(src), pos.getY(src), pos.getZ(src));
+    if (si && sw) for (let k = 0; k < 4; k++) { si.setComponent(dst, k, si.getComponent(src, k)); sw.setComponent(dst, k, sw.getComponent(src, k)); }
+  };
+  if (idx) {
+    if (!mesh.userData.restIndex) mesh.userData.restIndex = idx.array.slice();
+    const a = idx.array;
+    for (let t = 0; t + 2 < a.length; t += 3) {
+      if (gone[a[t]] || gone[a[t + 1]] || gone[a[t + 2]]) { a[t + 1] = a[t]; a[t + 2] = a[t]; }
+    }
+    idx.needsUpdate = true;
+  } else {
+    // Non-indexed: collapse each affected triangle onto one of its own corners.
+    for (let t = 0; t + 2 < pos.count; t += 3) {
+      if (gone[t] || gone[t + 1] || gone[t + 2]) { copy(t + 1, t); copy(t + 2, t); }
     }
   }
+  for (let i = 0; i < pos.count; i++) if (gone[i]) hidden[i] = 1;
   pos.needsUpdate = true;
   if (si) si.needsUpdate = true;
   if (sw) sw.needsUpdate = true;
@@ -703,12 +766,11 @@ function detachPart(f, part, dir, scene) {
     hideVertices(mesh, lost);
   }
 
-  // Also fold the limb bones away (stops the stump end from swinging a stray joint).
-  for (const b of part.bones) {
-    const n = normName(b.name);
-    if (n.includes('spine') || n.includes('hips') || n.includes('body') || n === 'torso' || n === 'abdomen') continue;
-    b.scale.set(0.001, 0.001, 0.001);
-  }
+  // Also fold the limb bones away (stops the stump end from swinging a stray joint), after
+  // releasing any kept skin weight on them.
+  const foldBones = part.bones.filter((b) => { const n = normName(b.name); return !(n.includes('spine') || n.includes('hips') || n.includes('body') || n === 'torso' || n === 'abdomen'); });
+  releaseBones(f, new Set(foldBones));
+  for (const b of foldBones) b.scale.set(0.001, 0.001, 0.001);
 
   const pivot = attachPivot(pieces, scene);
   if (!pivot) return;
@@ -1219,6 +1281,7 @@ function restoreMesh(mesh) {
   if (si && mesh.userData.restSkinIndex) { si.array.set(mesh.userData.restSkinIndex); si.needsUpdate = true; }
   if (sw && mesh.userData.restSkinWeight) { sw.array.set(mesh.userData.restSkinWeight); sw.needsUpdate = true; }
   if (mesh.userData.hiddenVerts) mesh.userData.hiddenVerts.fill(0);
+  if (mesh.geometry.index && mesh.userData.restIndex) { mesh.geometry.index.array.set(mesh.userData.restIndex); mesh.geometry.index.needsUpdate = true; }
   if (pos) mesh.geometry.computeVertexNormals();
   for (const m of [].concat(mesh.material)) {
     if (!m || !m.emissive) continue;
