@@ -17,8 +17,8 @@ body.fs-open #c { visibility: hidden; }
 .fs-bg {
   position: absolute; inset: 0; z-index: 0; pointer-events: none;
   background:
-    radial-gradient(ellipse 45% 60% at 30% 52%, rgba(63,125,255,.22), transparent 70%),
-    radial-gradient(ellipse 45% 60% at 70% 52%, rgba(255,64,64,.18), transparent 70%),
+    radial-gradient(ellipse 45% 60% at 30% 52%, rgba(63,125,255,.13), transparent 70%),
+    radial-gradient(ellipse 45% 60% at 70% 52%, rgba(255,64,64,.11), transparent 70%),
     radial-gradient(ellipse 80% 70% at 50% 45%, #161a28 0%, #0a0c13 70%, #06070b 100%);
 }
 .fs-bg::after {
@@ -172,7 +172,7 @@ body.fs-open #c { visibility: hidden; }
 .fs-tile > * { transform: skewX(6deg); }
 .fs-tile small { position: relative; z-index: 1; font: 800 calc(11 * var(--u))/1 var(--ww-font); letter-spacing: .14em; text-transform: uppercase; }
 .fs-portrait { position: absolute; inset: 0 0 calc(18 * var(--u)); display: grid; place-items: center; }
-.fs-portrait img { width: 118%; height: 118%; object-fit: cover; object-position: 50% 35%; }
+.fs-portrait img { width: 100%; height: 100%; object-fit: cover; }
 .fs-tile:not(.locked) { border-color: rgba(154,171,255,.6); background: radial-gradient(ellipse at 50% 30%, #34406a, #151827 75%); }
 .fs-tile:not(.locked):focus, .fs-tile:not(.locked):hover { transform: skewX(-6deg) scale(1.08); z-index: 3; border-color: #fff; box-shadow: 0 0 0 2px var(--ww-accent), 0 0 calc(26 * var(--u)) rgba(126,148,255,.55); }
 .fs-tile.locked { cursor: not-allowed; filter: saturate(.3); opacity: .55; border-style: dashed; }

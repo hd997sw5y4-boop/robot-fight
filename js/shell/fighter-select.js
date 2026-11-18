@@ -13,7 +13,7 @@ const S = window.RFShell;
 
 /* ---------- roster data (add future robots here) ---------- */
 // Reference ceilings for the bars, so later frames can sit above or below this one.
-const STAT_SCALE = { power: 20, speed: 5, armor: 300, reach: 2.5 };
+const STAT_SCALE = { power: 12, speed: 5, armor: 350, reach: 2.5 };
 const partHp = Object.values(DAMAGE.parts).reduce((a, p) => a + p.hp, 0);
 const ROBOTS = [
   {
@@ -22,7 +22,7 @@ const ROBOTS = [
       { k: 'power', label: 'Power', v: (COMBAT.punch.damage + COMBAT.kick.damage) / 2, unit: 'dmg' },
       { k: 'speed', label: 'Speed', v: COMBAT.moveSpeed, unit: 'm/s' },
       { k: 'armor', label: 'Armor', v: partHp, unit: 'hp' },
-      { k: 'reach', label: 'Reach', v: COMBAT.kick.range, unit: 'm' },
+      { k: 'reach', label: 'Reach', v: COMBAT.kick.reach, unit: 'm' },
     ],
   },
   { id: 'slot-2', locked: true },
@@ -41,7 +41,8 @@ let stage = null;
 const esc = (t) => S.esc(t);
 const H = () => S.selectHooks;
 const mode = () => S.state.mode;
-const isCpu = (side) => side === 'p2' && mode() !== 'versus';
+// Control per side: fight = P1 player / P2 CPU, versus = both players, watch (Bot vs Bot) = both CPU.
+const isCpu = (side) => (side === 'p2' ? mode() !== 'versus' : mode() === 'watch');
 const presetName = (side) => H().paintName(H().sel[side]);
 
 function oppList() { return ['random'].concat(S.ROSTER.map((o) => o.id)); }
@@ -71,7 +72,9 @@ function ctrlToggle(side) {
   let lockP = false;
   let lockC = false;
   let note = '';
-  if (side === 'p1') { lockC = true; note = 'P1 is always a player in this version.'; }
+  if (side === 'p1' && (m === 'arcade' || m === 'training')) { lockC = true; note = m === 'arcade' ? 'Arcade is played by you.' : 'Training is played by you.'; }
+  else if (side === 'p1' && m === 'watch') note = 'Bot vs Bot: both robots run on the CPU brain.';
+  else if (side === 'p1') { /* CPU here switches to Bot vs Bot */ }
   else if (m === 'arcade') { lockP = true; note = 'Arcade is a solo ladder.'; }
   else if (m === 'training') { lockP = true; note = 'Training uses a dummy.'; }
   const b = (v, label, locked) => `<button type="button" class="rfs-f fs-tog" data-fs="ctrl" data-side="${side}" data-v="${v}" aria-pressed="${(v === 'cpu') === cpu}"${locked ? ' aria-disabled="true"' : ''}>${label}${locked ? LOCK_SVG : ''}</button>`;
@@ -90,7 +93,7 @@ function p2Extra() {
   if (m === 'versus') {
     return chips('p2') + '<div class="fs-pads"><span class="fs-padtxt"></span><button type="button" class="rfs-f fs-mini" data-fs="swap">Swap pads</button></div>';
   }
-  if (m === 'fight') {
+  if (m === 'fight' || m === 'watch') {
     const o = sel.opp === 'random' ? null : S.opponent(sel.opp);
     return `<div class="fs-lbl">CPU style</div>
       <div class="fs-step"><button type="button" class="rfs-f fs-arrow" data-fs="opp" data-d="-1" aria-label="Previous CPU style">‹</button>
@@ -108,7 +111,7 @@ function p2Extra() {
 
 function sidePanel(side) {
   const r = robotById(st.pick[side]);
-  const who = side === 'p1' ? 'Player 1' : (isCpu(side) ? (mode() === 'training' ? 'Training dummy' : 'CPU') : 'Player 2');
+  const who = side === 'p1' ? (isCpu('p1') ? 'Blue corner CPU' : 'Player 1') : (isCpu(side) ? (mode() === 'training' ? 'Training dummy' : 'CPU') : 'Player 2');
   return `<section class="fs-side" data-side="${side}" style="--pc:${SIDE_COLOR[side]}">
     <header class="fs-head"><span class="fs-tag">${side.toUpperCase()}</span>
       <div><small>${who}</small><b>${esc(r.name)}</b><em>${esc(r.cls)}</em></div>
@@ -125,7 +128,7 @@ function rosterGrid() {
     ? `<button type="button" class="rfs-f fs-tile locked" data-fs="tile" data-id="${r.id}" aria-disabled="true" aria-label="Locked slot, coming soon"><span class="fs-lockic">${LOCK_SVG}</span><small>Soon</small></button>`
     : `<button type="button" class="rfs-f fs-tile" data-fs="tile" data-id="${r.id}" aria-label="${esc(r.name)}"${r.id === 'robot' ? ' data-autofocus' : ''}>
         <span class="fs-portrait">${st.portrait ? `<img src="${st.portrait}" alt="">` : ''}</span><small>${esc(r.name)}</small>
-        <i class="fs-cur p1">1P</i><i class="fs-cur p2">${isCpu('p2') ? 'CPU' : '2P'}</i></button>`).join('')}</div>
+        <i class="fs-cur p1">${isCpu('p1') ? 'CPU' : '1P'}</i><i class="fs-cur p2">${isCpu('p2') ? 'CPU' : '2P'}</i></button>`).join('')}</div>
     <div class="fs-caption" aria-live="polite"></div>`;
 }
 
@@ -214,7 +217,7 @@ function setReady(side, on, quiet) {
 
 function lockNext() {
   if (!st.ready.p1) {
-    setReady('p1', true);
+    setReady('p1', true, isCpu('p1'));
     if (isCpu('p2')) setTimeout(() => { if (st.active && !st.ready.p2) setReady('p2', true, true); }, 260);
   } else if (!st.ready.p2) setReady('p2', true);
   if (st.ready.p1 && (st.ready.p2 || isCpu('p2'))) {
@@ -258,16 +261,18 @@ function onClick(e) {
       return st.ready[side] ? setReady(side, false) : (side === 'p1' ? lockNext() : setReady(side, true));
     case 'ctrl': {
       if (b.getAttribute('aria-disabled') === 'true') {
-        return deny(b, side === 'p1' ? 'CPU control for P1 isn\'t supported by the game yet.' : (mode() === 'arcade' ? 'Arcade is solo: P2 is always the CPU ladder.' : 'Training always uses the dummy.'));
+        return deny(b, side === 'p1' ? 'P1 is you in this mode.' : (mode() === 'arcade' ? 'Arcade is solo: P2 is always the CPU ladder.' : 'Training always uses the dummy.'));
       }
-      const want = b.dataset.v === 'cpu' ? 'fight' : 'versus';
+      const cpuPick = b.dataset.v === 'cpu';
+      // fight <-> versus from P2, fight/versus <-> watch from P1 (Bot vs Bot needs both on CPU).
+      const want = side === 'p2' ? (cpuPick ? (mode() === 'watch' ? 'watch' : 'fight') : 'versus') : (cpuPick ? 'watch' : 'fight');
       if (mode() === want) return;
       S.sfx('click');
       S.state.mode = want;
-      st.ready.p2 = false;
+      st.ready = { p1: false, p2: false };
       render();
       H().previewSelect();
-      const nb = st.host.querySelector(`[data-fs="ctrl"][data-side="p2"][data-v="${b.dataset.v}"]`);
+      const nb = st.host.querySelector(`[data-fs="ctrl"][data-side="${side}"][data-v="${b.dataset.v}"]`);
       if (nb) nb.focus({ preventScroll: true });
       return;
     }
@@ -321,12 +326,12 @@ function vsOverlay() {
 }
 function go() {
   const m = mode();
-  if (!st.ready.p1) setReady('p1', true);
+  if (!st.ready.p1) setReady('p1', true, isCpu('p1'));
   if (!st.ready.p2) setReady('p2', true, isCpu('p2'));
   if (m === 'arcade') { H().start(); return; }
   st.busy = true;
   const sel = H().sel;
-  const o = m === 'fight' && sel.opp !== 'random' ? S.opponent(sel.opp) : null;
+  const o = (m === 'fight' || m === 'watch') && sel.opp !== 'random' ? S.opponent(sel.opp) : null;
   const ov = vsOverlay();
   const set = (cls, small, big, sub) => {
     const el = ov.querySelector(cls);
@@ -334,9 +339,9 @@ function go() {
     el.querySelector('b').textContent = big;
     el.querySelector('span').textContent = sub;
   };
-  set('.fs-vs-l', 'Player 1', robotById(st.pick.p1).name, presetName('p1'));
+  set('.fs-vs-l', isCpu('p1') ? 'Blue CPU' : 'Player 1', robotById(st.pick.p1).name, presetName('p1'));
   set('.fs-vs-r', m === 'versus' ? 'Player 2' : m === 'training' ? 'Training' : 'CPU', m === 'training' ? 'Dummy' : robotById(st.pick.p2).name,
-    m === 'versus' ? presetName('p2') : (o ? o.name : (m === 'fight' ? 'Random' : '')));
+    m === 'versus' ? presetName('p2') : (o ? o.name : (m === 'fight' || m === 'watch' ? 'Random' : '')));
   ov.className = 'fs-vs';
   void ov.offsetWidth;
   ov.classList.add('in');
@@ -428,7 +433,7 @@ function makeStage(host) {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, low ? 1 : 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.15;
+  renderer.toneMappingExposure = 1.55;
   renderer.shadowMap.enabled = !low;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.setClearColor(0x000000, 0);
@@ -439,15 +444,15 @@ function makeStage(host) {
   const envRT = pmrem.fromScene(room, 0.04);
   room.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
   scene.environment = envRT.texture;
-  scene.environmentIntensity = 0.45;
+  scene.environmentIntensity = 0.85;
 
   const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 80);
   const own = { geos: [], mats: [], texs: [] };
   const keepG = (g) => { own.geos.push(g); return g; };
   const keepM = (m) => { own.mats.push(m); return m; };
 
-  scene.add(new THREE.HemisphereLight(0xc8d4ff, 0x10121a, 0.45));
-  const key = new THREE.DirectionalLight(0xfff0e0, 2.4);
+  scene.add(new THREE.HemisphereLight(0xc8d4ff, 0x10121a, 0.7));
+  const key = new THREE.DirectionalLight(0xfff0e0, 3.4);
   key.position.set(2.5, 7, 6);
   key.castShadow = true;
   key.shadow.mapSize.set(1024, 1024);
@@ -456,14 +461,14 @@ function makeStage(host) {
   key.shadow.normalBias = 0.02;
   Object.assign(key.shadow.camera, { left: -5, right: 5, top: 5, bottom: -2, near: 1, far: 20 });
   scene.add(key, key.target);
-  const fill = new THREE.DirectionalLight(0xaebfff, 0.55);
+  const fill = new THREE.DirectionalLight(0xaebfff, 1.0);
   fill.position.set(-4, 2.5, 5);
   scene.add(fill);
 
-  const floorTex = radialTex('rgba(28,32,46,1)', 'rgba(28,32,46,0)');
+  const floorTex = radialTex('rgba(10,11,17,1)', 'rgba(10,11,17,0)');
   own.texs.push(floorTex);
   const floor = new THREE.Mesh(keepG(new THREE.CircleGeometry(9, 64)),
-    keepM(new THREE.MeshStandardMaterial({ map: floorTex, transparent: true, roughness: 0.55, metalness: 0.5, depthWrite: false })));
+    keepM(new THREE.MeshStandardMaterial({ map: floorTex, transparent: true, roughness: 0.85, metalness: 0.2, depthWrite: false })));
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   scene.add(floor);
@@ -499,8 +504,8 @@ function makeStage(host) {
     const spin = new THREE.Group();
     spin.position.y = 0.22;
     g.add(spin);
-    const rim = new THREE.SpotLight(col, 70, 14, 0.55, 0.7, 1.6);
-    const rim2 = new THREE.SpotLight(col, 28, 14, 0.6, 0.8, 1.6);
+    const rim = new THREE.SpotLight(col, 60, 14, 0.42, 0.7, 1.6);
+    const rim2 = new THREE.SpotLight(col, 18, 14, 0.45, 0.8, 1.6);
     g.add(rim, rim.target, rim2, rim2.target);
     rim.target.position.set(0, 1.6, 0);
     rim2.target.position.set(0, 1.4, 0);
@@ -545,7 +550,7 @@ function makeStage(host) {
     const avail = Math.max(120, (r - l) / 2);
     const tanH = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
     // pixels per world unit: robot + pedestal must fit the band, pedestal must fit its half
-    const ppu = Math.max(40, Math.min((yBot - yTop) * 0.86 / 2.75, avail * 0.94 / (R * 2.25)));
+    const ppu = Math.max(40, Math.min((yBot - yTop) * 0.86 / (MODEL.targetHeight + 0.3), avail * 0.94 / (R * 2.25)));
     const D = (Hh / 2) / (ppu * tanH);
     const halfW = D * tanH * camera.aspect;
     const cx1 = (l + W / 2) / 2;
@@ -553,7 +558,7 @@ function makeStage(host) {
     sides.p1.g.position.x = ((cx1 / W) * 2 - 1) * halfW;
     sides.p2.g.position.x = ((cx2 / W) * 2 - 1) * halfW;
     const sMid = (yTop + yBot) / 2 + 6;
-    const T = 1.45 - (Hh / 2 - sMid) / ppu;
+    const T = (MODEL.targetHeight + 0.22) / 2 + 0.05 - (Hh / 2 - sMid) / ppu;
     camera.position.set(0, T + 0.5, D);
     camera.lookAt(0, T, 0);
     camera.updateProjectionMatrix();
@@ -570,27 +575,41 @@ function makeStage(host) {
   function takePortrait() {
     const s = sides.p1;
     if (!s.bot) return;
-    const keepVis = sides.p2.g.visible;
+    const h = MODEL.targetHeight;
+    const keep = { p2: sides.p2.g.visible, rot: s.spin.rotation.y, exp: renderer.toneMappingExposure };
     sides.p2.g.visible = false;
-    const a = s.spin.rotation.y;
-    s.spin.rotation.y = 0.35;
-    const cam = new THREE.PerspectiveCamera(20, camera.aspect, 0.1, 50);
+    s.spin.rotation.y = 0.32;
+    s.bot.model.updateMatrixWorld(true);
+    // Square offscreen-style pass in the corner of the stage canvas, framed on head + torso.
+    const px = Math.min(256, canvas.width, canvas.height);
+    const cssPx = px / renderer.getPixelRatio();
+    const cam = new THREE.PerspectiveCamera(22, 1, 0.1, 50);
     const p = new THREE.Vector3();
     s.g.getWorldPosition(p);
-    cam.position.set(p.x + 0.3, 2.3, 4.4);
-    cam.lookAt(p.x, 2.12, 0);
+    const cy = 0.22 + h * 0.84;
+    const dist = (h * 0.2) / Math.tan(THREE.MathUtils.degToRad(11));
+    cam.position.set(p.x + dist * 0.18, cy + h * 0.04, dist);
+    cam.lookAt(p.x, cy, 0);
+    renderer.toneMappingExposure = keep.exp * 1.1;
+    renderer.setScissorTest(true);
+    renderer.setViewport(0, 0, cssPx, cssPx);
+    renderer.setScissor(0, 0, cssPx, cssPx);
+    renderer.setClearColor(0x000000, 0);
+    renderer.clear();
     renderer.render(scene, cam);
     try {
       const c = document.createElement('canvas');
-      c.width = c.height = 160;
-      const sz = Math.min(canvas.width, canvas.height) * 0.7;
-      c.getContext('2d').drawImage(canvas, (canvas.width - sz) / 2, (canvas.height - sz) / 2, sz, sz, 0, 0, 160, 160);
+      c.width = c.height = 192;
+      c.getContext('2d').drawImage(canvas, 0, canvas.height - px, px, px, 0, 0, 192, 192);
       st.portrait = c.toDataURL('image/png');
       const slot = host.querySelector('.fs-tile:not(.locked) .fs-portrait');
       if (slot) slot.innerHTML = `<img src="${st.portrait}" alt="">`;
     } catch (_) { /* portrait is decoration only */ }
-    s.spin.rotation.y = a;
-    sides.p2.g.visible = keepVis;
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, W, Hh);
+    renderer.toneMappingExposure = keep.exp;
+    s.spin.rotation.y = keep.rot;
+    sides.p2.g.visible = keep.p2;
   }
 
   let raf = 0;
@@ -610,7 +629,7 @@ function makeStage(host) {
       s.spin.rotation.y = s.angle;
       const ready = st.ready[side];
       s.ringMat.emissiveIntensity = 1.2 + (ready ? 1.2 + Math.sin(t * 5) * 0.35 : Math.sin(t * 2 + (side === 'p1' ? 0 : 1.5)) * 0.25) + s.pulse * 5;
-      s.rim.intensity = 70 * (1 + s.pulse * 1.6 + (ready ? 0.25 : 0));
+      s.rim.intensity = 60 * (1 + s.pulse * 1.6 + (ready ? 0.25 : 0));
       if (s.bot) s.bot.mixer.update(dt);
     }
     if (!portraitDone) { portraitDone = true; if (!st.portrait) takePortrait(); }
@@ -698,7 +717,7 @@ if (S) {
     if (st.active && st.busy) return;
     if (st.active && act === 'back') {
       if (st.ready.p2 && !isCpu('p2')) return setReady('p2', false);
-      if (st.ready.p1) { setReady('p1', false); if (isCpu('p2')) setReady('p2', false, true); return; }
+      if (st.ready.p1) { setReady('p1', false, isCpu('p1')); if (isCpu('p2')) setReady('p2', false, true); return; }
       S.sfx('close');
     }
     baseNav(act);
