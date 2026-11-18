@@ -44,3 +44,7 @@ Pick one in Settings → Display → Arena (saved in `localStorage` as `rf_arena
 The octagon cage/fence is turned off for now (`ARENA.cage` in `js/config.js`); an invisible ring collider still keeps fighters and loose parts on the mat.
 
 The menu/arcade shell can start and end fights through `js/api.js` (`startFight`, `onFightEnd`, `setFighterConfig` with paint colors and AI personality). Flip attacks and win celebrations will use upcoming Mixamo clips (`MODEL.animations.flipSpecial` / `victory`); missing names are skipped until that pack is in the GLB.
+
+## Fighter select
+
+`js/shell/fighter-select.js` + `css/fighter-select.css` replace the shell's select screen (hooked from `js/shell/menus.js`). Two turntable previews clone the real in-game fighter (same GLB, tint, visor, idle clip), lit with a key/fill and a rim tinted to the side color (P1 blue, P2 red). Stat bars read `COMBAT` / `DAMAGE` from `js/config.js` (Power = average punch/kick damage, Speed = move speed, Armor = total part HP, Reach = kick range) against reference ceilings in `STAT_SCALE`. Add robots to the `ROBOTS` array; locked entries show as "Coming soon". P2 Player/CPU switches between Versus and Fight; P1 is always a player (the game has no CPU-driven P1 yet). Select sounds reuse the Kenney Interface Sounds (CC0) already in `sounds/` and follow the Settings volume.

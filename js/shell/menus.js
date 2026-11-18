@@ -252,6 +252,7 @@
     watch: ['Bot vs Bot', 'Watch two CPUs · best of 3'],
   };
   function openSelect(mode) {
+    if (S.fighterSelect && S.fighterSelect.open(mode)) return; // [fighter-select hook] new select screen
     S.state.mode = mode;
     const [title, sub] = MODE_INFO[mode];
     let right = '';
@@ -357,6 +358,9 @@
       S.startMatch({ mode, p1: p1Cfg(false), p2: { name: 'Dummy', label: 'Training dummy', paint: { primary: '#4a505c', accent: '#9aabff' } }, dummyBlock: sel.dummyBlock });
     }
   }
+
+  // [fighter-select hook] shared choices + start, used by js/shell/fighter-select.js.
+  S.selectHooks = { sel, MODE_INFO, fromPreset, paintName, setPaint, previewSelect, start: startFromSelect };
 
   /* ---------- arcade ---------- */
   function renderLadder() {
