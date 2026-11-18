@@ -10,32 +10,44 @@ export const MODEL = {
   targetHeight: 2.45 * SIZE,
   footOffset: 0,
   animations: {
+    // Clip map grouped like the Mixamo library (robot-fight-assets/animations/):
+    // idle-stance, movement, punches, kicks, combos, blocks-dodges,
+    // hits-reactions, knockdowns-getups, ko, taunts-special.
+    // Array contents and clip names are unchanged.
+
+    // --- idle-stance ---
     idle: 'FightingIdle',
     idleVariants: ['FightingIdle'], // guard stance only: no relaxed / breathing idle (robots don't tire)
     idleInjured: 'InjuredStumbleIdle',
+
+    // --- movement ---
     walkForward: 'Walking',
     walkBack: 'WalkingBackwards',
     strafeLeft: 'JogStrafeLeft',
     strafeRight: 'JogStrafeRight',
+
+    // --- punches + combos (PunchCombo is the combo in this list) ---
     punch: 'Punching',
     punchVariants: ['Punching', 'PunchCombo', 'ElbowPunching', 'LeadJab', 'RightHook', 'Uppercut'],
     punchRight: ['Punching', 'PunchCombo', 'ElbowPunching', 'LeadJab', 'RightHook', 'Uppercut'],
     punchLeft: [],
+
+    // --- kicks (specials / jump kicks) ---
     kick: 'Kicking',
     kickVariants: ['Kicking', 'MmaKick', 'RoundhouseKick', 'SideKick', 'MeiaLuaDeFrente', 'LegSweep', 'KneeKickLead'],
     kickSpecial: ['FlipKick', 'ChapaGiratoria', 'SpinFlipKick', 'MeiaLuaDeCompasso'],
     flipSpecial: ['FlipKick', 'ChapaGiratoria', 'SpinFlipKick', 'MeiaLuaDeCompasso'],
     // Airborne moves: the root holds the clip's own height (no grounding pull) until landing.
     jumpKicks: ['FlipKick', 'SpinFlipKick'],
+
+    // --- blocks-dodges ---
     dodgeBack: null, // 'Backflip' removed (lands on its hands and crawls back up: read as climbing)
     dodgeFront: 'FrontFlip',
-    victory: 'Victory',
-    victoryVariants: ['Victory', 'VictoryIdle', 'Taunt'],
     dodgeVariants: ['Dodging', 'DodgingBack'],
-    knockdownVariants: ['KnockedDown', 'LivershotKnockdown', 'StumbleBackwards'],
-    koVariants: ['KnockedOut', 'StandingReactDeathBackward', 'Defeated'],
     block: 'CenterBlock',
     blockVariants: ['CenterBlock', 'BodyBlock', 'LeftBlock', 'RightBlock'],
+
+    // --- hits-reactions ---
     hit: 'Stunned',
     hitByPart: {
       head: ['HeadHit', 'HitOnSideOfHead', 'Reaction'],
@@ -46,9 +58,19 @@ export const MODEL = {
       legR: ['HitOnLegs', 'Reaction'],
     },
     stunned: 'Stunned',
-    ko: 'KnockedOut',
+    hitHeavy: 'StumbleBackwards', // also used in knockdowns-getups
+
+    // --- knockdowns-getups ---
+    knockdownVariants: ['KnockedDown', 'LivershotKnockdown', 'StumbleBackwards'],
     getUp: 'GettingUp',
-    hitHeavy: 'StumbleBackwards',
+
+    // --- ko ---
+    ko: 'KnockedOut',
+    koVariants: ['KnockedOut', 'StandingReactDeathBackward', 'Defeated'],
+
+    // --- taunts-special ---
+    victory: 'Victory',
+    victoryVariants: ['Victory', 'VictoryIdle', 'Taunt'],
   },
   colors: {
     p1: 0x2f74ff,
@@ -56,8 +78,12 @@ export const MODEL = {
   },
 };
 
-export const LOOP_CLIPS = ['GuardUpper', 
-  'FightingIdle', 'InjuredStumbleIdle', 'Idle', 'VictoryIdle',
+export const LOOP_CLIPS = ['GuardUpper',
+  // idle-stance
+  'FightingIdle', 'InjuredStumbleIdle', 'Idle',
+  // taunts-special
+  'VictoryIdle',
+  // movement
   'Walking', 'WalkingBackwards', 'JogStrafeLeft', 'JogStrafeRight',
 ];
 
@@ -94,7 +120,9 @@ export const COMBAT = {
   // Extra idle after a clip by strike class (60 fps targets: jab 16-20f, hook/elbow 22-28f,
   // knee/kick 28-36f, spinning 36-44f); the clip's own follow-through covers part of it.
   recoverByClip: {
+    // punches + combos
     LeadJab: 0.18, Punching: 0.2, PunchCombo: 0.26, ElbowPunching: 0.26, RightHook: 0.26, Uppercut: 0.28,
+    // kicks
     Kicking: 0.36, MmaKick: 0.36, SideKick: 0.36, KneeKickLead: 0.32, LegSweep: 0.38, RoundhouseKick: 0.42,
     MeiaLuaDeFrente: 0.44, FlipKick: 0.5, ChapaGiratoria: 0.5, SpinFlipKick: 0.55, MeiaLuaDeCompasso: 0.55,
   },

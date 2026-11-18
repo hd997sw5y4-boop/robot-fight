@@ -1355,6 +1355,7 @@ function setAnim(f, name, fade = 0.2) {
   const clipName = resolveClip(f, name);
   if (!clipName) return;
   const next = f.actions[clipName];
+  // Oneshot clips follow the same groups as MODEL.animations (punches/kicks/combos, blocks-dodges, taunts-special, ko, knockdowns-getups).
   const oneshot = ['punch', 'kick', 'hit', 'ko', 'getUp', 'getup', 'GettingUp', 'KnockedOut'].includes(name)
     || (MODEL.animations.punchVariants || []).includes(clipName)
     || (MODEL.animations.punchRight || []).includes(clipName)
