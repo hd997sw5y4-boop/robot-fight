@@ -110,7 +110,7 @@ export const COMBAT = {
   punchLunge: 0.12 * SIZE, // metres a strike steps in when slightly out of reach (small enough to hide)
   kickLunge: 0.1 * SIZE,
   strikeGap: 1.3 * SIZE,   // no lunge inside this gap; it would drive the body into the opponent
-  bodyRadius: 0.36 * SIZE, // defender body capsule used for fist/foot contact
+  bodyRadius: 0.27 * SIZE, // striking distance to the body surface (contact itself uses skeleton capsules, game.js CAPS)
   fistShell: 0.16 * SIZE,  // fist surface beyond the hand bone (contact tolerance)
   kickShell: 0.15 * SIZE,
   blockReduction: 0.82,

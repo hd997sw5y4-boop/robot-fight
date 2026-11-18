@@ -476,8 +476,13 @@ function closestOnPart(part, approx) {
   return best;
 }
 
-export function pickHit(atk, def, kind, towardFn) {
+export function pickHit(atk, def, kind, towardFn, contact) {
   const base = def.root.position;
+  if (contact && contact.point) {
+    // Real limb contact: the struck capsule's part, hit right there.
+    const id = def.parts[contact.part] && !def.parts[contact.part].detached ? contact.part : 'torso';
+    return { partId: id, point: contact.point.clone(), dir: towardFn(atk, def).clone() };
+  }
   const aimY = kind === 'kick'
     ? base.y + 0.45 + Math.random() * 0.7
     : base.y + 1.05 + Math.random() * 1.05;
@@ -863,18 +868,54 @@ const OIL_GEO = new THREE.SphereGeometry(0.016, 6, 4);
 // physics piece that bounces and comes to rest on the mat; once at rest it leaves physics and
 // is folded into an InstancedMesh batch (one draw call per shape+material), so hundreds stay
 // on the mat until the match ends. Past CHIP_MAX resting chips the oldest batch slot is reused.
+// Real little shapes (no flat quads): a bent hex plate, a flattened shard, a hex bolt with a
+// head, a rounded finger segment, a faceted chunk. Lit metal materials that never read as
+// black (moderate metalness + a faint emissive floor, since an un-mapped full metal goes black).
+function boltGeo() {
+  const shaft = new THREE.CylinderGeometry(0.009, 0.009, 0.045, 8);
+  const head = new THREE.CylinderGeometry(0.016, 0.016, 0.01, 6);
+  head.translate(0, 0.027, 0);
+  const g = mergeGeos([shaft, head]);
+  return g;
+}
+function mergeGeos(list) {
+  const pos = [], nor = [], idx = [];
+  let base = 0;
+  for (const g0 of list) {
+    const g = g0.index ? g0 : g0;
+    const p = g.attributes.position, n = g.attributes.normal;
+    for (let i = 0; i < p.count; i++) { pos.push(p.getX(i), p.getY(i), p.getZ(i)); nor.push(n.getX(i), n.getY(i), n.getZ(i)); }
+    if (g.index) for (let i = 0; i < g.index.count; i++) idx.push(g.index.getX(i) + base);
+    else for (let i = 0; i < p.count; i++) idx.push(i + base);
+    base += p.count;
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  out.setIndex(idx);
+  return out;
+}
+function plateGeo() {
+  const g = new THREE.CylinderGeometry(0.055, 0.05, 0.01, 6, 1);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) p.setY(i, p.getY(i) + (p.getX(i) * p.getX(i)) * 3.2); // slight bend
+  g.computeVertexNormals();
+  return g;
+}
+function shardGeo() { const g = new THREE.TetrahedronGeometry(0.045); g.scale(1, 0.35, 1.4); g.computeVertexNormals(); return g; }
 const CHIP_GEOS = [
-  { g: new THREE.BoxGeometry(0.11, 0.012, 0.08), m: 0.12 },           // armor plate
-  { g: new THREE.TetrahedronGeometry(0.045), m: 0.06 },                 // panel shard
-  { g: new THREE.CylinderGeometry(0.012, 0.012, 0.05, 6), m: 0.05 },   // bolt
-  { g: new THREE.BoxGeometry(0.028, 0.028, 0.06), m: 0.06 },           // finger segment
-  { g: new THREE.DodecahedronGeometry(0.03), m: 0.1 },                  // chunk
+  { g: plateGeo(), m: 0.12 },                                        // armor plate
+  { g: shardGeo(), m: 0.06 },                                        // panel shard
+  { g: boltGeo(), m: 0.05 },                                         // bolt
+  { g: new THREE.CapsuleGeometry(0.014, 0.035, 3, 8), m: 0.06 },     // finger segment
+  { g: new THREE.DodecahedronGeometry(0.03), m: 0.1 },               // chunk
 ];
+const chipMat = (color, metal, rough) => new THREE.MeshStandardMaterial({ color, metalness: metal, roughness: rough, emissive: new THREE.Color(color).multiplyScalar(0.06), envMapIntensity: 1.2, flatShading: true });
 const CHIP_MATS = {
-  chrome: new THREE.MeshStandardMaterial({ color: 0xc9ced6, metalness: 1, roughness: 0.22 }),
-  dark: new THREE.MeshStandardMaterial({ color: 0x3a3e45, metalness: 0.8, roughness: 0.45 }),
-  p1: new THREE.MeshStandardMaterial({ color: 0x3f7dff, metalness: 0.55, roughness: 0.38 }),
-  p2: new THREE.MeshStandardMaterial({ color: 0xff4040, metalness: 0.55, roughness: 0.38 }),
+  chrome: chipMat(0xd6dbe2, 0.7, 0.25),
+  dark: chipMat(0x7a808a, 0.65, 0.38),   // gunmetal
+  p1: chipMat(0x3f7dff, 0.45, 0.35),
+  p2: chipMat(0xff4a4a, 0.45, 0.35),
 };
 const CHIP_MAX = 360;
 const chipBatches = new Map(); // `${geo}|${mat}` -> InstancedMesh

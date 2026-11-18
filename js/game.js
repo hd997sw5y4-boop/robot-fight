@@ -920,7 +920,7 @@ function makeBlob(size, opacity) {
 const _blobP = new THREE.Vector3();
 function updateContactShadows(f) {
   if (!f || !f.model) return;
-  if (!f.blobs) f.blobs = { body: makeBlob(1.25, 0.5), left: makeBlob(0.42, 0.75), right: makeBlob(0.42, 0.75) };
+  if (!f.blobs) f.blobs = { body: makeBlob(1.25, 0.5), left: makeBlob(0.5 * SIZE, 0.9), right: makeBlob(0.5 * SIZE, 0.9) };
   const top = matTopY() + 0.005; // above the logo decal
   const hips = f.hipsBone || (f.hipsBone = findHips(f));
   (hips || f.root).getWorldPosition(_blobP);
@@ -933,13 +933,35 @@ function updateContactShadows(f) {
     const bone = foot && (foot.toe || foot.foot);
     if (!bone || (part && part.detached)) { blob.visible = false; continue; }
     blob.visible = true;
-    bone.getWorldPosition(_blobP);
+    // Under the real sole (lowest sole vertex), not the toe/ankle bone pivot that sits ~10 cm
+    // up: a planted foot gets a dark, tight contact shadow; a lifted one fades and spreads.
+    const sole = soleLow(f, side);
+    if (sole) { bone.getWorldPosition(_blobP); _blobP.x = (_blobP.x + sole.x) / 2; _blobP.z = (_blobP.z + sole.z) / 2; _blobP.y = sole.y; }
+    else bone.getWorldPosition(_blobP);
     blob.position.set(_blobP.x, top, _blobP.z);
     const h = Math.max(0, _blobP.y - top);
-    blob.material.opacity = blob.userData.baseOpacity * Math.max(0, 1 - h / 0.35);
-    const sc = 1 + h * 1.5;
+    blob.material.opacity = blob.userData.baseOpacity * Math.max(0, 1 - h / 0.3);
+    const sc = (0.85 + h * 2.2);
     blob.scale.set(sc, sc, 1);
   }
+}
+const _sl = new THREE.Vector3();
+function soleLow(f, side) {
+  const sv = f.soleVerts && f.soleVerts[side];
+  if (!sv || !sv.length) return null;
+  let best = null;
+  for (const { mesh, idx } of sv) {
+    if (!mesh.visible) continue;
+    const hidden = mesh.userData.hiddenVerts;
+    for (let k = 0; k < idx.length; k += Math.max(1, Math.floor(idx.length / 12))) {
+      const i = idx[k];
+      if (hidden && hidden[i]) continue;
+      mesh.getVertexPosition(i, _sl);
+      _sl.applyMatrix4(mesh.matrixWorld);
+      if (!best || _sl.y < best.y) best = (best || new THREE.Vector3()).copy(_sl);
+    }
+  }
+  return best;
 }
 function findHips(f) {
   let hips = null;
@@ -1685,20 +1707,27 @@ function separate(a, b) {
 // get-ups and made planted feet skate). A robot getting up keeps the clip's facing until it
 // is nearly upright.
 function faceToward(f, other, dt, snap) {
-  if (f.state === 'ko' || f.state === 'down' || f.state === 'ground' || f.state === 'dodge') return;
+  if (f.state === 'ko' || f.state === 'down' || f.state === 'ground' || f.state === 'dodge') { f.yawVel = 0; f.upEase = 0.9; return; }
   let rate = 9;
+  let maxRate = YAW_MAX_RATE;
   if (f.state === 'getup') {
     const act = f.actions.GettingUp;
     const prog = act ? act.time / Math.max(0.1, act.getClip().duration) : 1;
-    if (prog < 0.7) return;
-    rate = 3;
+    if (prog < 0.7) { f.yawVel = 0; f.upEase = 0.9; return; }
+    rate = 2.6; maxRate = 1.8;
+  } else if (f.upEase > 0) {
+    // Just back on its feet: keep re-facing gentle while the get-up blends into the guard
+    // (no snap, no overshoot), easing up to the normal turn speed.
+    f.upEase = Math.max(0, f.upEase - dt);
+    const k = 1 - f.upEase / 0.9;
+    rate = 2.6 + (9 - 2.6) * k; maxRate = 1.8 + (YAW_MAX_RATE - 1.8) * k;
   }
   const dx = other.root.position.x - f.root.position.x;
   const dz = other.root.position.z - f.root.position.z;
   // Bodies (nearly) on top of each other (a flip passing over, a push-out): the direction is
   // noise, so keep the last target instead of chasing it.
   if (dx * dx + dz * dz > (0.35 * SIZE) ** 2 || f.faceWant == null) f.faceWant = Math.atan2(dx, dz);
-  steerYaw(f, f.faceWant, dt, rate, snap);
+  steerYaw(f, f.faceWant, dt, rate, snap, maxRate);
 }
 
 // The one owner of a fighter's yaw: a critically damped spring toward the target heading with
@@ -1707,7 +1736,7 @@ function faceToward(f, other, dt, snap) {
 // separation/push-out and shook back and forth when the target bearing jittered.
 const YAW_MAX_RATE = 7.5;   // rad/s
 const YAW_DEADZONE = 0.015; // rad
-function steerYaw(f, want, dt, rate = 9, snap = false) {
+function steerYaw(f, want, dt, rate = 9, snap = false, maxRate = YAW_MAX_RATE) {
   const cur = f.root.rotation.y;
   let diff = Math.atan2(Math.sin(want - cur), Math.cos(want - cur));
   if (snap || !(dt > 0)) {
@@ -1722,7 +1751,7 @@ function steerYaw(f, want, dt, rate = 9, snap = false) {
   // Semi-implicit critically damped step (stable for any dt).
   const h = Math.min(dt, 0.05);
   v = (v + w * w * diff * h) / (1 + 2 * w * h + w * w * h * h);
-  v = Math.max(-YAW_MAX_RATE, Math.min(YAW_MAX_RATE, v));
+  v = Math.max(-maxRate, Math.min(maxRate, v));
   let step = v * h;
   if (Math.abs(step) > Math.abs(diff)) { step = diff; v = 0; } // never overshoot
   f.yawVel = v;
@@ -2013,15 +2042,50 @@ const _bp = new THREE.Vector3();
 // A strike lands when a fist/forearm (punch) or foot/shin (kick) actually reaches the
 // defender's body capsule, so hits fire on visible contact, not on root distance.
 // Returns the bone that made contact (or true without strike bones), else null.
+// Body capsules from the defender's real skeleton (segment between two bones + radius), so
+// a strike only counts when the fist/foot actually reaches a torso, head, arm or leg. The old
+// test was a fat vertical cylinder around the root (radius ~0.57 m incl. shells): kicks that
+// passed well wide of the thin legs still sparked and scored.
+const CAPS = [
+  ['Hips', 'Spine2', 0.26], ['Spine2', 'Neck', 0.27], ['Neck', 'Head', 0.12], ['Head', 'HeadTop_End', 0.15],
+  ['LeftArm', 'LeftForeArm', 0.09], ['LeftForeArm', 'LeftHand', 0.08], ['RightArm', 'RightForeArm', 0.09], ['RightForeArm', 'RightHand', 0.08],
+  ['LeftUpLeg', 'LeftLeg', 0.12], ['LeftLeg', 'LeftFoot', 0.09], ['RightUpLeg', 'RightLeg', 0.12], ['RightLeg', 'RightFoot', 0.09],
+];
+const TIP_SHELL = { punch: 0.095, kick: 0.1 }; // bone centre to fist / foot surface (base size)
+function bodyCaps(f) {
+  if (f._caps) return f._caps;
+  const by = {};
+  f.model.traverse((o) => { if (o.isBone || o.type === 'Bone') by[String(o.name).replace(/^mixamorig[:._]*/i, '')] = o; });
+  const partOf = (n) => (/^(Neck|Head)/.test(n) ? 'head' : /^Left(Arm|ForeArm)/.test(n) ? 'armL' : /^Right(Arm|ForeArm)/.test(n) ? 'armR' : /^Left(UpLeg|Leg)/.test(n) ? 'legL' : /^Right(UpLeg|Leg)/.test(n) ? 'legR' : 'torso');
+  f._caps = CAPS.map(([a, b, r]) => ({ a: by[a], b: by[b] || null, r: r * SIZE, head: a === 'Head', part: partOf(a) })).filter((c) => c.a && (c.b || c.head));
+  return f._caps;
+}
+const _ca = new THREE.Vector3();
+const _cb = new THREE.Vector3();
+const _cq = new THREE.Vector3();
+const _cp = new THREE.Vector3();
+// Closest capsule to point p: { d (surface distance, <0 inside), point (on the axis) }.
+function capsuleProbe(def, p, only) {
+  let best = Infinity, at = null, part = 'torso';
+  for (const c of bodyCaps(def)) {
+    if (only && !only.includes(c.part)) continue;
+    if (c.a.scale.x < 0.01) continue; // torn-off limb
+    c.a.getWorldPosition(_ca);
+    if (c.b) c.b.getWorldPosition(_cb); else _cb.copy(_ca).y += 0.22 * SIZE;
+    _cq.subVectors(_cb, _ca);
+    const t = Math.max(0, Math.min(1, _cq.dot(_cp.subVectors(p, _ca)) / Math.max(1e-6, _cq.lengthSq())));
+    _cq.multiplyScalar(t).add(_ca);
+    const d = p.distanceTo(_cq) - c.r;
+    if (d < best) { best = d; part = c.part; at = at || new THREE.Vector3(); at.copy(_cq).addScaledVector(_cp.subVectors(p, _cq).normalize(), c.r); }
+  }
+  return { d: best, point: at, part };
+}
 function strikeContact(atk, def, kind) {
   const bones = atk.strikeBones && atk.strikeBones[kind];
-  if (!bones || !bones.length) return atk.root.position.distanceTo(def.root.position) <= COMBAT[kind].reach * statOf(atk, 'reach') || null;
-  const base = def.root.position;
-  const y0 = base.y + 0.3 * SIZE;
-  const y1 = base.y + 2.15 * SIZE;
-  // Bone centres sit inside the fist / foot shell: allow for its thickness.
-  const reach = COMBAT.bodyRadius + (kind === 'kick' ? COMBAT.kickShell : COMBAT.fistShell);
+  if (!bones || !bones.length) return null; // no limb, no hit
+  const shell = (TIP_SHELL[kind] || 0.08) * SIZE;
   atk.model.updateWorldMatrix(true, true);
+  def.model.updateWorldMatrix(true, true);
   // Swept test from the bone's previous position, so a fast strike can't step past the body
   // between two frames.
   const prev = atk._strikePrev || (atk._strikePrev = new Map());
@@ -2032,8 +2096,8 @@ function strikeContact(atk, def, kind) {
     const n = last ? 4 : 1;
     for (let i = 1; i <= n && !hit; i++) {
       const p = last ? _sw.copy(last).lerp(_bp, i / n) : _bp;
-      _seg.set(base.x, Math.max(y0, Math.min(y1, p.y)), base.z);
-      if (p.distanceTo(_seg) <= reach) hit = b;
+      const pr = capsuleProbe(def, p);
+      if (pr.d <= shell) hit = { bone: b, point: pr.point.clone(), part: pr.part };
     }
     if (last) last.copy(_bp); else prev.set(b, _bp.clone());
     if (hit) break;
@@ -2042,19 +2106,65 @@ function strikeContact(atk, def, kind) {
 }
 const _sw = new THREE.Vector3();
 const _li = new THREE.Vector3();
-// Is any striking bone (fist/forearm or foot/shin) inside the other robot's body capsule?
+// Is any striking bone (fist/forearm or foot/shin) inside the other robot's body capsules?
 function limbInside(atk, def, kind) {
   if (DOWN_STATES.has(def.state)) return false;
   const bones = atk.strikeBones && atk.strikeBones[kind];
   if (!bones) return false;
-  const base = def.root.position;
-  const r = COMBAT.bodyRadius * 0.85 + (kind === 'kick' ? COMBAT.kickShell : COMBAT.fistShell) * 0.5;
   for (const b of bones) {
     b.getWorldPosition(_li);
-    _seg.set(base.x, Math.max(base.y + 0.3 * SIZE, Math.min(base.y + 2.15 * SIZE, _li.y)), base.z);
-    if (_li.distanceTo(_seg) < r) return true;
+    if (capsuleProbe(def, _li).d < 0) return true;
   }
   return false;
+}
+
+// Down / get-up clips: Mixamo's arms pass through the robot's own (bulkier) thighs and knees.
+// Push each elbow / hand out of the leg capsules by swinging the upper arm about the shoulder
+// (applied after the mixer, before joint limits).
+const _sa = new THREE.Vector3();
+const _sp = new THREE.Vector3();
+const _sx = new THREE.Vector3();
+const _sq = new THREE.Quaternion();
+const _sqp = new THREE.Quaternion();
+const LEG_PARTS = ['legL', 'legR'];
+function armSelfClear(f) {
+  if (!(f.state === 'down' || f.state === 'getup' || f.state === 'ko')) return;
+  if (!f._armBones) {
+    const by = {};
+    f.model.traverse((o) => { if (o.isBone || o.type === 'Bone') by[String(o.name).replace(/^mixamorig[:._]*/i, '')] = o; });
+    f._armBones = ['Left', 'Right'].map((s) => ({ arm: by[s + 'Arm'], pts: [by[s + 'ForeArm'], by[s + 'Hand']] })).filter((a) => a.arm && a.pts[0] && a.pts[1]);
+  }
+  const margin = 0.05 * SIZE;
+  f.model.updateWorldMatrix(true, true);
+  for (const a of f._armBones) {
+    if (a.arm.scale.x < 0.01) continue;
+    for (let pass = 0; pass < 2; pass++) {
+      a.arm.getWorldPosition(_sa);
+      let worst = null;
+      for (const b of a.pts) {
+        b.getWorldPosition(_sp);
+        const pr = capsuleProbe(f, _sp, LEG_PARTS);
+        if (pr.point && pr.d < margin && (!worst || pr.d < worst.d)) worst = { d: pr.d, p: _sp.clone(), n: _sp.clone().sub(pr.point).add(_sx.copy(pr.point).sub(_sp).setLength(0)) };
+      }
+      if (!worst) break;
+      // Outward direction: from the leg surface point toward the joint (or sideways if inside).
+      const pr = capsuleProbe(f, worst.p, LEG_PARTS);
+      const n = worst.p.clone().sub(pr.point);
+      if (pr.d < 0 || n.lengthSq() < 1e-6) n.copy(worst.p).sub(f.root.position).setY(0);
+      n.normalize();
+      const lever = worst.p.clone().sub(_sa);
+      const len = Math.max(0.1, lever.length());
+      const axis = lever.cross(n);
+      if (axis.lengthSq() < 1e-8) break;
+      axis.normalize();
+      const ang = Math.min(0.5, (margin - worst.d) / len);
+      a.arm.parent.getWorldQuaternion(_sqp);
+      axis.applyQuaternion(_sqp.invert());
+      _sq.setFromAxisAngle(axis, ang);
+      a.arm.quaternion.premultiply(_sq);
+      a.arm.updateWorldMatrix(false, true);
+    }
+  }
 }
 
 // Procedural flinch: a damped spring that snaps the spine/neck/head away from the blow and
@@ -2104,10 +2214,10 @@ function hitZone(partId) {
 
 const LOC_MUL = { head: 1.35, torso: 1, armL: 0.8, armR: 0.8, legL: 0.85, legR: 0.85 };
 
-function applyHit(atk, def, spec, kind, strikeBone) {
+function applyHit(atk, def, spec, kind, strikeBone, contact) {
   if (def.state === 'ko' || def.state === 'down' || def.state === 'getup' || def.invuln > 0) return;
   const blocked = def.blocking;
-  const hit = pickHit(atk, def, kind || 'punch', toward);
+  const hit = pickHit(atk, def, kind || 'punch', toward, contact); // sparks / dents at the real contact
   // Arm/leg wear (attackMods) times the fist/foot that landed: lost fingers or hand hit weaker.
   const mul = ((atk.atkMods && atk.atkMods.damageMul) || 1) * strikeMul(atk, kind || 'punch', strikeBone) * statOf(atk, 'power') / statOf(def, 'armor');
   // Comeback surge: a robot near KO and well behind hits a little harder (momentum swings).
@@ -2837,7 +2947,7 @@ function stepFighter(f, other, inp, dt) {
     if (contact) {
       f.hitThisAttack = true;
       f.contactT = f.stateT;
-      applyHit(f, other, spec, f.state, contact.isBone || contact.type === 'Bone' ? contact : null);
+      applyHit(f, other, spec, f.state, contact.bone, contact);
     }
     // Solid bodies: whenever the striking limb is inside the other robot's body (any phase,
     // landed or not), the clip stops advancing there and the strike is pulled back.
@@ -2845,7 +2955,8 @@ function stepFighter(f, other, inp, dt) {
       if (!f.hitThisAttack && ct >= tm.a0 - 0.08 && ct <= tm.a1) {
         // Already in the body at the start of the window: that is the connect.
         f.hitThisAttack = true;
-        applyHit(f, other, spec, f.state, null);
+        const tip = (f.strikeBones[f.state] || []).map((b) => b.getWorldPosition(new THREE.Vector3())).map((p) => ({ p, pr: capsuleProbe(other, p) })).sort((x, y) => x.pr.d - y.pr.d)[0];
+        applyHit(f, other, spec, f.state, null, tip && tip.pr.point ? { point: tip.pr.point, part: tip.pr.part } : null);
       }
       if (f.contactT < 0) f.contactT = f.stateT;
       // (A jump kick can't hang in mid-air: it lands through its follow-through instead.)
@@ -3807,6 +3918,7 @@ function tick() {
     poseAfterMixer(f, dt);
     if (window.__rfDiag) diagFootStage(f, 1);
     applyMalfunctions(f, dt);
+    armSelfClear(f);
     if (f.koTip) stepKoTip(f, dt);
     stepEyes(f, dt);
     if (window.__rfDiag) diagFootStage(f, 2);
