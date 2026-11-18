@@ -863,28 +863,28 @@ function emitSmoke(point) {
 const oilDrops = [];
 const puddles = [];
 const OIL_GEO = new THREE.SphereGeometry(0.016, 6, 4);
-// ---- Small debris: plates, panel shards, bolts, finger segments, chunks ----
-// Solid hits knock chips off the struck part (heavier hits shed more). Each chip is a rigid
-// physics piece that bounces and comes to rest on the mat; once at rest it leaves physics and
-// is folded into an InstancedMesh batch (one draw call per shape+material), so hundreds stay
-// on the mat until the match ends. Past CHIP_MAX resting chips the oldest batch slot is reused.
-// Real little shapes (no flat quads): a bent hex plate, a flattened shard, a hex bolt with a
-// head, a rounded finger segment, a faceted chunk. Lit metal materials that never read as
-// black (moderate metalness + a faint emissive floor, since an un-mapped full metal goes black).
-function boltGeo() {
-  const shaft = new THREE.CylinderGeometry(0.009, 0.009, 0.045, 8);
-  const head = new THREE.CylinderGeometry(0.016, 0.016, 0.01, 6);
-  head.translate(0, 0.027, 0);
-  const g = mergeGeos([shaft, head]);
-  return g;
-}
+// ---- Small debris: real robot parts ----
+// Solid hits knock pieces off the struck part (heavier hits shed more). Two kinds:
+//  * Torn-off skin: triangles cut from the defender's own skinned mesh right around the
+//    contact point (current pose, same material, UVs, paint, chrome and decals), thickened
+//    into a bent shell. Finger hits on an arm can tear a real finger segment off the hand.
+//    These are unique geometry, kept in a small ring (oldest removed).
+//  * Tech parts: panel-lined armor plates, PCB chips (green board, gold traces, glowing
+//    LEDs), coloured wire bundles, servos, gears, bolts and nuts. Each settles out of physics
+//    into an InstancedMesh batch (one draw call per shape+material), CHIP_MAX on the mat.
 function mergeGeos(list) {
-  const pos = [], nor = [], idx = [];
+  const pos = [], nor = [], uv = [], col = [], idx = [];
   let base = 0;
-  for (const g0 of list) {
-    const g = g0.index ? g0 : g0;
-    const p = g.attributes.position, n = g.attributes.normal;
-    for (let i = 0; i < p.count; i++) { pos.push(p.getX(i), p.getY(i), p.getZ(i)); nor.push(n.getX(i), n.getY(i), n.getZ(i)); }
+  for (const item of list) {
+    const g = item.g || item;
+    const c = new THREE.Color(item.color != null ? item.color : 0xffffff);
+    const p = g.attributes.position, n = g.attributes.normal, t = g.attributes.uv;
+    for (let i = 0; i < p.count; i++) {
+      pos.push(p.getX(i), p.getY(i), p.getZ(i));
+      nor.push(n.getX(i), n.getY(i), n.getZ(i));
+      uv.push(t ? t.getX(i) : 0, t ? t.getY(i) : 0);
+      col.push(c.r, c.g, c.b);
+    }
     if (g.index) for (let i = 0; i < g.index.count; i++) idx.push(g.index.getX(i) + base);
     else for (let i = 0; i < p.count; i++) idx.push(i + base);
     base += p.count;
@@ -892,31 +892,270 @@ function mergeGeos(list) {
   const out = new THREE.BufferGeometry();
   out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   out.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  out.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  out.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   out.setIndex(idx);
   return out;
 }
-function plateGeo() {
-  const g = new THREE.CylinderGeometry(0.055, 0.05, 0.01, 6, 1);
+const tx = (g, x, y, z) => { g.translate(x, y, z); return g; };
+const rx = (g, a) => { g.rotateX(a); return g; };
+const rz = (g, a) => { g.rotateZ(a); return g; };
+function canvasTex(w, h, draw) {
+  if (typeof document === 'undefined') return null;
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  return t;
+}
+// Grey panel with recessed seams, rivets and a hazard stencil; tinted by the material colour.
+const PANEL_TEX = canvasTex(128, 128, (g, w, h) => {
+  g.fillStyle = '#d8d8d8'; g.fillRect(0, 0, w, h);
+  g.strokeStyle = '#3a3a3a'; g.lineWidth = 3;
+  g.beginPath(); g.moveTo(0, 46); g.lineTo(78, 46); g.lineTo(96, 64); g.lineTo(128, 64); g.moveTo(78, 46); g.lineTo(78, 0); g.moveTo(40, 46); g.lineTo(40, 128); g.stroke();
+  g.strokeStyle = 'rgba(255,255,255,0.7)'; g.lineWidth = 1;
+  g.beginPath(); g.moveTo(0, 49); g.lineTo(78, 49); g.moveTo(43, 49); g.lineTo(43, 128); g.stroke();
+  g.fillStyle = '#555'; for (const [x, y] of [[8, 8], [68, 8], [8, 36], [68, 36], [52, 60], [52, 118], [118, 76], [118, 118]]) { g.beginPath(); g.arc(x, y, 3, 0, 7); g.fill(); }
+  g.fillStyle = '#222'; for (let i = 0; i < 4; i++) { g.save(); g.translate(60 + i * 14, 92); g.transform(1, 0, -0.6, 1, 0, 0); g.fillRect(0, 0, 7, 22); g.restore(); }
+});
+const PCB_TEX = canvasTex(128, 96, (g, w, h) => {
+  g.fillStyle = '#16602a'; g.fillRect(0, 0, w, h);
+  g.strokeStyle = '#d9b44a'; g.lineWidth = 2;
+  for (let i = 0; i < 14; i++) { const y = 6 + i * 6.5; g.beginPath(); g.moveTo(0, y); g.lineTo(30 + (i * 13) % 40, y); g.lineTo(44 + (i * 13) % 40, y + 10); g.lineTo(128, y + 10); g.stroke(); }
+  g.fillStyle = '#e5c25a'; for (let i = 0; i < 18; i++) { g.beginPath(); g.arc((i * 37) % 120 + 4, (i * 23) % 88 + 4, 2.2, 0, 7); g.fill(); }
+  g.fillStyle = '#111'; g.fillRect(52, 26, 34, 34); g.fillRect(12, 60, 22, 14); g.fillRect(96, 12, 18, 10);
+  g.fillStyle = '#999'; for (let i = 0; i < 8; i++) { g.fillRect(50, 28 + i * 4, 2, 2); g.fillRect(86, 28 + i * 4, 2, 2); }
+  g.fillStyle = '#ddd'; g.font = '8px monospace'; g.fillText('RX-7', 56, 46);
+});
+const PCB_GLOW = canvasTex(128, 96, (g, w, h) => {
+  g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
+  for (const [x, y, c] of [[104, 70, '#ff2a2a'], [112, 70, '#2aff5a'], [120, 70, '#ffb020'], [20, 20, '#40a0ff'], [100, 30, '#2aff5a']]) {
+    const gr = g.createRadialGradient(x, y, 0, x, y, 6); gr.addColorStop(0, c); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr; g.fillRect(x - 6, y - 6, 12, 12);
+  }
+});
+function plateGeo(seed) {
+  const g = new THREE.BoxGeometry(0.085, 0.007, 0.062, 8, 1, 6);
   const p = g.attributes.position;
-  for (let i = 0; i < p.count; i++) p.setY(i, p.getY(i) + (p.getX(i) * p.getX(i)) * 3.2); // slight bend
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), z = p.getZ(i);
+    // bent and torn: curved along x, folded corner, a crumple
+    let y = p.getY(i) + x * x * (2.5 + seed * 2) + Math.max(0, x + z - 0.05) * 0.5 * seed;
+    y += Math.sin(x * 60 + seed * 5) * Math.cos(z * 50) * 0.003;
+    p.setY(i, y);
+  }
   g.computeVertexNormals();
   return g;
 }
-function shardGeo() { const g = new THREE.TetrahedronGeometry(0.045); g.scale(1, 0.35, 1.4); g.computeVertexNormals(); return g; }
-const CHIP_GEOS = [
-  { g: plateGeo(), m: 0.12 },                                        // armor plate
-  { g: shardGeo(), m: 0.06 },                                        // panel shard
-  { g: boltGeo(), m: 0.05 },                                         // bolt
-  { g: new THREE.CapsuleGeometry(0.014, 0.035, 3, 8), m: 0.06 },     // finger segment
-  { g: new THREE.DodecahedronGeometry(0.03), m: 0.1 },               // chunk
-];
-const chipMat = (color, metal, rough) => new THREE.MeshStandardMaterial({ color, metalness: metal, roughness: rough, emissive: new THREE.Color(color).multiplyScalar(0.06), envMapIntensity: 1.2, flatShading: true });
+function pcbGeo() {
+  const board = new THREE.BoxGeometry(0.075, 0.004, 0.056);
+  const chip = tx(new THREE.BoxGeometry(0.02, 0.005, 0.02), 0.004, 0.004, -0.002);
+  const cap = tx(new THREE.CylinderGeometry(0.004, 0.004, 0.01, 8), -0.022, 0.007, 0.014);
+  return mergeGeos([{ g: board }, { g: chip, color: 0x222222 }, { g: cap, color: 0x3355aa }]);
+}
+const WIRE_COLS = [0xe53935, 0xfdd835, 0x1e88e5, 0x222222, 0x43a047, 0xff8f00];
+function wireGeo(seed) {
+  const list = [];
+  const pts = [];
+  for (let i = 0; i < 6; i++) pts.push(new THREE.Vector3(i * 0.022 - 0.055, Math.sin(i * 1.3 + seed * 2) * 0.012, Math.cos(i * 0.9 + seed) * 0.018));
+  for (let k = 0; k < 3; k++) {
+    const off = new THREE.Vector3(0, (k - 1) * 0.0075, (k % 2) * 0.006);
+    const curve = new THREE.CatmullRomCurve3(pts.map((q, i) => q.clone().add(off).add(new THREE.Vector3(0, i > 3 ? (k - 1) * 0.006 * (i - 3) : 0, 0))));
+    list.push({ g: new THREE.TubeGeometry(curve, 18, 0.0042, 6), color: WIRE_COLS[(k + seed * 2) % WIRE_COLS.length] });
+  }
+  list.push({ g: tx(rz(new THREE.CylinderGeometry(0.011, 0.011, 0.016, 8), Math.PI / 2), -0.06, 0, 0), color: 0x1a1a1a }); // plug
+  for (let k = 0; k < 3; k++) list.push({ g: tx(rz(new THREE.CylinderGeometry(0.0022, 0.0022, 0.008, 5), Math.PI / 2), 0.058, (k - 1) * 0.007 + 0.01, 0.01), color: 0xd4a050 }); // bare copper ends
+  return mergeGeos(list);
+}
+function gearShape(teeth, r, depth, hole) {
+  const s = new THREE.Shape();
+  for (let i = 0; i < teeth * 2; i++) {
+    const a0 = (i / (teeth * 2)) * Math.PI * 2, a1 = ((i + 1) / (teeth * 2)) * Math.PI * 2;
+    const rr = i % 2 ? r : r + depth;
+    if (i === 0) s.moveTo(Math.cos(a0) * rr, Math.sin(a0) * rr); else s.lineTo(Math.cos(a0) * rr, Math.sin(a0) * rr);
+    s.lineTo(Math.cos(a1) * rr, Math.sin(a1) * rr);
+  }
+  const h = new THREE.Path(); h.absarc(0, 0, hole, 0, Math.PI * 2, true); s.holes.push(h);
+  return s;
+}
+function gearGeo(color, teeth, r) {
+  const g = rx(new THREE.ExtrudeGeometry(gearShape(teeth, r, 0.0055, r * 0.32), { depth: 0.007, bevelEnabled: false, curveSegments: 6 }), Math.PI / 2);
+  return mergeGeos([{ g, color }]);
+}
+function hexShape(r, hole) {
+  const s = new THREE.Shape();
+  for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; if (i) s.lineTo(Math.cos(a) * r, Math.sin(a) * r); else s.moveTo(r, 0); }
+  if (hole) { const h = new THREE.Path(); h.absarc(0, 0, hole, 0, Math.PI * 2, true); s.holes.push(h); }
+  return s;
+}
+function nutGeo() {
+  return mergeGeos([{ g: rx(new THREE.ExtrudeGeometry(hexShape(0.014, 0.007), { depth: 0.01, bevelEnabled: true, bevelSize: 0.0012, bevelThickness: 0.0012, bevelSegments: 1 }), Math.PI / 2), color: 0xb8bec6 }]);
+}
+function boltGeo() {
+  const shaft = new THREE.CylinderGeometry(0.0075, 0.0075, 0.045, 8);
+  const p = shaft.attributes.position; // thread ridges
+  for (let i = 0; i < p.count; i++) { const y = p.getY(i); if (y < 0.015) { const k = 1 + 0.12 * Math.sin(y * 900); p.setX(i, p.getX(i) * k); p.setZ(i, p.getZ(i) * k); } }
+  shaft.computeVertexNormals();
+  const head = tx(rx(new THREE.ExtrudeGeometry(hexShape(0.015), { depth: 0.01, bevelEnabled: false }), -Math.PI / 2), 0, 0.0225, 0);
+  return mergeGeos([{ g: shaft, color: 0xaab0b8 }, { g: head, color: 0x8d949c }]);
+}
+function servoGeo() {
+  const body = new THREE.BoxGeometry(0.044, 0.04, 0.022);
+  const tabs = tx(new THREE.BoxGeometry(0.064, 0.004, 0.022), 0, 0.012, 0);
+  const label = tx(new THREE.BoxGeometry(0.03, 0.016, 0.0225), 0, -0.004, 0);
+  const shaft = tx(new THREE.CylinderGeometry(0.006, 0.006, 0.008, 10), 0.01, 0.024, 0);
+  const horn = tx(new THREE.CylinderGeometry(0.004, 0.009, 0.004, 4), 0.01, 0.03, 0);
+  horn.scale(2.2, 1, 0.7);
+  const cable = new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(-0.022, -0.012, 0), new THREE.Vector3(-0.034, -0.016, 0.006), new THREE.Vector3(-0.042, -0.006, 0.012), new THREE.Vector3(-0.05, -0.012, 0.004)]), 10, 0.003, 5);
+  return mergeGeos([{ g: body, color: 0x1b1d24 }, { g: tabs, color: 0x1b1d24 }, { g: label, color: 0x2a6fd6 }, { g: shaft, color: 0xd0d0d0 }, { g: horn, color: 0xf2f2f2 }, { g: cable, color: 0xe08a1e }]);
+}
+const chipMat = (color, metal, rough, extra = {}) => new THREE.MeshStandardMaterial({ color, metalness: metal, roughness: rough, emissive: new THREE.Color(color).multiplyScalar(0.05), envMapIntensity: 1.2, ...extra });
 const CHIP_MATS = {
-  chrome: chipMat(0xd6dbe2, 0.7, 0.25),
-  dark: chipMat(0x7a808a, 0.65, 0.38),   // gunmetal
-  p1: chipMat(0x3f7dff, 0.45, 0.35),
-  p2: chipMat(0xff4a4a, 0.45, 0.35),
+  chrome: chipMat(0xd6dbe2, 0.7, 0.25, { map: PANEL_TEX }),
+  dark: chipMat(0x7a808a, 0.65, 0.38, { map: PANEL_TEX }),
+  p1: chipMat(0x3f7dff, 0.45, 0.35, { map: PANEL_TEX }),
+  p2: chipMat(0xff4a4a, 0.45, 0.35, { map: PANEL_TEX }),
+  pcb: chipMat(0xffffff, 0.2, 0.55, { map: PCB_TEX, emissiveMap: PCB_GLOW, emissive: new THREE.Color(0xffffff), emissiveIntensity: 2.2, vertexColors: true }),
+  tech: chipMat(0xffffff, 0.5, 0.4, { vertexColors: true }),
 };
+CHIP_MATS.tech.emissive.setRGB(0.03, 0.03, 0.03);
+// kind: plate uses team/chrome panel materials; others carry their own colours.
+const CHIP_GEOS = [
+  { g: plateGeo(0.2), m: 0.12, kind: 'plate', w: 2 },
+  { g: plateGeo(0.9), m: 0.12, kind: 'plate', w: 2 },
+  { g: pcbGeo(), m: 0.05, mat: 'pcb', w: 2 },
+  { g: wireGeo(0), m: 0.04, mat: 'tech', w: 1.3 },
+  { g: wireGeo(1), m: 0.04, mat: 'tech', w: 1.3 },
+  { g: servoGeo(), m: 0.08, mat: 'tech', w: 1 },
+  { g: gearGeo(0xc9a443, 12, 0.02), m: 0.05, mat: 'tech', w: 1.2 },
+  { g: gearGeo(0xb4bac2, 9, 0.014), m: 0.04, mat: 'tech', w: 1.2 },
+  { g: boltGeo(), m: 0.05, mat: 'tech', w: 1.5 },
+  { g: nutGeo(), m: 0.04, mat: 'tech', w: 1.5 },
+];
+const CHIP_WSUM = CHIP_GEOS.reduce((a, c) => a + c.w, 0);
+function pickChipGeo() {
+  let r = Math.random() * CHIP_WSUM;
+  for (let i = 0; i < CHIP_GEOS.length; i++) { r -= CHIP_GEOS[i].w; if (r <= 0) return i; }
+  return 0;
+}
+
+// --- torn skin pieces sampled from the robot itself ---
+const _sv = new THREE.Vector3();
+const _sn = new THREE.Vector3();
+const _sc = new THREE.Vector3();
+const SKIN_MAX = 40;
+let skinRing = [];
+function skinnedWorld(mesh, i, out, cache) {
+  let v = cache.get(i);
+  if (!v) { mesh.getVertexPosition(i, _sv); v = _sv.clone().applyMatrix4(mesh.matrixWorld); cache.set(i, v); }
+  return out.copy(v);
+}
+// Cut the triangles of the robot's own skin within `radius` of `center` (current pose) into a
+// thin bent shell: same material, UVs and vertex colours, so paint/chrome/decals match.
+function sampleSkinPiece(f, partId, center, radius, maxTris = 160) {
+  const part = f.parts && f.parts[partId];
+  if (!part || part.detached) return null;
+  const code = DAMAGE.order.indexOf(partId) + 1;
+  let best = null;
+  for (const mesh of part.skinned) {
+    if (!mesh.visible || !mesh.geometry.index) continue;
+    mesh.updateMatrixWorld();
+    const vp = mesh.userData.vertPart;
+    const pos = mesh.geometry.attributes.position;
+    const cache = new Map();
+    // nearest vertex of this part to the hit (stride keeps it cheap on dense meshes)
+    const stride = pos.count > 12000 ? 3 : 1;
+    let bi = -1, bd = radius * radius * 4;
+    for (let i = 0; i < pos.count; i += stride) {
+      if (vp && vp[i] !== code) continue;
+      const d = skinnedWorld(mesh, i, _sc, cache).distanceToSquared(center);
+      if (d < bd) { bd = d; bi = i; }
+    }
+    if (bi >= 0 && (!best || bd < best.d)) best = { mesh, bi, d: bd, cache };
+  }
+  if (!best) return null;
+  const { mesh, cache } = best;
+  const seed = skinnedWorld(mesh, best.bi, new THREE.Vector3(), cache);
+  const geo = mesh.geometry, index = geo.index, r2 = radius * radius;
+  // material group of the seed vertex
+  let group = null;
+  if (Array.isArray(mesh.material) && geo.groups.length) {
+    for (let t = 0; t < index.count && !group; t += 3) for (let k = 0; k < 3; k++) if (index.getX(t + k) === best.bi) { group = geo.groups.find((gr) => t >= gr.start && t < gr.start + gr.count) || null; break; }
+  }
+  const material = Array.isArray(mesh.material) ? mesh.material[group ? group.materialIndex : 0] : mesh.material;
+  const t0 = group ? group.start : 0, t1 = group ? group.start + group.count : index.count;
+  const tris = [];
+  const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vC = new THREE.Vector3();
+  for (let t = t0; t < t1 && tris.length < maxTris; t += 3) {
+    const a = index.getX(t), b = index.getX(t + 1), c = index.getX(t + 2);
+    // cheap reject on rest-pose vertex part tags before skinning
+    const vp = mesh.userData.vertPart;
+    if (vp && vp[a] !== code && vp[b] !== code && vp[c] !== code) continue;
+    skinnedWorld(mesh, a, vA, cache);
+    if (vA.distanceToSquared(seed) > r2) continue;
+    skinnedWorld(mesh, b, vB, cache); skinnedWorld(mesh, c, vC, cache);
+    if (vB.distanceToSquared(seed) > r2 || vC.distanceToSquared(seed) > r2) continue;
+    tris.push([a, b, c]);
+  }
+  if (tris.length < 2) return null;
+  const uvA = geo.attributes.uv, colA = geo.attributes.color;
+  const verts = new Map(); const P = [], U = [], C = [], I = [];
+  const centroid = new THREE.Vector3();
+  for (const tri of tris) for (const i of tri) if (!verts.has(i)) { verts.set(i, P.length / 3); const v = skinnedWorld(mesh, i, _sc, cache); P.push(v.x, v.y, v.z); centroid.add(v); U.push(uvA ? uvA.getX(i) : 0, uvA ? uvA.getY(i) : 0); C.push(colA ? colA.getX(i) : 1, colA ? colA.getY(i) : 1, colA ? colA.getZ(i) : 1); }
+  const nv = verts.size; centroid.divideScalar(nv);
+  for (let k = 0; k < nv; k++) { P[k * 3] -= centroid.x; P[k * 3 + 1] -= centroid.y; P[k * 3 + 2] -= centroid.z; }
+  for (const tri of tris) I.push(verts.get(tri[0]), verts.get(tri[1]), verts.get(tri[2]));
+  let g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  g.setIndex(I); g.computeVertexNormals();
+  // Thicken into a shell (inner copy pushed in along the normals, reversed winding) and
+  // crumple it a little so it reads as a torn, bent panel.
+  const N = g.attributes.normal;
+  const th = 0.007 * SIZE;
+  const P2 = P.slice(), U2 = U.slice(), C2 = C.slice(), I2 = I.slice();
+  for (let k = 0; k < nv; k++) {
+    const x = P[k * 3], y = P[k * 3 + 1], z = P[k * 3 + 2];
+    const bend = (x * x + z * z) / (radius * radius) * 0.25 * radius * (0.5 + Math.random() * 0.5);
+    P2[k * 3] = x - N.getX(k) * bend; P2[k * 3 + 1] = y - N.getY(k) * bend; P2[k * 3 + 2] = z - N.getZ(k) * bend;
+  }
+  for (let k = 0; k < nv; k++) { P2.push(P2[k * 3] - N.getX(k) * th, P2[k * 3 + 1] - N.getY(k) * th, P2[k * 3 + 2] - N.getZ(k) * th); U2.push(U[k * 2], U[k * 2 + 1]); C2.push(C[k * 3] * 0.35, C[k * 3 + 1] * 0.35, C[k * 3 + 2] * 0.35); }
+  for (let t = 0; t < I.length; t += 3) I2.push(I[t] + nv, I[t + 2] + nv, I[t + 1] + nv);
+  g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(P2, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(U2, 2));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(C2, 3));
+  g.setIndex(I2); g.computeVertexNormals();
+  const m = new THREE.Mesh(g, material);
+  m.position.copy(centroid);
+  m.castShadow = true;
+  m.userData.skinPiece = true;
+  return m;
+}
+function fingerBone(f, partId) {
+  const part = f.parts && f.parts[partId];
+  if (!part) return null;
+  const list = part.bones.filter((b) => /Hand(Index|Middle|Ring|Pinky|Thumb)[12]$/.test(String(b.name).replace(/^mixamorig[:._]*/i, '')) && b.children.length);
+  return list.length ? list[Math.floor(Math.random() * list.length)] : null;
+}
+function launchPiece(f, mesh, mass, point, d, force, scene) {
+  scene.add(mesh);
+  const sp = 1.6 + force * 0.35 + Math.random() * 1.2;
+  return spawnDebris({
+    mesh, small: true, mass,
+    velocity: new THREE.Vector3(d.x * sp + (Math.random() - 0.5) * 2.2, 1.2 + Math.random() * 2.2, d.z * sp + (Math.random() - 0.5) * 2.2),
+    angularVelocity: new THREE.Vector3((Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30),
+    ownerId: f && f.id,
+  });
+}
+function keepSkinPiece(scene, mesh) {
+  skinRing.push(mesh);
+  while (skinRing.length > SKIN_MAX) {
+    const old = skinRing.shift();
+    if (old.parent) old.parent.remove(old);
+    old.visible = false;
+    old.geometry.dispose();
+  }
+}
+
 const CHIP_MAX = 360;
 const chipBatches = new Map(); // `${geo}|${mat}` -> InstancedMesh
 let chipRing = []; // resting chips in order: { key, slot }
@@ -942,24 +1181,41 @@ export function shedChips(f, partId, point, dir, force, scene, opts = {}) {
   const part = f && f.parts && f.parts[partId];
   if (part && part.max) n += Math.round((1 - part.hp / part.max) * 1.5 * Math.random()); // battered parts shed more
   const d = dir ? dir.clone().setY(0).normalize() : new THREE.Vector3(0, 0, 1);
-  for (let i = 0; i < n; i++) {
-    let gi = Math.floor(Math.random() * CHIP_GEOS.length);
-    if (gi === 3 && !(partId && partId.startsWith('arm'))) gi = 2; // finger segments come off arms
-    const mk = Math.random() < 0.45 ? (f && f.id === 'p1' ? 'p1' : 'p2') : (Math.random() < 0.6 ? 'chrome' : 'dark');
-    const mesh = new THREE.Mesh(CHIP_GEOS[gi].g, CHIP_MATS[mk]);
+  let skins = 0;
+  if (n > 0 && f && !opts.blocked && force >= 2.2) {
+    // A torn patch of the robot's own skin from right where it was hit (one, two on heavy hits).
+    const want = heavy ? 2 : 1;
+    for (let k = 0; k < want; k++) {
+      const c = k ? point.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.1 * SIZE, (Math.random() - 0.5) * 0.1 * SIZE, (Math.random() - 0.5) * 0.1 * SIZE)) : point;
+      let m = null;
+      try { m = sampleSkinPiece(f, partId, c, (0.045 + Math.random() * 0.03 + Math.min(0.03, force * 0.004)) * SIZE); } catch (e) { m = null; }
+      if (!m) break;
+      launchPiece(f, m, 0.1 * SIZE, point, d, force, scene);
+      keepSkinPiece(scene, m);
+      skins++;
+    }
+    // Arm hits can snap a real finger segment off the hand.
+    if (partId && partId.startsWith('arm') && Math.random() < (heavy ? 0.45 : 0.2)) {
+      const b = fingerBone(f, partId);
+      if (b) {
+        const a = b.getWorldPosition(new THREE.Vector3()), e = b.children[0].getWorldPosition(new THREE.Vector3());
+        let m = null;
+        try { m = sampleSkinPiece(f, partId, a.lerp(e, 0.5), Math.max(0.02 * SIZE, a.distanceTo(e) * 0.75), 120); } catch (err) { m = null; }
+        if (m) { launchPiece(f, m, 0.05 * SIZE, point, d, force, scene); keepSkinPiece(scene, m); skins++; }
+      }
+    }
+  }
+  for (let i = skins; i < n + (skins ? 1 : 0); i++) {
+    const gi = pickChipGeo();
+    const def = CHIP_GEOS[gi];
+    const mk = def.mat || (Math.random() < 0.5 ? (f && f.id === 'p1' ? 'p1' : 'p2') : (Math.random() < 0.6 ? 'chrome' : 'dark'));
+    const mesh = new THREE.Mesh(def.g, CHIP_MATS[mk]);
     mesh.userData.shared = true;
-    mesh.scale.setScalar(SIZE * (0.75 + Math.random() * 0.6));
+    mesh.scale.setScalar(SIZE * (0.8 + Math.random() * 0.5));
     mesh.position.copy(point).add(new THREE.Vector3((Math.random() - 0.5) * 0.12, (Math.random() - 0.5) * 0.12, (Math.random() - 0.5) * 0.12));
     mesh.quaternion.setFromEuler(new THREE.Euler(Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28));
     mesh.castShadow = true;
-    scene.add(mesh);
-    const sp = 1.6 + force * 0.35 + Math.random() * 1.2;
-    const rec = spawnDebris({
-      mesh, small: true, mass: CHIP_GEOS[gi].m * SIZE,
-      velocity: new THREE.Vector3(d.x * sp + (Math.random() - 0.5) * 2.2, 1.2 + Math.random() * 2.2, d.z * sp + (Math.random() - 0.5) * 2.2),
-      angularVelocity: new THREE.Vector3((Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30),
-      ownerId: f && f.id,
-    });
+    const rec = launchPiece(f, mesh, def.m * SIZE, point, d, force, scene);
     chipsLive.push({ mesh, phys: rec, gi, mk });
   }
   return n;
@@ -994,6 +1250,8 @@ function clearChips(scene) {
   chipsLive.length = 0;
   chipRing = [];
   for (const im of chipBatches.values()) { im.count = 0; im.userData.free = []; }
+  for (const m of skinRing) { if (m.parent) m.parent.remove(m); m.visible = false; m.geometry.dispose(); }
+  skinRing = [];
 }
 
 const oilDropMat = new THREE.MeshStandardMaterial({ color: 0x0c0a07, roughness: 0.12, metalness: 0.5 });

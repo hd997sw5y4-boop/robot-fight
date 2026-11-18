@@ -59,6 +59,7 @@ import {
   strikeMul,
   debugBreakSub,
   oilStats,
+  shedChips,
 } from './damage.js';
 
 const canvas = document.getElementById('c');
@@ -1686,13 +1687,37 @@ function moveFighter(f, other, sidestep, inout, dt, speeds) {
 // Spacing is normally kept by footwork (stepFighter backs a robot off with its walk when it is
 // inside COMBAT.separate) and by the physics capsules. This is only an emergency un-overlap for
 // rare deep interpenetration, so roots are never shoved around without animation.
-function separate(a, b) {
+const _sepA = new THREE.Vector3();
+const _sepB = new THREE.Vector3();
+function chestOf(f, out) {
+  const c = bodyCaps(f).find((k) => k.part === 'torso' && k.b);
+  if (!c) return out.copy(f.root.position);
+  return c.b.getWorldPosition(out);
+}
+// Torso-to-torso gap in the ground plane (leaning strikes bring chests together long before
+// the roots meet).
+function chestGap(a, b) {
+  chestOf(a, _sepA); chestOf(b, _sepB);
+  return Math.hypot(_sepB.x - _sepA.x, _sepB.z - _sepA.z);
+}
+function separate(a, b, dt = 0) {
   const dx = b.root.position.x - a.root.position.x;
   const dz = b.root.position.z - a.root.position.z;
   const d = Math.hypot(dx, dz);
-  const min = COMBAT.separateHard;
-  if (d < min && d > 1e-4) {
-    const push = (min - d) / 2;
+  // Body blocking: roots keep a hard minimum, and chests (capsules) may not overlap either,
+  // which matters during strikes when the torso leans in.
+  let push = d < COMBAT.separateHard ? (COMBAT.separateHard - d) / 2 : 0;
+  const cg = chestGap(a, b);
+  const chestMin = 0.6 * SIZE;
+  if (cg < chestMin) push = Math.max(push, (chestMin - cg) / 2);
+  // After an exchange both step back out a little so they don't stay glued together.
+  for (const f of [a, b]) {
+    if (f.backOff > 0) {
+      f.backOff -= dt;
+      if (f.state === 'idle' || f.state === 'walk' || f.state === 'block' || f.state === 'hit') push += dt * 0.55 * SIZE / 2;
+    }
+  }
+  if (push > 0 && d > 1e-4) {
     const nx = dx / d;
     const nz = dz / d;
     for (const [f, sgn] of [[a, -1], [b, 1]]) {
@@ -1805,7 +1830,16 @@ function tryAttack(f, kind, clipName, exact = false) {
     // hits ~22 m/s in the source clip): cap playback so the tip never outruns STRIKE_VMAX,
     // otherwise the foot teleports between frames.
     const cap = st && st.vpk > 0 ? STRIKE_VMAX / st.vpk : Infinity;
-    action.timeScale = Math.min(speed * mods.timeScale * statOf(f, 'speed'), cap);
+    let base = Math.min(speed * mods.timeScale * statOf(f, 'speed'), cap);
+    // No sluggish strikes: if the played part (lead-in skipped) would take longer than a snappy
+    // budget, play it faster (still under the limb-speed cap, so nothing teleports).
+    if (st && !SPECIAL_STRIKES.has(clip)) {
+      const budget = kind === 'punch' ? 0.5 : 0.7;
+      const played = (st.end - st.start) / Math.max(0.2, base);
+      if (played > budget) base = Math.min(cap, base * played / budget);
+    }
+    action.timeScale = base;
+    f.strikeBase = base;
     f.strikeCap = cap;
     if (st) action.time = st.start;
     // Jump kicks (also when picked as a CPU special): airborne root, travel in the air only.
@@ -2242,11 +2276,17 @@ function applyHit(atk, def, spec, kind, strikeBone, contact) {
   // Counter hit: caught mid-swing. Longer hitstun and a sharper freeze.
   const counter = !blocked && (def.state === 'punch' || def.state === 'kick');
   const solidHit = !blocked && force >= COMBAT.stumbleForce;
-  addShake(blocked ? 0.035 : (heavy ? Math.min(0.18, 0.12 + force * 0.008) : Math.min(0.08, 0.05 + force * 0.006)));
-  if (!blocked) triggerHitStop(counter ? COMBAT.hitStopCounter : ((heavy || solidHit) ? COMBAT.hitStopHeavy : COMBAT.hitStopLight));
+  // Impact weight: a real freeze scaled by how hard it landed (~40 ms light .. 120 ms big /
+  // counter), a shake that follows it (Settings shake toggle respected in addShake) and a bright
+  // flash right at the contact point.
+  const hard = Math.max(0, Math.min(1, (force - 2) / 4 + (heavy ? 0.25 : 0) + (counter ? 0.25 : 0)));
+  addShake(blocked ? 0.03 : 0.04 + hard * 0.12);
+  if (!blocked) triggerHitStop(0.04 + hard * 0.08);
+  hitFlash(hit.point, blocked ? 0.4 : 0.55 + hard * 0.75, blocked ? 0x9fd0ff : 0xfff0c8);
   const fwd = hit.dir;
   // Attacker feels the connect: the drive stops and the torso recoils a touch off the target.
   atk.atkContact = true;
+  atk.backOff = 0.3; def.backOff = 0.3;
   startFlinch(atk, fwd.clone().negate(), blocked ? 0.1 : 0.07, 'torso');
   // Defender visibly takes it: a spine/neck snap away from the blow by zone (smaller on guard).
   startFlinch(def, fwd, blocked ? 0.12 : Math.min(0.62, 0.3 + force * 0.045), blocked ? 'arm' : hitZone(hit.partId));
@@ -2929,15 +2969,28 @@ function stepFighter(f, other, inp, dt) {
     const action = f.actions[f.attackClip] || f.actions[f.state] || f.actions[resolveClip(f, f.state)];
     const tm = strikeTiming(f, action);
     const ct = action ? action.time : f.stateT; // clip playhead: windows stay right at any speed
+    // Weight curve over the strike: a slight held wind-up, a hard acceleration into the impact,
+    // and a heavier follow-through (contact / retraction below override it).
+    if (action && f.strikeBase && !f.retract && f.contactT < 0 && action.timeScale > 0 && !(f.airMove && f.airMove.action === action)) {
+      const st0 = tm.start, pk = tm.peak != null ? tm.peak : tm.a0;
+      const u = (ct - st0) / Math.max(0.05, pk - st0);
+      const mul = u < 0.3 ? 0.85 : (ct <= tm.a1 ? 1.3 : 0.92);
+      action.timeScale = Math.min(f.strikeCap || Infinity, f.strikeBase * mul);
+    }
     // A small step into the strike when just out of reach; it stops on contact and never
     // drives inside striking distance (that pushed fists through torsos).
     const gap = f.root.position.distanceTo(other.root.position);
     const airKick = f.airMove && f.airMove.action === action ? f.airMove : null;
     if (airKick) stepAirMove(f, dt); // jump kick: travels only while airborne, lands still
-    else if (!f.atkContact && ct < tm.a0 && gap > (COMBAT.strikeGap || 1.2)) {
+    else if (!f.atkContact && ct < tm.a0 && gap > (COMBAT.strikeGap || 1.2) * 0.9 && chestGap(f, other) > 0.72 * SIZE && !limbInside(f, other, f.state)) {
       const lunge = (f.state === 'kick' ? COMBAT.kickLunge : COMBAT.punchLunge) || 0;
       const fwd = toward(f, other);
       const v = lunge / Math.max(0.1, (tm.a0 - tm.start) / Math.max(0.2, action ? action.timeScale : 1));
+      setFighterMove(f, fwd.x * v, fwd.z * v);
+    } else if (!f.atkContact && action && ct < tm.a0 && ct > tm.start + (tm.a0 - tm.start) * 0.3 && chestGap(f, other) > 0.72 * SIZE && !limbInside(f, other, f.state)) {
+      // Mass behind it: the body shifts a touch into the blow during the acceleration.
+      const fwd = toward(f, other);
+      const v = 0.32 * SIZE;
       setFighterMove(f, fwd.x * v, fwd.z * v);
     } else setFighterMove(f, 0, 0);
     // Limb contact decides, not root distance: the swept fist/foot test runs through the whole
@@ -3343,6 +3396,35 @@ function addShake(amount) {
 let hitStopLeft = 0;
 function triggerHitStop(sec) {
   hitStopLeft = Math.max(hitStopLeft, sec);
+}
+
+// Contact flash: an additive glow sprite, wall-clock timed so it shows during the hit-stop.
+let _flash = null;
+function hitFlash(point, size, color) {
+  if (!point) return;
+  if (!_flash) {
+    const c = document.createElement('canvas'); c.width = c.height = 64;
+    const g = c.getContext('2d'); const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.2, 'rgba(255,255,255,0.8)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+    _flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, transparent: true, toneMapped: false }));
+    _flash.renderOrder = 20;
+    scene.add(_flash);
+  }
+  _flash.position.copy(point);
+  _flash.material.color.setHex(color);
+  _flash.userData = { t: 0, life: 0.11, size: size * SIZE };
+  _flash.visible = true;
+}
+function stepFlash(rawDt) {
+  if (!_flash || !_flash.visible) return;
+  const u = _flash.userData;
+  u.t += rawDt;
+  const k = u.t / u.life;
+  if (k >= 1) { _flash.visible = false; return; }
+  _flash.scale.setScalar(u.size * (0.7 + k * 0.6));
+  _flash.material.opacity = 1 - k * k;
 }
 
 // ---- Camera views (Settings > Camera view, or V to cycle) ----
@@ -3870,10 +3952,11 @@ function tick() {
   const rawDt = Math.min(0.05, clock.getDelta());
   updateFps(rawDt);
   stepFov(rawDt);
+  stepFlash(rawDt);
   let dt = isSettingsOpen() ? 0 : rawDt;
   if (dt > 0 && hitStopLeft > 0 && !match.over) {
     hitStopLeft = Math.max(0, hitStopLeft - rawDt);
-    dt = rawDt * 0.16;
+    dt = rawDt * 0.04; // near-freeze: the impact frame holds
   }
   if (dt > 0 && match.slowLeft > 0) { // brief mild slow motion on the KO
     match.slowLeft = Math.max(0, match.slowLeft - rawDt);
@@ -3910,7 +3993,7 @@ function tick() {
   // A robot that is falling, lying or getting up has no standing capsule to push against:
   // the other can step over it to stomp, and nothing shoves the lying body around.
   for (const f of [p1, p2]) if (f.phys && f.phys.body) f.phys.body.collisionResponse = !DOWN_STATES.has(f.state) && !f.ghost;
-  if (!DOWN_STATES.has(p1.state) && !DOWN_STATES.has(p2.state) && !p1.ghost && !p2.ghost) separate(p1, p2);
+  if (!DOWN_STATES.has(p1.state) && !DOWN_STATES.has(p2.state) && !p1.ghost && !p2.ghost) separate(p1, p2, dt);
   faceEachOther(p1, p2, dt);
   for (const f of [p1, p2]) {
     updateBaseLayer(f);
@@ -4331,6 +4414,13 @@ function onLoad(gltf) {
   window.__rfKoState = (id) => {
     const f = id === 'p1' ? p1 : p2; const h = f.hipsBone || findHips(f); const v = new THREE.Vector3();
     return { state: f.state, kind: f.koKind, hipsY: +h.getWorldPosition(v).y.toFixed(2), low: +(lowestBodyY(f) ?? 0).toFixed(2), rotZ: +f.model.rotation.z.toFixed(2), held: !!(f.koHold && f.koHold.held), legs: ['legL', 'legR'].filter((k) => f.parts[k].detached), head: f.parts.head.detached };
+  };
+  window.__rfShed = (id, partId = 'torso', force = 5) => {
+    const f = id === 'p1' ? p1 : p2;
+    const pt = f.root.position.clone().add(new THREE.Vector3(0, (partId.startsWith('arm') ? 1.25 : 1.1) * SIZE, 0.12 * SIZE));
+    const c = bodyCaps(f).find((k) => k.part === partId);
+    if (c) c.a.getWorldPosition(pt);
+    return shedChips(f, partId, pt, new THREE.Vector3(0, 0, 1), force, scene);
   };
   window.__rfBlowEye = (id, side = 'L') => { const f = id === 'p1' ? p1 : p2; const e = f.eyes && f.eyes.find((x) => x.side === side); blowEye(f, e, new THREE.Vector3(0, 0, 1)); return f.eyes.map((x) => x.blown); };
   window.__rfFighterStats = (id) => (id === 'p1' ? p1 : p2).stats;
