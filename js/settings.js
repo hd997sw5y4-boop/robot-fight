@@ -23,6 +23,7 @@ const KEYS = {
   hdri: 'rf_hdri',
   cam: 'rf_cam',
   autoRematch: 'rf_autorematch',
+  match: 'rf_match',
 };
 
 // Camera views, in the order the V key cycles them. 'arena' is the original orbit camera.
@@ -65,6 +66,7 @@ const defaults = {
   hdri: true,
   cam: 'arena',
   autoRematch: false, // Bot vs Bot: start the next match by itself after the results
+  match: 3, // best-of 1 / 3 / 5
 };
 
 function read() {
@@ -99,6 +101,8 @@ function read() {
     const cam = localStorage.getItem(KEYS.cam);
     if (CAM_MODES.includes(cam)) s.cam = cam;
     s.autoRematch = localStorage.getItem(KEYS.autoRematch) === '1';
+    const mt = localStorage.getItem(KEYS.match);
+    if (mt === '1' || mt === '3' || mt === '5') s.match = +mt;
   } catch (_) {}
   return s;
 }
@@ -120,6 +124,7 @@ function write(s) {
     localStorage.setItem(KEYS.hdri, s.hdri ? '1' : '0');
     localStorage.setItem(KEYS.cam, s.cam);
     localStorage.setItem(KEYS.autoRematch, s.autoRematch ? '1' : '0');
+    localStorage.setItem(KEYS.match, String(s.match));
   } catch (_) {}
 }
 
@@ -179,6 +184,8 @@ function paint() {
   if (camEl) camEl.value = settings.cam;
   const arEl = $('setAutoRematch');
   if (arEl) arEl.checked = !!settings.autoRematch;
+  const matchEl = $('setMatch');
+  if (matchEl) matchEl.value = String(settings.match);
   applyChrome();
 }
 
@@ -306,6 +313,11 @@ export function initSettings(nextHooks) {
   });
   document.getElementById('setRound')?.addEventListener('change', (e) => {
     settings.round = +e.target.value;
+    persist();
+  });
+  document.getElementById('setMatch')?.addEventListener('change', (e) => {
+    const v = +e.target.value;
+    if (v === 1 || v === 3 || v === 5) settings.match = v;
     persist();
   });
   document.getElementById('setAutoRematch')?.addEventListener('change', (e) => {

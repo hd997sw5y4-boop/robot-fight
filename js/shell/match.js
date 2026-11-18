@@ -1,11 +1,23 @@
-/* Robot Fight shell: best-of-3 rounds, round timer, intros, KO / TKO / decision, stats, training.
+/* Robot Fight shell: best-of-N rounds (Settings > Match, default 3), round timer, intros, KO / TKO / decision, stats, training.
    Each round is started with the public api.js startFight(); the shell owns the round clock
    (roundTime: 0 turns the game's own timer off) and the between-round flow. */
 (function () {
   'use strict';
   const S = window.RFShell;
-  const WINS_NEEDED = 2;
-  const MAX_ROUNDS = 5; // drawn rounds can push past round 3
+  // Best-of-N from Settings (1 / 3 / 5, default 3). Drawn rounds can push past best-of.
+  S.bestOf = (fresh) => {
+    if (!fresh && M.cfg && (M.cfg.bestOf === 1 || M.cfg.bestOf === 3 || M.cfg.bestOf === 5)) return M.cfg.bestOf;
+    const sel = document.getElementById('setMatch');
+    const v = sel ? +sel.value : 0;
+    if (v === 1 || v === 3 || v === 5) return v;
+    try {
+      const s = localStorage.getItem('rf_match');
+      if (s === '1' || s === '3' || s === '5') return +s;
+    } catch (_) {}
+    return 3;
+  };
+  const winsNeeded = () => Math.ceil(S.bestOf() / 2);
+  const maxRounds = () => S.bestOf() + 2;
 
   const M = (S.match = { cfg: null, phase: 'idle', round: 0, wins: [0, 0], rounds: [], t: 0,
     timeLeft: null, stats: null, total: null, lastHp: [0, 0], dummyBlock: false, train: null });
@@ -61,9 +73,14 @@
   S.clearCall = () => { const el = document.getElementById('rfsCall'); if (el) el.classList.remove('on'); };
 
   function paintHud() {
+    const need = winsNeeded();
+    const show = S.bestOf() > 1;
     for (let i = 0; i < 2; i++) {
       const el = document.getElementById('rfsPips' + (i + 1));
-      if (el) S.$$('i', el).forEach((pip, k) => pip.classList.toggle('won', M.wins[i] > k));
+      if (!el) continue;
+      el.style.display = show ? '' : 'none';
+      if (el.children.length !== need) el.innerHTML = '<i></i>'.repeat(need);
+      S.$$('i', el).forEach((pip, k) => pip.classList.toggle('won', M.wins[i] > k));
     }
     const t = document.getElementById('rfsTimer');
     if (t) {
@@ -112,6 +129,8 @@
     ensureHud();
     S.clearTimers();
     M.cfg = cfg;
+    M.bestOf = S.bestOf(true);
+    if (M.cfg) M.cfg.bestOf = M.bestOf;
     M.wins = [0, 0];
     M.rounds = [];
     M.total = blankStats();
@@ -145,7 +164,7 @@
     M.timeLeft = training ? null : S.roundLength();
     paintHud();
     if (training) { S.paintTraining(); return; }
-    const last = M.wins[0] === WINS_NEEDED - 1 && M.wins[1] === WINS_NEEDED - 1;
+    const last = M.wins[0] === winsNeeded() - 1 && M.wins[1] === winsNeeded() - 1;
     // [announcer hook] matchStart plays the welcome + blue/red walkout; rematch skips that package.
     const matchStart = n === 1 && M.wins[0] === 0 && M.wins[1] === 0;
     const rematch = !!M.rematch && matchStart;
@@ -183,7 +202,7 @@
     // [announcer hook]
     const ev = ko ? 'ko' : (method === 'Decision' ? 'decision' : (method === 'Draw' ? 'draw' : 'roundEnd'));
     if (window.RFAnnounce) window.RFAnnounce(ev, { delay: ko ? 0.5 : 0.3, method, winner });
-    const done = M.wins[0] >= WINS_NEEDED || M.wins[1] >= WINS_NEEDED || M.round >= MAX_ROUNDS;
+    const done = M.wins[0] >= winsNeeded() || M.wins[1] >= winsNeeded() || M.round >= maxRounds();
     S.emit('roundEnd', M.rounds[M.rounds.length - 1]);
     S.after(ko ? 3 : 2.5, () => {
       if (M.phase !== 'round-end') return;

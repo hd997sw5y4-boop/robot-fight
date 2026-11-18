@@ -356,3 +356,30 @@ html, body { margin: 0; height: 100%; background: #07080c; color: #eef2f6; font-
 #banner { padding-top: var(--rf-title-top, clamp(96px, 15vh, 150px)); }
 #banner span { display: inline-block; transform: scale(var(--rf-title-scale, 1)); transform-origin: top center; }
 body .rfs-call { top: var(--rf-title-top, clamp(96px, 15vh, 150px)); transform: scale(var(--rf-title-scale, 1)); transform-origin: top center; }
+
+/* Ghost health bars, low-health pulse, and a vignette (trail the real bar; no duplicate pips / pop-ups). */
+.bar { position: relative; }
+.bar > b {
+  position: absolute; inset: 0;
+  background: #fff3c4;
+  opacity: 0.75;
+  transform: scaleX(1);
+  pointer-events: none;
+}
+.bar > i { position: relative; }
+.bar.blue > b { transform-origin: left center; }
+.bar.red > b { transform-origin: right center; }
+.bar.flash { animation: rf-barflash 0.25s ease-out; }
+@keyframes rf-barflash { 0% { box-shadow: 0 0 0 2px #fff, 0 0 18px #fff8; } 100% { box-shadow: 0 0 0 1px rgba(0,0,0,0.4); } }
+.bar.danger > i { animation: rf-barpulse 0.7s ease-in-out infinite alternate; }
+@keyframes rf-barpulse { from { filter: brightness(1); } to { filter: brightness(1.7); } }
+
+#vignette {
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(200,0,0,0.55) 100%);
+  opacity: 0;
+  transition: opacity 0.4s;
+  pointer-events: none;
+}
+#vignette.hurt { opacity: 0.5; animation: rf-heartbeat 1s ease-in-out infinite; }
+@keyframes rf-heartbeat { 0%, 100% { opacity: 0.25; } 15% { opacity: 0.6; } 30% { opacity: 0.3; } 45% { opacity: 0.55; } }

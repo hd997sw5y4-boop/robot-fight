@@ -226,7 +226,7 @@ function rosterGrid() {
 function render() {
   const scr = selScreen();
   const m = mode();
-  const sub = H().MODE_INFO[m][1];
+  const sub = (H().modeInfo ? H().modeInfo(m) : H().MODE_INFO[m])[1];
   scr.classList.add('fs-on');
   let host = scr.querySelector('.fs');
   if (!host) {

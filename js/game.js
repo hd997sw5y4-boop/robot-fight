@@ -65,6 +65,7 @@ import {
 
 const canvas = document.getElementById('c');
 const keys = new Set();
+const tapped = new Set();
 const held = { punch: false, kick: false, ground: false, buf: null, bufT: 0 };
 
 // [game-shell hook] Optional menus / rounds / ladder layer (js/shell/*.js). No-op when absent.
@@ -1506,6 +1507,17 @@ function pickPunch(f) {
   return clip;
 }
 
+// Player: tapping punch walks punchVariants in order (resets if the last one missed or the window closed).
+const PUNCH_CHAIN_WINDOW = 1.1;
+function nextPlayerPunch(f) {
+  const chain = punchClipsFor(f);
+  if (!chain.length) return { clip: null, chain: 0 };
+  const now = performance.now() / 1000;
+  const sinceLast = f.lastPunchAt != null ? now - f.lastPunchAt : 99;
+  const idx = sinceLast < PUNCH_CHAIN_WINDOW && f.chainHit ? ((f.chain || 0) + 1) % chain.length : 0;
+  return { clip: chain[idx] || chain[0], chain: idx };
+}
+
 function pickKick(f, allowFlip) {
   const jumps = MODEL.animations.jumpKicks || [];
   // No jump kicks on a broken / badly bent leg.
@@ -1591,10 +1603,20 @@ window.addEventListener('keydown', (e) => {
     else { prevCamMode = cur; setCameraMode('broadcast'); }
     return;
   }
-  keys.add(e.key.toLowerCase());
-  if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(e.key.toLowerCase())) e.preventDefault();
+  const k = e.key.toLowerCase();
+  keys.add(k);
+  if (!e.repeat) tapped.add(k);
+  if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) e.preventDefault();
 });
 window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
+// Releasing keys while the tab is unfocused never fires keyup; clear to avoid stuck movement.
+function clearStuckKeys() {
+  keys.clear();
+  tapped.clear();
+  held.punch = held.kick = held.ground = held.flipFront = held.jumpKick = false;
+}
+window.addEventListener('blur', clearStuckKeys);
+document.addEventListener('visibilitychange', () => { if (document.hidden) clearStuckKeys(); });
 
 function rawInput() {
   const shellInp = shellCall('input', 'p1'); // [game-shell hook] versus keys / menu idle
@@ -1604,13 +1626,18 @@ function rawInput() {
   if (keys.has('d') || keys.has('arrowright')) inp.sidestep += 1;
   if (keys.has('w') || keys.has('arrowup')) inp.inout += 1;
   if (keys.has('s') || keys.has('arrowdown')) inp.inout -= 1;
-  inp.punch = keys.has('j');
-  inp.kick = keys.has('k');
+  inp.tapPunch = tapped.has('j');
+  inp.tapKick = tapped.has('k');
+  inp.tapGround = tapped.has('i');
+  inp.tapFlipFront = tapped.has('y');
+  inp.tapJumpKick = tapped.has('u');
+  inp.punch = keys.has('j') || inp.tapPunch;
+  inp.kick = keys.has('k') || inp.tapKick;
   inp.block = keys.has('l');
-  inp.ground = keys.has('i');
+  inp.ground = keys.has('i') || inp.tapGround;
   inp.run = keys.has('shift');
-  inp.flipFront = keys.has('y'); // (P is pause)
-  inp.jumpKick = keys.has('u');
+  inp.flipFront = keys.has('y') || inp.tapFlipFront; // (P is pause)
+  inp.jumpKick = keys.has('u') || inp.tapJumpKick;
 
   const gp = navigator.getGamepads?.()[0];
   if (gp) {
@@ -1640,11 +1667,11 @@ function rawInput() {
 // Player attacks are edge-triggered and buffered for a moment: a press made while the robot
 // is still finishing a strike or recovering fires as soon as it can, instead of being lost.
 function consumeAttacks(inp, dt = 0) {
-  const punch = inp.punch && !held.punch;
-  const kick = inp.kick && !held.kick;
-  const ground = !!inp.ground && !held.ground;
-  const flipFront = !!inp.flipFront && !held.flipFront;
-  const jumpKick = !!inp.jumpKick && !held.jumpKick;
+  const punch = (inp.punch && !held.punch) || !!inp.tapPunch;
+  const kick = (inp.kick && !held.kick) || !!inp.tapKick;
+  const ground = (!!inp.ground && !held.ground) || !!inp.tapGround;
+  const flipFront = (!!inp.flipFront && !held.flipFront) || !!inp.tapFlipFront;
+  const jumpKick = (!!inp.jumpKick && !held.jumpKick) || !!inp.tapJumpKick;
   held.punch = inp.punch;
   held.kick = inp.kick;
   held.ground = !!inp.ground;
@@ -1823,6 +1850,8 @@ function tryAttack(f, kind, clipName, exact = false) {
   const clip = exact && clipName ? clipName : fitStrikeClip(f, kind, clipName
     || (kind === 'punch' ? pickPunch(f) : pickKick(f, true))
     || MODEL.animations[kind], other);
+  if (kind === 'punch' && !f.isCpu) f.lastPunchAt = performance.now() / 1000;
+  if (kind === 'punch') f.chainHit = false;
   f.state = kind;
   f.stateT = 0;
   f.hitThisAttack = false;
@@ -1966,7 +1995,7 @@ function endAttack(f, fade = 0.2) {
   const spec = COMBAT[f.state] || COMBAT.punch;
   const base = (COMBAT.recoverByClip && COMBAT.recoverByClip[f.attackClip]) || spec.recover || 0.25;
   const who = f.isCpu ? (COMBAT.cpuRecoverMul || 1) : (COMBAT.playerRecoverMul || 1);
-  const rec = base * who * (f.hitThisAttack ? 1 : (COMBAT.whiffMul || 2)) * ((f.atkMods && f.atkMods.cooldownMul) || 1);
+  const rec = base * who * (f.hitThisAttack ? 1 : (COMBAT.whiffMul || 2)) * ((f.atkMods && f.atkMods.cooldownMul) || 1) * (!f.isCpu && f.chain > 0 ? 0.8 : 1);
   f.cooldown = Math.max(f.cooldown, rec / statOf(f, 'recovery'));
   f.state = 'idle';
   f.atkContact = false;
@@ -2287,6 +2316,7 @@ function applyHit(atk, def, spec, kind, strikeBone, contact) {
   const force = (closing + swing) * (blocked ? 0.45 : 1);
   const dmg = Math.max(1, Math.round(spec.damage * mul * surge * blockMul * loc * (0.5 + 0.55 * (force / 5))));
   def.health = Math.max(0, def.health - dmg);
+  atk.chainHit = !blocked;
   applyPartHit(def, hit.partId, dmg, hit.point, hit.dir, scene, { blocked, force, final: def.health <= 0 });
   applyStrikeWear(atk, kind || 'punch', strikeBone, blocked, force, scene, hit.dir);
   hitLight.color.setHex(blocked ? 0x88ccff : 0xffc060);
@@ -3086,8 +3116,12 @@ function stepFighter(f, other, inp, dt) {
   if (inp.ground && tryGroundAttack(f, other)) return;
   if (inp.flipFront && tryDodge(f, other, 'front')) return;
   if (inp.jumpKick && tryJumpKick(f, other)) return;
-  if (inp.punch) tryAttack(f, 'punch', inp.punchClip);
-  else if (inp.kick) tryAttack(f, 'kick', inp.kickClip);
+  if (inp.punch) {
+    if (!f.isCpu) {
+      const next = nextPlayerPunch(f);
+      if (tryAttack(f, 'punch', next.clip, !!next.clip)) f.chain = next.chain;
+    } else tryAttack(f, 'punch', inp.punchClip);
+  } else if (inp.kick) tryAttack(f, 'kick', inp.kickClip);
   if (f.state === 'punch' || f.state === 'kick' || f.state === 'ground' || f.state === 'hit' || f.state === 'ko') return;
 
   const speeds = locoMoveSpeeds(f, f.blocking);
@@ -3394,10 +3428,38 @@ function stepFootSounds(f, dt) {
   }
 }
 
-function syncHud() {
+const hudGhost = { p1: 1, p2: 1, last: { p1: 1, p2: 1 }, hitAt: { p1: -1, p2: -1 } };
+function resetHudGhost() { hudGhost.p1 = hudGhost.p2 = 1; hudGhost.last.p1 = hudGhost.last.p2 = 1; hudGhost.hitAt.p1 = hudGhost.hitAt.p2 = -1; }
+function syncHud(dt = 0) {
   if (!p1 || !p2) return;
-  document.getElementById('hp1').style.transform = `scaleX(${Math.max(0, p1.health / COMBAT.maxHealth)})`;
-  document.getElementById('hp2').style.transform = `scaleX(${Math.max(0, p2.health / COMBAT.maxHealth)})`;
+  const now = performance.now() / 1000;
+  const max = COMBAT.maxHealth;
+  for (const [f, hid, gid] of [[p1, 'hp1', 'ghost1'], [p2, 'hp2', 'ghost2']]) {
+    const hp = Math.max(0, f.health / max);
+    const bar = document.getElementById(hid);
+    if (bar) bar.style.transform = `scaleX(${hp})`;
+    const wrap = bar && bar.parentElement;
+    if (wrap) {
+      wrap.classList.toggle('danger', hp > 0 && hp <= 0.25);
+      if (hp < (hudGhost.last[f.id] ?? 1) - 1e-4) {
+        wrap.classList.remove('flash'); void wrap.offsetWidth; wrap.classList.add('flash');
+      }
+    }
+    hudGhost.last[f.id] = hp;
+    const gEl = document.getElementById(gid);
+    if (gEl) {
+      if (hp < hudGhost[f.id] - 1e-4) {
+        if (hudGhost.hitAt[f.id] < 0) hudGhost.hitAt[f.id] = now;
+        if (now - hudGhost.hitAt[f.id] > 0.45) hudGhost[f.id] = Math.max(hp, hudGhost[f.id] - dt * 0.6);
+      } else {
+        hudGhost[f.id] = hp;
+        hudGhost.hitAt[f.id] = -1;
+      }
+      gEl.style.transform = `scaleX(${hudGhost[f.id]})`;
+    }
+  }
+  const vig = document.getElementById('vignette');
+  if (vig) vig.classList.toggle('hurt', p1.health > 0 && p1.health <= max * 0.25 && !match.over && match.phase === 'fight');
   syncPartHud(p1, document.getElementById('parts1'));
   syncPartHud(p2, document.getElementById('parts2'));
 }
@@ -3898,6 +3960,9 @@ function resetMatch(keepDebris = false) {
     f.stateT = 0;
     f.cooldown = 0;
     f.invuln = 0;
+    f.chain = 0;
+    f.chainHit = false;
+    f.lastPunchAt = null;
     f.blocking = false;
     f.hitThisAttack = false;
     f.shield.visible = false;
@@ -3950,6 +4015,7 @@ function resetMatch(keepDebris = false) {
   match.orbitT = 0;
   match.overlayAt = 0;
   held.buf = null;
+  resetHudGhost();
   paintRound();
   const banner = document.getElementById('banner');
   banner.style.opacity = '';
@@ -3985,6 +4051,8 @@ function tick() {
   p1.isCpu = watch;
   const pin = canAct ? (watch ? updateAI(p1, p2, dt) : consumeAttacks(rawInput(), dt)) : consumeAttacks({ sidestep: 0, inout: 0, punch: false, kick: false, block: false }, 1);
   const ain = canAct ? updateAI(p2, p1, dt) : { sidestep: 0, inout: 0, punch: false, kick: false, block: false };
+  tapped.clear();
+  shellCall('clearTapped');
 
   const p1Was = p1.state;
   stepFighter(p1, p2, pin, dt);
@@ -4030,7 +4098,7 @@ function tick() {
   updateFighterRims();
   hitLight.intensity = Math.max(0, hitLight.intensity - dt * 28);
   setBuzz(isSettingsOpen() ? 0 : buzzFromFighters());
-  syncHud();
+  syncHud(dt);
   updateStadium(dt); // [stadium-arena hook]
   renderer.render(scene, camera);
 }
@@ -4054,6 +4122,8 @@ function startFightFromShell(opts) {
   if (opts.p2) applyFighterConfig(p2, opts.p2);
   if (opts.round != null) match.roundIndex = opts.round;
   if (opts.roundTime != null) match.roundTimeOverride = opts.roundTime;
+  // Shell owns best-of-N rounds; stash opts.bestOf so getFightState can report it if no shell match is running.
+  if (opts.bestOf === 1 || opts.bestOf === 3 || opts.bestOf === 5) match.bestOf = opts.bestOf;
   if (opts.onEnd) onFightEnd(opts.onEnd);
   // Round 2+ of the same match: the wreckage of earlier rounds stays on the mat.
   resetMatch(opts.round != null && opts.round > 1);
@@ -4074,6 +4144,11 @@ function startFightFromShell(opts) {
 
 function getFightState() {
   if (!p1 || !p2) return { ready: false };
+  const sh = window.RFShell && window.RFShell.match;
+  const wins = (sh && sh.wins)
+    ? { p1: sh.wins[0] || 0, p2: sh.wins[1] || 0 }
+    : (match.wins || { p1: 0, p2: 0 });
+  const bestOf = (sh && sh.bestOf) || match.bestOf || 1;
   return {
     ready: true,
     phase: match.phase,
@@ -4081,6 +4156,8 @@ function getFightState() {
     winner: match.winner,
     roundIndex: match.roundIndex,
     roundLeft: match.roundLeft,
+    bestOf,
+    wins,
     p1: { health: p1.health, state: p1.state, config: p1.config },
     p2: { health: p2.health, state: p2.state, config: p2.config },
   };

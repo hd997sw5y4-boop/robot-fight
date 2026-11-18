@@ -36,6 +36,7 @@
     onReady(h) { handle = h; tryReady(); },
     input(side) { return S.inputFor ? S.inputFor(side) : null; },
     cpuControls(side) { return !!(S.match && S.match.cfg && S.match.cfg.mode === 'watch' && side === 'p1'); },
+    clearTapped() { if (S.clearTapped) S.clearTapped(); },
   };
   const modUrl = (p) => new URL(p, document.baseURI).href;
   Promise.all([import(modUrl('js/api.js')), import(modUrl('js/audio.js'))]).then(([fight, audio]) => {
@@ -60,7 +61,10 @@
 
   /* ---------- keyboard ---------- */
   const down = new Set();
+  const tapped = new Set();
   S.keyDown = (code) => down.has(code);
+  S.keyTapped = (code) => tapped.has(code);
+  S.clearTapped = () => tapped.clear();
   const NAV = {
     ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down',
     ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
@@ -70,6 +74,7 @@
 
   window.addEventListener('keydown', (e) => {
     down.add(e.code);
+    if (!e.repeat) tapped.add(e.code);
     if (S.settingsOpen()) return; // the settings sheet owns keys while open
     if (e.target && /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
     if (S.menuActive && S.menuActive()) {
@@ -92,7 +97,8 @@
     }
   }, true);
   window.addEventListener('keyup', (e) => down.delete(e.code), true);
-  window.addEventListener('blur', () => down.clear());
+  window.addEventListener('blur', () => { down.clear(); tapped.clear(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { down.clear(); tapped.clear(); } });
 
   /* ---------- gamepads ---------- */
   S.pads = () => {

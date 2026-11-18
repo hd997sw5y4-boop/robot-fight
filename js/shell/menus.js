@@ -252,10 +252,17 @@
     training: ['Training', 'Dummy · no timer'],
     watch: ['Bot vs Bot', 'Watch two CPUs · best of 3'],
   };
+  function modeInfo(mode) {
+    const row = MODE_INFO[mode] || ['', ''];
+    if (mode === 'training' || mode === 'arcade') return row;
+    const n = (S.bestOf && S.bestOf(true)) || 3;
+    const tag = n === 1 ? 'single round' : 'best of ' + n;
+    return [row[0], row[1].replace(/best of \d+|single round/, tag)];
+  }
   function openSelect(mode) {
     if (S.fighterSelect && S.fighterSelect.open(mode)) return; // [fighter-select hook] new select screen
     S.state.mode = mode;
-    const [title, sub] = MODE_INFO[mode];
+    const [title, sub] = modeInfo(mode);
     let right = '';
     if (mode === 'versus') right = paintPanel('p2', 'Player 2');
     else if (mode === 'fight' || mode === 'watch') {
@@ -361,7 +368,7 @@
   }
 
   // [fighter-select hook] shared choices + start, used by js/shell/fighter-select.js.
-  S.selectHooks = { sel, MODE_INFO, fromPreset, paintName, setPaint, previewSelect, start: startFromSelect };
+  S.selectHooks = { sel, MODE_INFO, modeInfo, fromPreset, paintName, setPaint, previewSelect, start: startFromSelect };
 
   /* ---------- arcade ---------- */
   function renderLadder() {

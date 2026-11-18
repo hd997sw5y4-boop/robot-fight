@@ -26,10 +26,11 @@
   <canvas id="c"></canvas>
   <div id="loader"><div class="spin">Loading Robot Fight<div class="barline"><i id="loadbar"></i></div></div></div>
   <div id="hud">
+    <div id="vignette"></div>
     <div id="top">
       <div class="fighter-hud">
         <div class="name" id="n1">BLUE</div>
-        <div class="bar blue"><i id="hp1"></i></div>
+        <div class="bar blue"><b id="ghost1"></b><i id="hp1"></i></div>
         <div class="parts" id="parts1">
           <i data-part="head" title="Head"></i>
           <i data-part="torso" title="Torso"></i>
@@ -55,7 +56,7 @@
       </div>
       <div class="fighter-hud right">
         <div class="name" id="n2">RED</div>
-        <div class="bar red"><i id="hp2"></i></div>
+        <div class="bar red"><b id="ghost2"></b><i id="hp2"></i></div>
         <div class="parts" id="parts2">
           <i data-part="head" title="Head"></i>
           <i data-part="torso" title="Torso"></i>
@@ -160,6 +161,13 @@
             <option value="60">60 seconds</option>
             <option value="90">90 seconds</option>
             <option value="120">120 seconds</option>
+          </select>
+        </label>
+        <label>Match
+          <select id="setMatch">
+            <option value="1">Single round</option>
+            <option value="3">Best of 3</option>
+            <option value="5">Best of 5</option>
           </select>
         </label>
         <label>Auto rematch (Bot vs Bot) <input type="checkbox" id="setAutoRematch"></label>

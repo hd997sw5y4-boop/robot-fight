@@ -109,10 +109,14 @@
     if (anyDown(map.r)) inp.sidestep += 1;
     if (anyDown(map.u)) inp.inout += 1;
     if (anyDown(map.d)) inp.inout -= 1;
-    inp.punch = inp.punch || anyDown(map.punch);
-    inp.kick = inp.kick || anyDown(map.kick);
+    const anyTap = (codes) => !!(S.keyTapped && codes.some(S.keyTapped));
+    inp.tapPunch = anyTap(map.punch);
+    inp.tapKick = anyTap(map.kick);
+    inp.tapGround = anyTap(map.ground || []);
+    inp.punch = inp.punch || anyDown(map.punch) || inp.tapPunch;
+    inp.kick = inp.kick || anyDown(map.kick) || inp.tapKick;
     inp.block = inp.block || anyDown(map.block);
-    inp.ground = inp.ground || anyDown(map.ground || []);
+    inp.ground = inp.ground || anyDown(map.ground || []) || inp.tapGround;
     inp.run = inp.run || anyDown(map.run || []);
     inp.sidestep = Math.max(-1, Math.min(1, inp.sidestep));
     inp.inout = Math.max(-1, Math.min(1, inp.inout));
@@ -133,11 +137,14 @@
     if (m.mode === 'versus') {
       const map = side === 'p1' ? P1K : P2K;
       const inp = readSide(map, S.padFor(side));
-      if (side === 'p1') return inp; // the game edge-detects P1 attacks itself
-      const out = { ...inp, punch: inp.punch && !p2Held.punch, kick: inp.kick && !p2Held.kick, ground: inp.ground && !p2Held.ground };
-      p2Held.punch = inp.punch;
-      p2Held.kick = inp.kick;
-      p2Held.ground = inp.ground;
+      if (side === 'p1') return inp; // the game edge-detects P1 attacks itself (and honors tap* flags)
+      const punch = inp.punch || inp.tapPunch;
+      const kick = inp.kick || inp.tapKick;
+      const ground = inp.ground || inp.tapGround;
+      const out = { ...inp, punch: punch && !p2Held.punch, kick: kick && !p2Held.kick, ground: ground && !p2Held.ground };
+      p2Held.punch = punch;
+      p2Held.kick = kick;
+      p2Held.ground = ground;
       return out;
     }
     if (m.mode === 'watch') return null; // both robots run on the CPU brain
