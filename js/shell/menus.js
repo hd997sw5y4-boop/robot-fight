@@ -33,7 +33,7 @@
     <li><kbd>J</kbd> <span>punch</span> <kbd>K</kbd> <span>kick</span> <kbd>L</kbd> <span>block</span></li>
     <li><kbd>I</kbd> <span>stomp / ground punch a downed robot</span></li>
     <li>Hold <kbd>Shift</kbd> <span>run forward / back</span></li>
-    <li><kbd>V</kbd> <span>camera view: arena, 3rd person, 1st person</span></li>
+    <li><kbd>V</kbd> <span>camera view: arena, fighting, 3rd person, 1st person</span></li>
     <li><kbd>Esc</kbd> / <kbd>P</kbd> <span>pause</span></li>
     <li>Mouse drag <span>spin camera</span> · wheel <span>zoom</span> · double-click <span>reset view</span></li>`;
   const KEYS_P1 = '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>F</kbd> punch · <kbd>G</kbd> kick · <kbd>H</kbd> block · <kbd>T</kbd> ground attack · hold <kbd>Left Shift</kbd> run';
@@ -76,7 +76,7 @@
       <aside class="rfs-card rfs-controls" aria-label="Controls">
         <h3>Controls</h3>
         <h4>Solo</h4><ul>${KEYS_SOLO}</ul>
-        <h4>Versus</h4><ul><li><em>P1</em> ${KEYS_P1}</li><li><em>P2</em> ${KEYS_P2}</li><li><kbd>V</kbd> camera view (arena, 3rd person, 1st person)</li><li>Gamepad 1 → P1, gamepad 2 → P2</li></ul>
+        <h4>Versus</h4><ul><li><em>P1</em> ${KEYS_P1}</li><li><em>P2</em> ${KEYS_P2}</li><li><kbd>V</kbd> camera view (arena, fighting, 3rd person, 1st person)</li><li>Gamepad 1 → P1, gamepad 2 → P2</li></ul>
         <h4>Gamepad</h4><ul>${PAD}</ul>
         <h4>Menus</h4><ul><li>Arrows / WASD / D-pad · <kbd>Enter</kbd> or <kbd>A</kbd> select · <kbd>Esc</kbd> or <kbd>B</kbd> back</li></ul>
       </aside>
@@ -200,6 +200,8 @@
     if (!b || !root.contains(b)) return;
     S.sfx('click');
     const act = b.dataset.act;
+    cancelAutoRematch();
+    if (act === 'cancelAuto') return;
     if (act === 'start') S.showScreen('main');
     else if (act === 'mode') openSelect(b.dataset.mode);
     else if (act === 'settings') S.openSettings();
@@ -432,7 +434,41 @@
     delete lastFocus.results;
     S.sfx(w === 0 || mode === 'versus' ? 'ko' : 'click');
     setTimeout(() => S.showScreen('results'), 250);
+    if (mode === 'watch' && autoRematchOn()) startAutoRematch();
   });
+
+  /* ---------- auto rematch (Bot vs Bot, Settings > Fight, off by default) ---------- */
+  const AUTO_SECS = 6;
+  let autoTimer = null;
+  function autoRematchOn() {
+    try { return localStorage.getItem('rf_autorematch') === '1'; } catch (_) { return false; }
+  }
+  function cancelAutoRematch() {
+    if (autoTimer) clearInterval(autoTimer);
+    autoTimer = null;
+    const el = S.$('.rfs-auto', resultsEl);
+    if (el) el.remove();
+  }
+  function startAutoRematch() {
+    cancelAutoRematch();
+    const box = S.$('.rfs-results', resultsEl);
+    if (!box) return;
+    const p = document.createElement('p');
+    p.className = 'rfs-auto rfs-sub';
+    p.innerHTML = 'Next match in <b>' + AUTO_SECS + '</b>s <button type="button" class="rfs-f rfs-btn rfs-small" data-act="cancelAuto">Cancel</button>';
+    box.appendChild(p);
+    let left = AUTO_SECS;
+    autoTimer = setInterval(() => {
+      if (S.state.paused || document.hidden) return; // hold while paused or in another tab
+      left -= 1;
+      const b2 = p.querySelector('b');
+      if (b2) b2.textContent = String(Math.max(0, left));
+      if (left <= 0) {
+        cancelAutoRematch();
+        if (S.match && S.match.phase === 'match-end' && autoRematchOn()) { S.state.paused = false; S.restartMatch(); }
+      }
+    }, 1000);
+  }
 
   function renderEnding() {
     const a = S.arcade;

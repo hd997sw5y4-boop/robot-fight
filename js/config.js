@@ -188,14 +188,14 @@ export const DAMAGE = {
   // Smaller breakables inside the limbs. `root` = normalized bone names; every bone below them
   // belongs to the sub-part (deepest sub-part wins). They break off as their own debris.
   sub: {
-    handL: { parent: 'armL', hp: 30, label: 'Left hand', root: ['lefthand'] },
-    thumbL: { parent: 'handL', hp: 9, label: 'Left thumb', root: ['lefthandthumb1'] },
-    fingersL: { parent: 'handL', hp: 10, label: 'Left index + middle', root: ['lefthandindex1', 'lefthandmiddle1'] },
-    fingersL2: { parent: 'handL', hp: 10, label: 'Left ring + pinky', root: ['lefthandring1', 'lefthandpinky1'] },
-    handR: { parent: 'armR', hp: 30, label: 'Right hand', root: ['righthand'] },
-    thumbR: { parent: 'handR', hp: 9, label: 'Right thumb', root: ['righthandthumb1'] },
-    fingersR: { parent: 'handR', hp: 10, label: 'Right index + middle', root: ['righthandindex1', 'righthandmiddle1'] },
-    fingersR2: { parent: 'handR', hp: 10, label: 'Right ring + pinky', root: ['righthandring1', 'righthandpinky1'] },
+    handL: { parent: 'armL', hp: 20, label: 'Left hand', root: ['lefthand'] },
+    thumbL: { parent: 'handL', hp: 6, label: 'Left thumb', root: ['lefthandthumb1'] },
+    fingersL: { parent: 'handL', hp: 6, label: 'Left index + middle', root: ['lefthandindex1', 'lefthandmiddle1'] },
+    fingersL2: { parent: 'handL', hp: 6, label: 'Left ring + pinky', root: ['lefthandring1', 'lefthandpinky1'] },
+    handR: { parent: 'armR', hp: 20, label: 'Right hand', root: ['righthand'] },
+    thumbR: { parent: 'handR', hp: 6, label: 'Right thumb', root: ['righthandthumb1'] },
+    fingersR: { parent: 'handR', hp: 6, label: 'Right index + middle', root: ['righthandindex1', 'righthandmiddle1'] },
+    fingersR2: { parent: 'handR', hp: 6, label: 'Right ring + pinky', root: ['righthandring1', 'righthandpinky1'] },
     footL: { parent: 'legL', hp: 32, label: 'Left foot', root: ['leftfoot'] },
     toesL: { parent: 'footL', hp: 12, label: 'Left toes', root: ['lefttoebase'] },
     footR: { parent: 'legR', hp: 32, label: 'Right foot', root: ['rightfoot'] },
@@ -203,7 +203,9 @@ export const DAMAGE = {
   },
   subOrder: ['handL', 'thumbL', 'fingersL', 'fingersL2', 'handR', 'thumbR', 'fingersR', 'fingersR2', 'footL', 'toesL', 'footR', 'toesR'],
   oil: { maxDrops: 140, maxPuddles: 36, puddleMaxR: 0.42 },
-  dent: { radius: 0.32, depth: 0.085, maxDepth: 0.22, colorDarken: 0.7 },
+  dent: { radius: 0.32, depth: 0.085, maxDepth: 0.22, colorDarken: 0.7,
+    // Per-part scaling: head dents go deeper, wider and darker, and show from the first hits.
+    part: { head: { depth: 1.9, radius: 1.15, maxDepth: 1.15, darken: 1.35, min: 0.7 } } },
   heavySmoke: 0.5,
   punchArm: 'armR',
 };

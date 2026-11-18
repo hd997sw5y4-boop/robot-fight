@@ -194,13 +194,13 @@ body.rfs-on .rfs-timer { display: block; }
 @keyframes rfs-blink { 50% { opacity: .55; } }
 
 .rfs-call {
-  position: fixed; inset: 0; z-index: 9; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  position: fixed; left: 0; right: 0; top: clamp(96px, 15vh, 150px); z-index: 9; display: flex; flex-direction: column; align-items: center;
   pointer-events: none; opacity: 0; transition: opacity .25s ease;
 }
 .rfs-call.on { opacity: 1; }
 body.rfs-dimmed .rfs-call { opacity: 0; }
 .rfs-call b {
-  font: 800 clamp(54px, 9vw, 124px)/1 var(--ww-font); letter-spacing: .14em; text-transform: uppercase; color: #fff;
+  font: 800 clamp(40px, 6.2vw, 88px)/1 var(--ww-font); letter-spacing: .14em; text-transform: uppercase; color: #fff;
   text-shadow: 0 0 28px rgba(126,148,255,.65), 0 8px 26px #000;
 }
 .rfs-call span { margin-top: 12px; font: 600 clamp(14px, 1.6vw, 20px) var(--ww-font); letter-spacing: .2em; text-transform: uppercase; color: #dfe4ff; text-shadow: 0 2px 10px #000; }

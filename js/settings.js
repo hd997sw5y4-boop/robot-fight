@@ -20,10 +20,11 @@ const KEYS = {
   light: 'rf_light',
   hdri: 'rf_hdri',
   cam: 'rf_cam',
+  autoRematch: 'rf_autorematch',
 };
 
 // Camera views, in the order the V key cycles them. 'arena' is the original orbit camera.
-export const CAM_MODES = ['arena', 'third', 'first'];
+export const CAM_MODES = ['arena', 'fighting', 'third', 'first'];
 
 const defaults = {
   gfx: 'high',
@@ -40,6 +41,7 @@ const defaults = {
   light: 1,
   hdri: true,
   cam: 'arena',
+  autoRematch: false, // Bot vs Bot: start the next match by itself after the results
 };
 
 function read() {
@@ -73,6 +75,7 @@ function read() {
     if (hdri != null) s.hdri = hdri === '1';
     const cam = localStorage.getItem(KEYS.cam);
     if (CAM_MODES.includes(cam)) s.cam = cam;
+    s.autoRematch = localStorage.getItem(KEYS.autoRematch) === '1';
   } catch (_) {}
   return s;
 }
@@ -93,6 +96,7 @@ function write(s) {
     localStorage.setItem(KEYS.light, String(s.light));
     localStorage.setItem(KEYS.hdri, s.hdri ? '1' : '0');
     localStorage.setItem(KEYS.cam, s.cam);
+    localStorage.setItem(KEYS.autoRematch, s.autoRematch ? '1' : '0');
   } catch (_) {}
 }
 
@@ -150,6 +154,8 @@ function paint() {
   if (hdriEl) hdriEl.checked = !!settings.hdri;
   const camEl = $('setCam');
   if (camEl) camEl.value = settings.cam;
+  const arEl = $('setAutoRematch');
+  if (arEl) arEl.checked = !!settings.autoRematch;
   applyChrome();
 }
 
@@ -276,6 +282,10 @@ export function initSettings(nextHooks) {
   });
   document.getElementById('setRound')?.addEventListener('change', (e) => {
     settings.round = +e.target.value;
+    persist();
+  });
+  document.getElementById('setAutoRematch')?.addEventListener('change', (e) => {
+    settings.autoRematch = e.target.checked;
     persist();
   });
   document.getElementById('setControls')?.addEventListener('change', (e) => {

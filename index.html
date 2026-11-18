@@ -105,6 +105,7 @@
         <label>Camera view
           <select id="setCam">
             <option value="arena">Arena (default)</option>
+            <option value="fighting">Fighting (side-on)</option>
             <option value="third">3rd person (behind P1)</option>
             <option value="first">1st person (P1 visor)</option>
           </select>
@@ -153,6 +154,29 @@
             <option value="120">120 seconds</option>
           </select>
         </label>
+        <label>Auto rematch (Bot vs Bot) <input type="checkbox" id="setAutoRematch"></label>
+      </section>
+      <section class="mcat">
+        <h3>AI API Brain</h3>
+        <label>Use an AI API brain <input type="checkbox" id="aiOn"></label>
+        <label>Provider
+          <select id="aiProvider">
+            <option value="xai">xAI Grok</option>
+            <option value="openai">OpenAI</option>
+            <option value="custom">Other OpenAI-compatible</option>
+          </select>
+        </label>
+        <label>Base URL <input type="url" id="aiBase" autocomplete="off" spellcheck="false"></label>
+        <label>Model <input type="text" id="aiModel" autocomplete="off" spellcheck="false"></label>
+        <label>API key <input type="password" id="aiKey" autocomplete="off" spellcheck="false"> <button type="button" id="aiClear">Clear</button></label>
+        <label>P1 brain (Bot vs Bot)
+          <select id="aiBrainP1"><option value="cpu">CPU</option><option value="api">API</option></select>
+        </label>
+        <label>P2 brain
+          <select id="aiBrainP2"><option value="cpu">CPU</option><option value="api">API</option></select>
+        </label>
+        <p class="hint" id="aiNote"></p>
+        <p class="hint">The key stays in this browser (localStorage) and is sent only to the endpoint above. About two requests a second per API robot; on any error or slow reply the built-in CPU brain takes over.</p>
       </section>
       <section class="mcat">
         <h3>Controls</h3>
@@ -165,7 +189,7 @@
               <li><kbd>W</kbd> / <kbd>S</kbd> or arrows — in / out</li>
               <li><kbd>J</kbd> punch · <kbd>K</kbd> kick · <kbd>L</kbd> block</li>
               <li><kbd>I</kbd> stomp / ground punch on a downed robot</li>
-              <li><kbd>V</kbd> cycle camera view: arena, 3rd person, 1st person</li>
+              <li><kbd>V</kbd> cycle camera view: arena, fighting, 3rd person, 1st person</li>
               <li><kbd>Esc</kbd> open or close this panel</li>
             </ul>
           </div>

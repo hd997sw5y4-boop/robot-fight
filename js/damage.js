@@ -2,6 +2,7 @@ import { playSfx } from './audio.js';
 import { spawnDebris, clearPhysicsDebris, PART_MASS, stepPhysics } from './physics.js';
 import * as THREE from 'three';
 import { DAMAGE, ARENA } from './config.js';
+import { addWires, clearWires, stepWires } from './wires.js';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -278,6 +279,10 @@ function detachSub(f, sub, dir, scene) {
   }
   playSfx('tear');
   emitSparks(at, d, 12);
+  if ((sub.id.startsWith('hand') || sub.id.startsWith('foot')) && sub.stump) {
+    addWires(sub.stump, scene, { onSpark: (p) => emitSparks(p, _v.set(0, -1, 0), 4) });
+    if (pivot) addWires(pivot, scene, { piece: true });
+  }
   sprayOil(at, d, sub.id.startsWith('hand') || sub.id.startsWith('foot') ? 18 : 9);
 }
 
@@ -492,7 +497,7 @@ export function pickHit(atk, def, kind, towardFn) {
   return { partId: bestId, point, dir: fwd.clone() };
 }
 
-function dentMesh(mesh, worldPoint, worldDir, amount, partCode) {
+function dentMesh(mesh, worldPoint, worldDir, amount, partCode, pm = null) {
   const pos = mesh.geometry.attributes.position;
   const col = mesh.geometry.attributes.color;
   const rest = mesh.userData.restPos;
@@ -506,9 +511,10 @@ function dentMesh(mesh, worldPoint, worldDir, amount, partCode) {
   else localDir.normalize();
   mesh.getWorldScale(_v);
   const scale = Math.max(_v.x, 0.08);
-  const radius = DAMAGE.dent.radius / scale;
-  const depth = (DAMAGE.dent.depth * amount) / scale;
-  const maxDepth = DAMAGE.dent.maxDepth / scale;
+  const radius = (DAMAGE.dent.radius * (pm ? pm.radius : 1)) / scale;
+  const depth = (DAMAGE.dent.depth * (pm ? pm.depth : 1) * amount) / scale;
+  const maxDepth = (DAMAGE.dent.maxDepth * (pm ? pm.maxDepth : 1)) / scale;
+  const darken = Math.min(0.92, DAMAGE.dent.colorDarken * (pm ? pm.darken : 1));
   const hidden = mesh.userData.hiddenVerts;
   for (let i = 0; i < pos.count; i++) {
     if (hidden && hidden[i]) continue;
@@ -527,7 +533,7 @@ function dentMesh(mesh, worldPoint, worldDir, amount, partCode) {
     if (push <= 0 && falloff < 0.05) continue;
     pos.setXYZ(i, vx + localDir.x * push, vy + localDir.y * push, vz + localDir.z * push);
     if (col) {
-      const dark = 1 - DAMAGE.dent.colorDarken * falloff * Math.min(amount, 1.4);
+      const dark = 1 - darken * falloff * Math.min(amount, 1.4);
       col.setXYZ(i, col.getX(i) * dark, col.getY(i) * dark * 0.92, col.getZ(i) * dark * 0.78);
     }
   }
@@ -538,9 +544,11 @@ function dentMesh(mesh, worldPoint, worldDir, amount, partCode) {
 
 function dentPart(part, worldPoint, worldDir, amount) {
   const code = DAMAGE.order.indexOf(part.id) + 1;
+  const pm = (DAMAGE.dent.part && DAMAGE.dent.part[part.id]) || null;
+  if (pm && pm.min) amount = Math.max(pm.min, amount);
   for (const mesh of part.meshes.concat(part.skinned)) {
     if (!mesh.visible || mesh.userData.hiddenPart) continue;
-    dentMesh(mesh, worldPoint, worldDir, amount, mesh.userData.vertPart ? code : 0);
+    dentMesh(mesh, worldPoint, worldDir, amount, mesh.userData.vertPart ? code : 0, pm);
   }
 }
 
@@ -726,6 +734,9 @@ function detachPart(f, part, dir, scene) {
   part.lostT = 0;
   if (f.subs) for (const sub of Object.values(f.subs)) if (sub.limb === part.id) sub.detached = true;
   emitSparks(pivot.position, impulse, 22);
+  const sparkAt = (p) => emitSparks(p, _v.set(0, -1, 0), 5);
+  if (part.stump) addWires(part.stump, scene, { onSpark: sparkAt });
+  addWires(pivot, scene, { piece: true });
   if (part.stump) sprayOil(part.stump.getWorldPosition(new THREE.Vector3()), impulse.clone().negate(), 26);
 }
 
@@ -932,7 +943,11 @@ export function applyPartHit(f, partId, damage, point, dir, scene, opts = {}) {
   const amount = opts.blocked ? 0.45 : 1;
   const dmg = Math.max(1, Math.round(damage * amount));
   const force = opts.force != null ? opts.force : (dmg / 8);
+  const hpBefore = part.hp;
   part.hp = Math.max(0, part.hp - dmg);
+  // The head comes off only once it is already badly beaten (at or under half health before
+  // the blow): never in a single hit from a healthy head.
+  if (partId === 'head' && part.hp <= 0 && hpBefore > part.max * 0.5) part.hp = 1;
   part.wear = (part.wear || 0) + force;
   const dentAmt = (opts.blocked ? 0.4 : 1) * Math.min(2.6, (0.4 + force * 0.32) * (1 + Math.min(1.2, part.wear * 0.08)));
   dentPart(part, point, dir, dentAmt);
@@ -957,7 +972,7 @@ export function applyPartHit(f, partId, damage, point, dir, scene, opts = {}) {
     const id = (partId.startsWith('arm') ? 'hand' : 'foot') + partId.slice(-1);
     const sub = f.subs[id];
     if (sub && !sub.detached && point && subWorldPos(sub, _v2).distanceTo(point) < 0.38) {
-      damageSub(f, sub, dmg * (opts.blocked ? 1.1 : 0.75), dir, scene);
+      damageSub(f, sub, dmg * (opts.blocked ? 1.2 : 0.95), dir, scene);
     }
   }
   if (!part.detached && (1 - part.hp / part.max) > 0.5) emitOil(point, dir, 2, 0.6);
@@ -966,6 +981,7 @@ export function applyPartHit(f, partId, damage, point, dir, scene, opts = {}) {
 
 export function stepDamage(scene, dt) {
   addSparkScene(scene);
+  stepWires(dt);
   stepOil(scene, dt);
   const floor = ARENA.floorY + 0.02;
   for (const d of debrisList) {
@@ -1203,6 +1219,7 @@ function restoreMesh(mesh) {
 
 export function clearAllDebris(scene) {
   clearPhysicsDebris();
+  clearWires();
   for (const d of debrisList) {
     d.obj.traverse((o) => {
       if (o.isMesh && o.geometry && !o.userData.deformReady) {
