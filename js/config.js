@@ -27,7 +27,7 @@ export const MODEL = {
     flipSpecial: ['FlipKick', 'ChapaGiratoria', 'BackFlipToUppercut', 'SpinFlipKick', 'MeiaLuaDeCompasso'],
     // Airborne moves: the root holds the clip's own height (no grounding pull) until landing.
     jumpKicks: ['FlipKick', 'SpinFlipKick'],
-    dodgeBack: 'Backflip',
+    dodgeBack: null, // 'Backflip' removed (lands on its hands and crawls back up: read as climbing)
     dodgeFront: 'FrontFlip',
     victory: 'Victory',
     victoryVariants: ['Victory', 'VictoryIdle', 'Taunt'],
@@ -132,7 +132,7 @@ export const COMBAT = {
   downRest: 0.85,      // seconds lying still before getting up (same every time: robots don't tire)
   downMax: 4.2,        // safety: get up by this long after the knockdown started
   getupTime: 1.25,     // the GettingUp clip is played over about this long
-  // Flips (O back flip, P front flip, U jump kick; pad RB flip, R3 jump kick).
+  // Flips (Y front flip, U jump kick; pad RB+toward front flip, R3 jump kick). No back flip.
   dodge: {
     back: 1.75 * SIZE,      // metres a back flip carries the robot away
     frontPast: 1.0 * SIZE,  // a front flip lands this far beyond the opponent (when there's room)

@@ -1608,7 +1608,6 @@ function rawInput() {
   inp.block = keys.has('l');
   inp.ground = keys.has('i');
   inp.run = keys.has('shift');
-  inp.flipBack = keys.has('o');
   inp.flipFront = keys.has('y'); // (P is pause)
   inp.jumpKick = keys.has('u');
 
@@ -1625,8 +1624,8 @@ function rawInput() {
     if (gp.buttons[0]?.pressed) inp.punch = true;
     if (gp.buttons[1]?.pressed) inp.kick = true;
     if (gp.buttons[3]?.pressed) inp.ground = true;
-    // RB flips (back flip, or front flip while pushing toward the opponent); R3 jump kick.
-    if (gp.buttons[5]?.pressed) { if (inp.inout > 0.5) inp.flipFront = true; else inp.flipBack = true; }
+    // RB + toward the opponent: front flip; R3 jump kick.
+    if (gp.buttons[5]?.pressed && inp.inout > 0.5) inp.flipFront = true;
     if (gp.buttons[11]?.pressed) inp.jumpKick = true;
     if (gp.buttons[2]?.pressed || gp.buttons[4]?.pressed || gp.buttons[7]?.pressed) {
       inp.block = true;
@@ -2897,8 +2896,7 @@ function intentToInput(f, opp, intent) {
     inp.block = true;
     inp.blockClip = f._aiBlockClip || (f._aiBlockClip = pickBlock(f, opp));
   } else f._aiBlockClip = null;
-  if (intent.dodge === 'back') inp.flipBack = true;
-  else if (intent.dodge === 'front') inp.flipFront = true;
+  if (intent.dodge === 'front') inp.flipFront = true;
   if (intent.attack === 'ground') inp.ground = true;
   else if (intent.attack === 'jump') inp.jumpKick = true;
   else if (intent.attack === 'punch' && punchClipsFor(f).length) {
@@ -3092,7 +3090,6 @@ function stepFighter(f, other, inp, dt) {
     return;
   }
   if (inp.ground && tryGroundAttack(f, other)) return;
-  if (inp.flipBack && tryDodge(f, other, 'back')) return;
   if (inp.flipFront && tryDodge(f, other, 'front')) return;
   if (inp.jumpKick && tryJumpKick(f, other)) return;
   if (inp.punch) tryAttack(f, 'punch', inp.punchClip);

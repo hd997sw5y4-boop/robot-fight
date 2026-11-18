@@ -165,12 +165,6 @@ export function createPacedBrain(getProfile) {
       if (s.seenAttackT < 0) { s.seenAttackT = s.t; s.guardDecided = false; }
       if (!s.guardDecided && s.t - s.seenAttackT >= reactDelay + reactLag) {
         s.guardDecided = true;
-        // Heavy strike coming: sometimes back-flip clear of it (harder CPUs more often).
-        if (opp.heavy && self.canFlip && self.edge < 0.8 && Math.random() < (prof.dodge != null ? prof.dodge : 0.1)) {
-          intent.dodge = 'back';
-          setMode('reset', 0.5);
-          return intent;
-        }
         const r = Math.random();
         if (r < react && self.canBlock) s.guardUntil = s.t + 0.45;
         else if (r < react + (1 - react) * 0.3) setMode('reset', 0.35);

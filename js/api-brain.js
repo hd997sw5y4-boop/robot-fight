@@ -11,7 +11,7 @@
  * ships with the game and nothing is sent anywhere except the endpoint the user picks.
  */
 
-export const AI_ACTIONS = ['approach', 'retreat', 'circle_left', 'circle_right', 'punch', 'kick', 'jump_kick', 'flip_back', 'flip_front', 'block', 'ground', 'wait'];
+export const AI_ACTIONS = ['approach', 'retreat', 'circle_left', 'circle_right', 'punch', 'kick', 'jump_kick', 'flip_front', 'block', 'ground', 'wait'];
 
 export const AI_PROVIDERS = {
   // grok-4.3 with reasoning off is xAI's fast current model (grok-3-mini and the old fast slugs
@@ -53,8 +53,8 @@ export function wantsApiBrain(id) {
 const SYSTEM = 'You control one heavy humanoid robot in a 3D fighting game. Each message is the current '
   + 'state as JSON (distances in metres, health 0-100, parts 0-1 health, 0 means torn off). Reply with JSON '
   + '{"action":"<one of: ' + AI_ACTIONS.join(', ') + '>"} and nothing else. Punch lands within strikeRange.punch, '
-  + 'kick within strikeRange.kick; ground only works when opp.groundable is true; block when the opponent attacks; flip_back dodges a heavy strike '
-  + '(only when self.canFlip); flip_front flips over or toward the opponent; jump_kick is a flying kick (needs canFlip).';
+  + 'kick within strikeRange.kick; ground only works when opp.groundable is true; block when the opponent attacks; '
+  + 'flip_front (only when self.canFlip) flips over or toward the opponent; jump_kick is a flying kick (needs canFlip).';
 
 function compact(s) {
   const r2 = (v) => Math.round(v * 100) / 100;
@@ -136,7 +136,6 @@ function actionIntent(a) {
   else if (a === 'circle_right') it.strafe = 1;
   else if (a === 'punch' || a === 'kick' || a === 'ground') it.attack = a;
   else if (a === 'jump_kick') it.attack = 'jump';
-  else if (a === 'flip_back') it.dodge = 'back';
   else if (a === 'flip_front') it.dodge = 'front';
   else if (a === 'block') it.block = true;
   return it;
