@@ -1,4 +1,5 @@
 'use strict';
+import { SIZE } from './config.js';
 /*
  * Fighter brains. A brain turns a compact state snapshot into an intent:
  *
@@ -71,7 +72,8 @@ export function createPacedBrain(getProfile) {
     // A damaged head (optics) slows reactions and makes range judgement wobble.
     const headDmg = self.parts && self.parts.head != null ? Math.max(0, 1 - self.parts.head) : 0;
     const blur = Math.max(0, headDmg - 0.4);
-    const dist = snap.dist + Math.sin(s.t * 2.3) * blur * 0.45;
+    // Distances are judged in base-size units (robot size scales every spacing by SIZE).
+    const dist = snap.dist / SIZE + Math.sin(s.t * 2.3) * blur * 0.45;
     const reactLag = blur * 0.4;
     s.t += snap.dt;
     s.modeT += snap.dt;
@@ -89,8 +91,8 @@ export function createPacedBrain(getProfile) {
 
     if (!self.canAct) return intent;
 
-    const punchR = snap.strikeRange.punch;
-    const kickR = snap.strikeRange.kick;
+    const punchR = snap.strikeRange.punch / SIZE;
+    const kickR = snap.strikeRange.kick / SIZE;
 
     // Opponent on the mat: sometimes go in for a stomp / ground punch (decided once per
     // knockdown), otherwise step off and wait for it to stand.
@@ -102,7 +104,7 @@ export function createPacedBrain(getProfile) {
       }
       if (s.mode === 'ground' && opp.state === 'down') {
         if (opp.groundable && self.cooldown <= 0) intent.attack = 'ground';
-        else if (opp.groundDist != null) intent.move = opp.groundDist > 0.62 ? 1 : 0;
+        else if (opp.groundDist != null) intent.move = opp.groundDist > 0.62 * SIZE ? 1 : 0;
         if (s.modeT > 3) setMode('wait', 0);
         return intent;
       }

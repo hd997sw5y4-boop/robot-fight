@@ -1,10 +1,13 @@
 // Mixamo-rigged Sketchfab "Robot character" (assetfactory, Free Standard).
 // Animations from Mixamo. Idle/walk/strafe use real clips; hips XZ root motion is stripped.
+// Robot size: every robot-relative distance (reach, spacing, capsules, cameras, wires) scales by this.
+export const SIZE = 1.12;
+
 export const MODEL = {
   url: './models/RobotFighter.glb',
   source: "Robot character by assetfactory (Sketchfab Free Standard); animations from Mixamo",
   scale: 1,
-  targetHeight: 2.45,
+  targetHeight: 2.45 * SIZE,
   footOffset: 0,
   animations: {
     idle: 'FightingIdle',
@@ -74,16 +77,16 @@ export const ARENA = {
 
 export const COMBAT = {
   maxHealth: 100,
-  moveSpeed: 3.4,
+  moveSpeed: 3.4 * SIZE,
   runMul: 1.5, // Shift: forward speed multiplier (on top of footworkMul)
   footworkMul: 1.5, // base forward/back stepping speed vs the clip; walk anim speeds up to match
   runBackMul: 1.35, // Shift: backward speed multiplier
-  blockMoveSpeed: 1.4,
+  blockMoveSpeed: 1.4 * SIZE,
   // reach: root-to-root distance where the strike visibly lands (the AI fights from here).
   // range: outer gate; the hit itself needs the fist/foot to touch the body (see strikeContact).
   // recover: idle time after the attack ends (x whiffMul when it missed).
-  punch: { damage: 5, reach: 1.36, range: 1.9, recover: 0.2, activeFrac: [0.2, 0.78] },
-  kick: { damage: 8, reach: 1.68, range: 2.2, recover: 0.36, activeFrac: [0.26, 0.8] },
+  punch: { damage: 5, reach: 1.36 * SIZE, range: 1.9 * SIZE, recover: 0.2, activeFrac: [0.2, 0.78] },
+  kick: { damage: 8, reach: 1.68 * SIZE, range: 2.2 * SIZE, recover: 0.36, activeFrac: [0.26, 0.8] },
   // Extra idle after a clip by strike class (60 fps targets: jab 16-20f, hook/elbow 22-28f,
   // knee/kick 28-36f, spinning 36-44f); the clip's own follow-through covers part of it.
   recoverByClip: {
@@ -100,12 +103,12 @@ export const COMBAT = {
   contactHold: 0.1,      // after a fist/foot connects it is pulled back this soon
   knockdownForce: 4.6,   // a heavy blow at least this hard knocks down (heavy counters always do)
   kickKnockChance: 0.25,  // other heavy kicks knock down this often
-  punchLunge: 0.12, // metres a strike steps in when slightly out of reach (small enough to hide)
-  kickLunge: 0.1,
-  strikeGap: 1.3,   // no lunge inside this gap; it would drive the body into the opponent
-  bodyRadius: 0.36, // defender body capsule used for fist/foot contact
-  fistShell: 0.16,  // fist surface beyond the hand bone (contact tolerance)
-  kickShell: 0.15,
+  punchLunge: 0.12 * SIZE, // metres a strike steps in when slightly out of reach (small enough to hide)
+  kickLunge: 0.1 * SIZE,
+  strikeGap: 1.3 * SIZE,   // no lunge inside this gap; it would drive the body into the opponent
+  bodyRadius: 0.36 * SIZE, // defender body capsule used for fist/foot contact
+  fistShell: 0.16 * SIZE,  // fist surface beyond the hand bone (contact tolerance)
+  kickShell: 0.15 * SIZE,
   blockReduction: 0.82,
   hitStun: 0.3,        // light hitstun (18f)
   hitStunHeavy: 0.53,  // hooks, body shots, most kicks (32f)
@@ -116,19 +119,19 @@ export const COMBAT = {
   hitStopCounter: 0.12,
   koSlowMo: 0.3,       // seconds of mild slow motion on a KO
   hitInvuln: 0.08,     // only stops one blow registering twice; combos can land
-  hitRock: 0.26,       // metres a light hit knocks a robot back (walked out with the back-step)
+  hitRock: 0.26 * SIZE,       // metres a light hit knocks a robot back (walked out with the back-step)
   stumbleForce: 3.8,   // impact force that turns a hit into a stepped stumble-back
-  stumbleDist: 0.75,   // metres travelled over the StumbleBackwards steps
-  separate: 1.1,       // soft spacing: closer than this, the CPU steps back (with its walk)
-  separateDown: 0.6,   // how close a robot may walk to one lying on the mat (ground attacks)
-  separateHard: 0.92,  // emergency push-apart only (physics capsules normally keep 0.95)
+  stumbleDist: 0.75 * SIZE,   // metres travelled over the StumbleBackwards steps
+  separate: 1.1 * SIZE,       // soft spacing: closer than this, the CPU steps back (with its walk)
+  separateDown: 0.6 * SIZE,   // how close a robot may walk to one lying on the mat (ground attacks)
+  separateHard: 0.92 * SIZE,  // emergency push-apart only (physics capsules normally keep 0.95)
   downRest: 0.85,      // seconds lying still before getting up (same every time: robots don't tire)
   downMax: 4.2,        // safety: get up by this long after the knockdown started
   getupTime: 1.25,     // the GettingUp clip is played over about this long
   // Stomp / ground punch on a downed robot (key I, pad Y).
   ground: {
-    reach: 1.05,        // nearest lying body segment must be this close (root XZ)
-    stompReach: 0.8,    // closer than this it's a stomp, else a ground punch
+    reach: 1.05 * SIZE,      // nearest lying body segment must be this close (root XZ)
+    stompReach: 0.8 * SIZE,    // closer than this it's a stomp, else a ground punch
     stompDamage: 8,
     poundDamage: 6,
     perKnockdown: 2,    // per attacker, per knockdown

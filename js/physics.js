@@ -3,7 +3,7 @@
    (see game.js knockDown / ko); there is no ragdoll. */
 import * as CANNON from 'cannon-es';
 import * as THREE from 'three';
-import { ARENA } from './config.js';
+import { ARENA, SIZE } from './config.js';
 
 const G = { ARENA: 1, FIGHTER: 2, DEBRIS: 8 };
 
@@ -95,9 +95,9 @@ export function attachFighter(f) {
   });
   // Body-vs-body: about 0.95 m between centres, the real width of the chest and shoulders,
   // so torsos can't pass through each other while circling.
-  body.addShape(new CANNON.Sphere(0.42), new CANNON.Vec3(0, 0.56, 0)); // clear of the mat (no floor drag)
-  body.addShape(new CANNON.Sphere(0.48), new CANNON.Vec3(0, 1.1, 0));
-  body.addShape(new CANNON.Sphere(0.44), new CANNON.Vec3(0, 1.72, 0));
+  body.addShape(new CANNON.Sphere(0.42 * SIZE), new CANNON.Vec3(0, 0.56 * SIZE, 0)); // clear of the mat (no floor drag)
+  body.addShape(new CANNON.Sphere(0.48 * SIZE), new CANNON.Vec3(0, 1.1 * SIZE, 0));
+  body.addShape(new CANNON.Sphere(0.44 * SIZE), new CANNON.Vec3(0, 1.72 * SIZE, 0));
   body.position.set(f.root.position.x, 0, f.root.position.z);
   body.collisionFilterGroup = G.FIGHTER;
   // Standing robots only touch the cage and each other: a downed body or loose parts on the

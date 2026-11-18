@@ -5,7 +5,7 @@
 // Capped for performance: fewer wires and arcs on Low graphics.
 import * as THREE from 'three';
 import { playSfx } from './audio.js';
-import { ARENA } from './config.js';
+import { ARENA, SIZE } from './config.js';
 
 const SEGS = 6;
 const COLORS = [0xb3261e, 0xd8b41c, 0x1d1f24, 0x2a5fd0, 0x2e8b3e];
@@ -34,8 +34,8 @@ export function addWires(anchor, scene, { piece = false, onSpark = null } = {}) 
   anchor.getWorldPosition(_a);
   const g = { anchor, wires: [], t: 0, nextArc: piece ? Infinity : 0.25 + Math.random() * 0.5, piece, onSpark, scene };
   for (let i = 0; i < n; i++) {
-    const len = (0.06 + Math.random() * 0.05) * (piece ? 0.7 : 1);
-    const off = new THREE.Vector3((Math.random() - 0.5) * 0.06, (Math.random() - 0.5) * 0.06, (Math.random() - 0.5) * 0.06);
+    const len = (0.06 + Math.random() * 0.05) * SIZE * (piece ? 0.7 : 1);
+    const off = new THREE.Vector3((Math.random() - 0.5) * 0.06, (Math.random() - 0.5) * 0.06, (Math.random() - 0.5) * 0.06).multiplyScalar(SIZE);
     const pts = []; const prev = [];
     const dir = new THREE.Vector3(Math.random() - 0.5, -Math.random(), Math.random() - 0.5).normalize();
     for (let k = 0; k <= SEGS; k++) {
@@ -74,7 +74,7 @@ function arc(g) {
   const arr = new Float32Array(n * 3);
   for (let k = 0; k < n; k++) {
     const t = k / (n - 1);
-    const j = k === 0 || k === n - 1 ? 0 : 0.035;
+    const j = k === 0 || k === n - 1 ? 0 : 0.035 * SIZE;
     arr[k * 3] = from.x + (to.x - from.x) * t + (Math.random() - 0.5) * j;
     arr[k * 3 + 1] = from.y + (to.y - from.y) * t + (Math.random() - 0.5) * j;
     arr[k * 3 + 2] = from.z + (to.z - from.z) * t + (Math.random() - 0.5) * j;
