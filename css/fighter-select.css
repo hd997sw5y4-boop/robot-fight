@@ -254,3 +254,18 @@ select.fs-in { appearance: none; padding-right: calc(24 * var(--u)); background:
 .fs-dot.ok { background: #3ddc84; box-shadow: 0 0 10px #3ddc84; }
 .fs-dot.warn { background: #f5b83d; box-shadow: 0 0 10px #f5b83d; }
 .fs-dot.err { background: #ff4d4d; box-shadow: 0 0 10px #ff4d4d; animation: rfs-blink 1s steps(2) infinite; }
+
+/* ---------- per-fighter profiles (js/shell/profiles.js): style tag, edges, strengths / weaknesses ---------- */
+.fs-head em.fs-style { display: inline-block; margin-top: calc(3 * var(--u)); padding: calc(2 * var(--u)) calc(8 * var(--u)); border-radius: 99px;
+  font-weight: 800; font-size: calc(10.5 * var(--u)); letter-spacing: .24em; color: #fff;
+  background: color-mix(in srgb, var(--pc) 30%, transparent); border: 1px solid color-mix(in srgb, var(--pc) 70%, transparent); }
+.fs-stat.up em { color: #9dffb8; }
+.fs-stat.down em { color: #ffb0a8; }
+.fs-stat.up em::after, .fs-stat.down em::after { font-size: calc(9 * var(--u)); margin-left: calc(3 * var(--u)); }
+.fs-stat.up em::after { content: '▲'; color: #5be38a; }
+.fs-stat.down em::after { content: '▼'; color: #ff7a6e; }
+.fs-traits { display: grid; gap: calc(4 * var(--u)); margin-top: calc(4 * var(--u)); }
+.fs-trait { display: grid; grid-template-columns: calc(78 * var(--u)) 1fr; gap: calc(8 * var(--u)); margin: 0; font: 600 calc(11.5 * var(--u))/1.35 var(--ww-font); color: var(--ww-text); }
+.fs-trait b { font-size: calc(9.5 * var(--u)); font-weight: 800; letter-spacing: .2em; text-transform: uppercase; padding-top: calc(1 * var(--u)); }
+.fs-trait.up b { color: #5be38a; }
+.fs-trait.down b { color: #ff7a6e; }

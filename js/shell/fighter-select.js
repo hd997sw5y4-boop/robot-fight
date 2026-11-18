@@ -9,6 +9,7 @@ import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { COMBAT, DAMAGE, MODEL } from '../config.js';
 import { aiConfig, AI_PROVIDERS } from '../api-brain.js'; // read-only: public config + provider list
+import { sideProfiles, STAT_SCALE as PROFILE_SCALE } from './profiles.js'; // read-only per-side stat profiles
 
 const S = window.RFShell;
 
@@ -128,12 +129,33 @@ function p2Paint() {
 /* ---------- DOM ---------- */
 function selScreen() { return document.querySelector('.rfs-screen[data-screen="select"]'); }
 
-function statRows(robot, side) {
-  return robot.stats.map((s) => {
-    const pct = Math.max(4, Math.min(100, (s.v / STAT_SCALE[s.k]) * 100));
-    return `<div class="fs-stat"><span>${s.label}</span><i><u style="--v:${pct.toFixed(1)}%"></u></i><em>${+s.v.toFixed(2)}<small>${s.unit}</small></em></div>`;
-  }).join('');
+// Per-side numbers: the fighter's own profile when the game provides one (js/shell/profiles.js),
+// otherwise the shared tuning. Bar ceilings are fixed, so equal values always draw equal bars.
+const sideIdx = (side) => (side === 'p2' ? 1 : 0);
+function profileOf(robot, side) {
+  if (!robot || robot.id !== 'robot') return null; // future roster entries bring their own stats
+  try { return sideProfiles()[sideIdx(side)]; } catch (_) { return null; }
 }
+function statRows(robot, side) {
+  const pr = profileOf(robot, side);
+  const stats = pr ? pr.stats : robot.stats;
+  const other = pr ? sideProfiles()[1 - sideIdx(side)] : null;
+  return stats.map((s) => {
+    const scale = PROFILE_SCALE[s.k] || STAT_SCALE[s.k] || s.v || 1;
+    const pct = Math.max(4, Math.min(100, (s.v / scale) * 100));
+    const o = other && other.v[s.k];
+    const edge = pr && pr.real && o != null && Math.abs(s.v / o - 1) > 0.02 ? (s.v > o ? ' up' : ' down') : '';
+    return `<div class="fs-stat${edge}"><span>${s.label}</span><i><u style="--v:${pct.toFixed(1)}%"></u></i><em>${+s.v.toFixed(2)}<small>${s.unit}</small></em></div>`;
+  }).join('') + traitLines(pr);
+}
+function traitLines(pr) {
+  if (!pr || !pr.real || (!pr.strengths.length && !pr.weaknesses.length)) return '';
+  return `<div class="fs-traits">
+    ${pr.strengths.length ? `<p class="fs-trait up"><b>Strengths</b><span>${pr.strengths.map(esc).join(' · ')}</span></p>` : ''}
+    ${pr.weaknesses.length ? `<p class="fs-trait down"><b>Weaknesses</b><span>${pr.weaknesses.map(esc).join(' · ')}</span></p>` : ''}
+  </div>`;
+}
+const styleTag = (robot, side) => { const pr = profileOf(robot, side); return pr && pr.real && pr.tag ? pr.tag : robot.cls; };
 
 function ctrlToggle(side) {
   const m = mode();
@@ -183,7 +205,7 @@ function sidePanel(side) {
   const who = brainOf(side) === 'api' ? (side === 'p1' ? 'Blue corner · AI API' : 'AI API') : side === 'p1' ? (isCpu('p1') ? 'Blue corner CPU' : 'Player 1') : (isCpu(side) ? (mode() === 'training' ? 'Training dummy' : 'CPU') : 'Player 2');
   return `<section class="fs-side" data-side="${side}" style="--pc:${SIDE_COLOR[side]}">
     <header class="fs-head"><span class="fs-tag">${side.toUpperCase()}</span>
-      <div><small>${who}</small><b>${esc(r.name)}</b><em>${esc(r.cls)}</em></div>
+      <div><small>${who}</small><b>${esc(r.name)}</b><em${profileOf(r, side) && profileOf(r, side).real && profileOf(r, side).tag ? ' class="fs-style"' : ''}>${esc(styleTag(r, side))}</em></div>
       <span class="fs-ready" aria-live="polite">Ready</span></header>
     ${ctrlToggle(side)}
     <div class="fs-stats">${statRows(r, side)}</div>

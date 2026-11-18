@@ -117,3 +117,18 @@ body.rfs-on .rfs-timer:empty { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .fp-tcard, .fp-bcard, .fp-count b, .fp-pop, .rfs-call.fight b, .rfs-call.ko b { animation: none !important; transition: none !important; }
 }
+
+/* ---------- per-fighter profiles on the tape ---------- */
+.fp-tstyle { display: inline-block; margin: 4px 0 0; padding: 2px 9px; border-radius: 99px; font: 800 normal 10px/1.5 var(--ww-font); letter-spacing: .24em; color: #fff; }
+.fp-tside.p1 .fp-tstyle { background: rgba(63,125,255,.28); border: 1px solid rgba(63,125,255,.7); }
+.fp-tside.p2 .fp-tstyle { background: rgba(255,64,64,.24); border: 1px solid rgba(255,64,64,.7); }
+.fp-tside .fp-tcol { display: flex; }
+.fp-tside.p2 .fp-tcol { justify-content: flex-end; }
+.fp-ttraits { margin-top: 6px; display: grid; gap: 2px; font-size: 11.5px; line-height: 1.35; color: var(--ww-text); }
+.fp-ttraits p { margin: 0; }
+.fp-ttraits b { font-size: 9.5px; font-weight: 800; letter-spacing: .2em; text-transform: uppercase; margin-right: 4px; }
+.fp-ttraits .up b { color: #5be38a; } .fp-ttraits .down b { color: #ff7a6e; }
+.fp-trows td.hi { color: #fff; text-shadow: 0 0 14px rgba(154,171,255,.6); }
+.fp-trows td.hi::after, .fp-trows td.hi::before { color: #5be38a; font-size: 10px; }
+.fp-trows td:first-child.hi::after { content: ' ▲'; }
+.fp-trows td:last-child.hi::before { content: '▲ '; }

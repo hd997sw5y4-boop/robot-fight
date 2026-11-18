@@ -85,27 +85,48 @@
   function renderTape() {
     const M = S.match;
     const fs = S.fighters();
-    const stats = robotStats();
     const hs = fs.map(heightOf);
-    const rows = [];
-    if (hs[0] != null || hs[1] != null) rows.push(['Height', hs.map((h) => (h == null ? '–' : h.toFixed(2) + ' m'))]);
-    for (const s of stats) {
-      const v = `${+(+s.v).toFixed(2)} ${s.unit}`;
-      rows.push([s.label, [v, v]]); // every robot runs the same frame today
+    // Per-side profile numbers when the game provides them (js/shell/profiles.js); otherwise the shared tuning.
+    let prof = null;
+    try { prof = S.profiles && S.profiles.sideProfiles(); } catch (_) { prof = null; }
+    const rows = []; // [label, [text1, text2], [num1, num2]]
+    if (hs[0] != null || hs[1] != null) rows.push(['Height', hs.map((h) => (h == null ? '–' : h.toFixed(2) + ' m')), hs]);
+    if (prof) {
+      const keys = prof[0].stats.map((x) => x.k);
+      for (const k of keys) {
+        const a = prof[0].stats.find((x) => x.k === k);
+        const b = prof[1].stats.find((x) => x.k === k);
+        const txt = (x) => (x ? `${+(+x.v).toFixed(2)} ${x.unit}` : '–');
+        rows.push([a.label, [txt(a), txt(b)], [a ? a.v : null, b ? b.v : null]]);
+      }
+    } else {
+      for (const st of robotStats()) { const v = `${+(+st.v).toFixed(2)} ${st.unit}`; rows.push([st.label, [v, v], [st.v, st.v]]); }
     }
+    // Better value per row (only a real difference; Height is information, not better/worse).
+    const better = (r) => {
+      const [a, b] = r[2];
+      if (r[0] === 'Height' || a == null || b == null || !(Math.abs(a - b) > Math.max(Math.abs(a), Math.abs(b)) * 0.005)) return -1;
+      return a > b ? 0 : 1;
+    };
+    const traits = (pr) => {
+      if (!pr || !pr.real || (!pr.strengths.length && !pr.weaknesses.length)) return '';
+      return `<div class="fp-ttraits">${pr.strengths.length ? `<p class="up"><b>Strengths</b> ${pr.strengths.map(esc).join(' · ')}</p>` : ''}${pr.weaknesses.length ? `<p class="down"><b>Weaknesses</b> ${pr.weaknesses.map(esc).join(' · ')}</p>` : ''}</div>`;
+    };
     const col = (i) => {
       const c = M.cfg[side(i)];
+      const pr = prof && prof[i];
       return `<div class="fp-tside ${side(i)}">
         <small>${i === 0 ? 'Blue corner' : 'Red corner'}</small>
-        <b>${esc(c.name)}</b>
+        <b>${esc(c.name)}</b>${pr && pr.real && pr.tag ? `<em class="fp-tstyle">${esc(pr.tag)}</em>` : ''}
         <span class="fp-tcol">${swatch(c)}${esc(c.label || '')}</span>
+        ${traits(pr)}
       </div>`;
     };
     const mode = { fight: 'Quick match', arcade: 'Arcade', versus: 'Versus', watch: 'Bot vs Bot' }[M.cfg.mode] || '';
     tapeEl.innerHTML = `<div class="fp-tcard" role="dialog" aria-label="Tale of the tape">
       <header><small>${esc(mode)}${M.cfg.mode === 'arcade' && M.cfg.opp ? ' · ' + esc(M.cfg.opp.name) : ''} · best of 3</small><b>Tale of the tape</b></header>
       <div class="fp-tgrid">${col(0)}<div class="fp-tvs">VS</div>${col(1)}</div>
-      ${rows.length ? `<table class="fp-trows">${rows.map((r) => `<tr><td>${esc(r[1][0])}</td><th>${esc(r[0])}</th><td>${esc(r[1][1])}</td></tr>`).join('')}</table>` : ''}
+      ${rows.length ? `<table class="fp-trows">${rows.map((r) => { const w = better(r); return `<tr><td class="${w === 0 ? 'hi' : ''}">${esc(r[1][0])}</td><th>${esc(r[0])}</th><td class="${w === 1 ? 'hi' : ''}">${esc(r[1][1])}</td></tr>`; }).join('')}</table>` : ''}
       <footer><i class="fp-tbar"><i></i></i><span><kbd>Enter</kbd> or click to skip</span></footer>
     </div>`;
   }
