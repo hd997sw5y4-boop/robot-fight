@@ -391,16 +391,24 @@
   /* ---------- results ---------- */
   const METHOD = { KO: 'KO', TKO: 'TKO', Decision: 'Decision', Draw: 'Draw' };
   function statsTable(total, cfg, wins) {
+    // Counters that a build does not track stay undefined and their rows are left out (no made-up numbers).
+    const has = (k) => typeof total[0][k] === 'number' && typeof total[1][k] === 'number';
+    const acc = (i) => (total[i].thrown > 0 ? Math.min(100, Math.round((total[i].hits / total[i].thrown) * 100)) + '%' : '–');
     const rows = [
       ['Rounds won', wins ? wins[0] : '–', wins ? wins[1] : '–'],
-      ['Hits landed', total[0].hits, total[1].hits],
+      has('thrown') && ['Strikes thrown', total[0].thrown, total[1].thrown],
+      ['Strikes landed', total[0].hits, total[1].hits],
+      has('thrown') && ['Accuracy', acc(0), acc(1)],
+      has('kd') && ['Knockdowns', total[0].kd, total[1].kd],
       ['Damage dealt', Math.round(total[0].damage), Math.round(total[1].damage)],
       ['Parts destroyed', total[0].parts, total[1].parts],
+      ['Parts lost', total[1].parts, total[0].parts],
       ['Hits blocked', total[0].blocked, total[1].blocked],
-    ];
+    ].filter(Boolean);
     const head = (p) => `<th><i style="--a:${p.paint.primary};--b:${p.paint.accent}"></i>${esc(p.name)}</th>`;
     return `<table class="rfs-stats"><thead><tr><th></th>${head(cfg.p1)}${head(cfg.p2)}</tr></thead><tbody>${rows.map((r) => {
-      const hi = typeof r[1] === 'number' && r[1] !== r[2] ? (r[1] > r[2] ? 1 : 2) : 0;
+      const lowWins = r[0] === 'Parts lost';
+      const hi = typeof r[1] === 'number' && r[1] !== r[2] ? ((r[1] > r[2]) !== lowWins ? 1 : 2) : 0;
       return `<tr><td>${r[0]}</td><td class="${hi === 1 ? 'hi' : ''}">${r[1]}</td><td class="${hi === 2 ? 'hi' : ''}">${r[2]}</td></tr>`;
     }).join('')}</tbody></table>`;
   }
@@ -411,11 +419,15 @@
     const winner = w == null ? null : (w === 0 ? cfg.p1 : cfg.p2);
     const title = w == null ? 'Match drawn' : (mode !== 'versus' && mode !== 'watch' && w === 0 ? 'You win' : winner.name + ' wins');
     const last = M.rounds[M.rounds.length - 1];
-    const sub = w == null ? 'Even on rounds and damage.' : `${M.wins[w]}–${M.wins[1 - w]} · final round by ${METHOD[last.method]}`;
+    // Method and round of victory: the last round the match winner took (the deciding one).
+    const won = w == null ? null : [...M.rounds].reverse().find((r) => r.winner === w);
+    const sub = w == null ? 'Even on rounds and damage.'
+      : won ? `${M.wins[w]}–${M.wins[1 - w]} · won by ${METHOD[won.method]} in round ${won.n}`
+      : `${M.wins[w]}–${M.wins[1 - w]} · won on damage after ${M.rounds.length} rounds`;
     let buttons = '';
     if (mode === 'arcade') {
       const a = S.arcade;
-      for (let i = 0; i < 2; i++) for (const k of ['hits', 'damage', 'parts', 'blocked']) a.total[i][k] += M.total[i][k];
+      for (let i = 0; i < 2; i++) for (const k of ['hits', 'damage', 'parts', 'blocked', 'thrown', 'kd']) if (typeof M.total[i][k] === 'number') a.total[i][k] = (a.total[i][k] || 0) + M.total[i][k];
       if (w === 0) {
         a.idx += 1;
         buttons = a.idx >= S.ROSTER.length

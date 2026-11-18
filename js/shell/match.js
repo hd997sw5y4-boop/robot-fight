@@ -10,7 +10,13 @@
   const M = (S.match = { cfg: null, phase: 'idle', round: 0, wins: [0, 0], rounds: [], t: 0,
     timeLeft: null, stats: null, total: null, lastHp: [0, 0], dummyBlock: false, train: null });
 
-  const blankStats = () => [0, 1].map(() => ({ hits: 0, damage: 0, parts: 0, blocked: 0 }));
+  const STAT_KEYS = ['hits', 'damage', 'parts', 'blocked', 'thrown', 'kd'];
+  const blankStats = () => [0, 1].map(() => ({ hits: 0, damage: 0, parts: 0, blocked: 0, thrown: 0, kd: 0 }));
+  // Read-only presentation counters: attacks started and knockdowns are read off each fighter's
+  // existing state (punch / kick / ground, down) once per frame. Nothing in the fight is changed.
+  const ATTACK_STATES = new Set(['punch', 'kick', 'ground']);
+  let prevSt = [null, null];
+  let prevT = [0, 0];
   const partsDown = (f) => Object.values((f && f.parts) || {}).filter((p) => p && (p.detached || p.hp <= 0)).length;
 
   /* ---------- HUD bits injected next to the existing health bars ---------- */
@@ -125,6 +131,8 @@
     M.round = n;
     M.t = 0;
     M.stats = blankStats();
+    prevSt = [null, null];
+    prevT = [0, 0];
     M.phase = training ? 'fight' : 'intro';
     launch({
       p1: fighterCfg(M.cfg.p1, 'p1', null),
@@ -138,9 +146,16 @@
     paintHud();
     if (training) { S.paintTraining(); return; }
     const last = M.wins[0] === WINS_NEEDED - 1 && M.wins[1] === WINS_NEEDED - 1;
-    S.call(last ? 'Final Round' : 'Round ' + n, M.cfg.p1.name + '  vs  ' + M.cfg.p2.name, 'round');
-    if (window.RFAnnounce) window.RFAnnounce('round', { n, final: last, delay: 0.25 });
-    S.sfx('confirm');
+    const announce = () => {
+      S.call(last ? 'Final Round' : 'Round ' + n, M.cfg.p1.name + '  vs  ' + M.cfg.p2.name, 'round');
+      if (window.RFAnnounce) window.RFAnnounce('round', { n, final: last, delay: 0.25 });
+      S.sfx('confirm');
+    };
+    S.emit('roundBegin', n);
+    // [fight-presentation hook] Round 1 opens with the tale of the tape + camera intro; the round
+    // call follows once it ends (or is skipped). Without the presentation layer: unchanged.
+    if (n === 1 && S.tape && S.tape.start(announce)) return;
+    announce();
   }
 
   // Round length: the Settings "Round time" if set, otherwise 90 seconds.
@@ -154,7 +169,7 @@
     if (M.phase !== 'fight') return;
     M.phase = 'round-end';
     if (winner != null) M.wins[winner] += 1;
-    for (let i = 0; i < 2; i++) for (const k of ['hits', 'damage', 'parts', 'blocked']) M.total[i][k] += M.stats[i][k];
+    for (let i = 0; i < 2; i++) for (const k of STAT_KEYS) M.total[i][k] += M.stats[i][k];
     M.rounds.push({ n: M.round, winner, method, stats: M.stats });
     paintHud();
     const who = winner == null ? 'Nobody scores' : (winner === 0 ? M.cfg.p1.name : M.cfg.p2.name) + ' takes round ' + M.round;
@@ -163,10 +178,14 @@
     S.call(big, who, 'end ' + (ko ? 'ko' : ''));
     if (window.RFAnnounce) window.RFAnnounce(ko ? 'ko' : 'roundEnd', { delay: ko ? 0.5 : 0.3 });
     const done = M.wins[0] >= WINS_NEEDED || M.wins[1] >= WINS_NEEDED || M.round >= MAX_ROUNDS;
+    S.emit('roundEnd', M.rounds[M.rounds.length - 1]);
     S.after(ko ? 3 : 2.5, () => {
       if (M.phase !== 'round-end') return;
-      if (done) endMatch();
-      else beginRound(M.round + 1);
+      if (done) return endMatch();
+      // [fight-presentation hook] round break card (damage maps + round stats) before the next round.
+      const next = () => { if (M.phase === 'round-end') beginRound(M.round + 1); };
+      if (S.roundBreak && S.roundBreak.show(M.rounds[M.rounds.length - 1], next)) return;
+      next();
     });
   }
 
@@ -195,12 +214,19 @@
     const fs = S.fighters();
     for (let i = 0; i < 2; i++) {
       const f = fs[i];
+      const st = f.state;
+      if (ATTACK_STATES.has(st) && (st !== prevSt[i] || (f.stateT || 0) < prevT[i])) M.stats[i].thrown += 1;
+      if (st === 'down' && prevSt[i] !== 'down') { M.stats[1 - i].kd += 1; S.emit('knockdown', i); }
+      prevSt[i] = st;
+      prevT[i] = f.stateT || 0;
       const drop = M.lastHp[i] - f.health;
       if (drop > 0.01) {
         const by = 1 - i;
         M.stats[by].damage += drop;
-        if (f.blocking && f.health > 0) M.stats[i].blocked += 1;
+        const blocked = f.blocking && f.health > 0;
+        if (blocked) M.stats[i].blocked += 1;
         else M.stats[by].hits += 1;
+        S.emit('hit', by, drop, blocked);
         if (M.cfg.mode === 'training' && i === 1) {
           const tr = M.train;
           tr.hits += 1;
