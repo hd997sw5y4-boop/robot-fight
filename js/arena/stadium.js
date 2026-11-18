@@ -9,6 +9,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { STADIUM } from './stadium-config.js';
 // [stadium-broadcast] extras driven from the same init/update hooks (no new game.js loop hooks).
 import { initBroadcast, updateBroadcast } from './broadcast.js';
+import { initPostfight, updatePostfight } from './postfight.js'; // [postfight hook]
 import { initCrowdCam } from './crowdcam.js';
 import { initMusic, updateMusic } from './music.js';
 
@@ -890,6 +891,7 @@ export function initStadium(c) {
   if (stadiumOwnsEnv()) rebuild();
   try { initCrowdCam(c); } catch (e) { console.warn('[crowd cam]', e); }
   try { initBroadcast(c); } catch (e) { console.warn('[broadcast]', e); }
+  try { initPostfight(c); } catch (e) { console.warn('[postfight]', e); } // [postfight hook]
   try { initMusic(c); } catch (e) { console.warn('[music]', e); }
 }
 
@@ -898,4 +900,5 @@ export function updateStadium(dt) {
   if (built && dt > 0) built.tick(Math.min(dt, 0.1));
   updateMusic(dt);
   updateBroadcast(dt);
+  updatePostfight(dt); // [postfight hook] after the feed: poses replays for the main render
 }

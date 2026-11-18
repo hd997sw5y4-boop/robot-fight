@@ -18,6 +18,7 @@ import { buildArena as buildArenaVisual, addArenaLights, addFloorReflection } fr
 // [stadium-arena hook] stadium scenery lives in its own module.
 import { initStadium, stadiumOwnsEnv, stadiumApplyEnv, stadiumSetGfx, updateStadium } from './arena/stadium.js';
 import { updateCrowdCam } from './arena/crowdcam.js'; // [stadium-broadcast hook]
+import { postfightCamera } from './arena/postfight.js'; // [postfight hook]
 import {
   initArenaPhysics,
   attachFighter,
@@ -3528,6 +3529,7 @@ function placeTitles() {
 }
 
 function updateCamera(dt) {
+  if (postfightCamera()) { setFirstPersonHide(false); camModeLive = 'postfight'; return; } // [postfight hook]
   // [stadium-broadcast hook] crowd-watch seat (V-cycle 'crowd') and VR own the camera when active.
   if (updateCrowdCam(camera, dt)) { setFirstPersonHide(false); camModeLive = 'crowd'; return; }
   const want = cameraMode();
