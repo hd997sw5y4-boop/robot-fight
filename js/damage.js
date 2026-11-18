@@ -1,4 +1,5 @@
 import { playSfx } from './audio.js';
+import { announce } from './announcer.js';
 import { spawnDebris, clearPhysicsDebris, PART_MASS, stepPhysics } from './physics.js';
 import * as THREE from 'three';
 import { DAMAGE, ARENA } from './config.js';
@@ -278,6 +279,8 @@ function detachSub(f, sub, dir, scene) {
     debrisList.push({ obj: pivot, phys: rec, owner: f.id, settled: false });
   }
   playSfx('tear');
+  // [announcer hook] whole hands/feet only (skip fingers and toes).
+  if (sub.id.startsWith('hand') || sub.id.startsWith('foot')) announce('tear', { part: sub.id, delay: 0.2 });
   emitSparks(at, d, 12);
   if ((sub.id.startsWith('hand') || sub.id.startsWith('foot')) && sub.stump) {
     addWires(sub.stump, scene, { onSpark: (p) => emitSparks(p, _v.set(0, -1, 0), 4) });
@@ -727,6 +730,9 @@ function detachPart(f, part, dir, scene) {
   });
   debrisList.push({ obj: pivot, phys: rec, owner: f.id, settled: false });
   playSfx('tear');
+  // [announcer hook]
+  if (part.id === 'head') announce('headOff', { delay: 0.12 });
+  else announce('tear', { part: part.id, delay: 0.2 });
   part.stump = part.bones.find((b) => {
     const n = normName(b.name);
     return !n.endsWith('end') && !n.includes('pole');

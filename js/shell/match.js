@@ -146,9 +146,13 @@
     paintHud();
     if (training) { S.paintTraining(); return; }
     const last = M.wins[0] === WINS_NEEDED - 1 && M.wins[1] === WINS_NEEDED - 1;
+    // [announcer hook] matchStart plays the welcome + blue/red walkout; rematch skips that package.
+    const matchStart = n === 1 && M.wins[0] === 0 && M.wins[1] === 0;
+    const rematch = !!M.rematch && matchStart;
+    M.rematch = false;
     const announce = () => {
       S.call(last ? 'Final Round' : 'Round ' + n, M.cfg.p1.name + '  vs  ' + M.cfg.p2.name, 'round');
-      if (window.RFAnnounce) window.RFAnnounce('round', { n, final: last, delay: 0.25 });
+      if (window.RFAnnounce) window.RFAnnounce('round', { n, final: last, matchStart, rematch, delay: 0.25 });
       S.sfx('confirm');
     };
     S.emit('roundBegin', n);
@@ -176,7 +180,9 @@
     const big = { KO: 'K.O.', TKO: 'T.K.O.', Decision: 'Decision', Draw: 'Draw' }[method];
     const ko = method === 'KO' || method === 'TKO';
     S.call(big, who, 'end ' + (ko ? 'ko' : ''));
-    if (window.RFAnnounce) window.RFAnnounce(ko ? 'ko' : 'roundEnd', { delay: ko ? 0.5 : 0.3 });
+    // [announcer hook]
+    const ev = ko ? 'ko' : (method === 'Decision' ? 'decision' : (method === 'Draw' ? 'draw' : 'roundEnd'));
+    if (window.RFAnnounce) window.RFAnnounce(ev, { delay: ko ? 0.5 : 0.3, method, winner });
     const done = M.wins[0] >= WINS_NEEDED || M.wins[1] >= WINS_NEEDED || M.round >= MAX_ROUNDS;
     S.emit('roundEnd', M.rounds[M.rounds.length - 1]);
     S.after(ko ? 3 : 2.5, () => {
@@ -196,6 +202,8 @@
     if (M.wins[0] !== M.wins[1]) w = M.wins[0] > M.wins[1] ? 0 : 1;
     else if (Math.abs(M.total[0].damage - M.total[1].damage) >= 1) w = M.total[0].damage > M.total[1].damage ? 0 : 1;
     M.winner = w;
+    // [announcer hook] waits if a KO line is still on the channel.
+    if (window.RFAnnounce) window.RFAnnounce('winner', { side: w, delay: 0.55 });
     S.emit('matchEnd', w);
   }
 
@@ -267,7 +275,9 @@
       return;
     }
     if (M.timeLeft != null && st.phase === 'fight') {
+      const prev = M.timeLeft;
       M.timeLeft -= dt;
+      if (prev > 10 && M.timeLeft <= 10 && window.RFAnnounce) window.RFAnnounce('last10'); // [announcer hook]
       if (M.timeLeft <= 0) { M.timeLeft = 0; paintHud(); decide(); return; }
       paintHud();
     }
@@ -286,7 +296,7 @@
     S.toast(M.dummyBlock ? 'Dummy: blocking' : 'Dummy: idle');
   };
 
-  S.restartMatch = () => { if (M.cfg) S.startMatch(M.cfg); };
+  S.restartMatch = () => { if (M.cfg) { M.rematch = true; S.startMatch(M.cfg); } };
   S.abortMatch = (paintA, paintB) => {
     S.clearTimers();
     S.clearCall();

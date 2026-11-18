@@ -74,7 +74,7 @@ Full-quality WAV masters were downloaded from Mixkit and recompressed to mono OG
 
 ## Announcer voice
 
-Original lines written for the game (Window Workshop Games), voiced with the Kokoro v1.0 TTS model (Apache-2.0; voice blend of am_michael / am_onyx / am_fenrir, processed: EQ, compression, -16 LUFS). Only the round start, round end, knockdown and KO lines are used (`sounds/announcer/ann_*.mp3`, 22 clips), played dry plus a light send into the arena reverb.
+Original lines written for the game (Window Workshop Games), voiced with the Kokoro v1.0 TTS model (Apache-2.0; excited Voice D blend of am_michael / am_onyx / am_fenrir, phrase-level prosody, no pitch shift; EQ, compression, -16 LUFS). The full event set lives in `sounds/announcer/` (108 clips plus `manifest.json`): intro and blue/red walkouts, round starts, FIGHT, big hits and combos, knockdowns and get-ups, torn parts and a lost head, jump kicks and dodges, low health, the last 10 seconds, round end, decision, KO, winner, and rematch. Clips are dry; a light send into the arena reverb is applied at runtime (`js/announcer.js`, `js/audio.js`).
 
 ## Arena reverb
 

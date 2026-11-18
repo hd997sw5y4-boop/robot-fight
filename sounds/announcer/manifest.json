@@ -1,0 +1,823 @@
+{
+ "voice": "Kokoro v1.0 blend 0.4 am_michael + 0.3 am_onyx + 0.3 am_fenrir, excited phrase-level prosody, no pitch shift",
+ "processing": "dry: presence EQ + crystalizer + comp, -16 LUFS / -1.5 dBTP; apply arena PA reverb at runtime",
+ "license": "Kokoro Apache-2.0; lines original (Window Workshop Games). No real-person voice and no trademarked fight calls.",
+ "version": "excited-d-1",
+ "count": 108,
+ "events": {
+  "intro": [
+   "ann_intro_01.mp3",
+   "ann_intro_02.mp3",
+   "ann_intro_03.mp3",
+   "ann_intro_04.mp3"
+  ],
+  "introBlue": [
+   "ann_intro_blue_01.mp3",
+   "ann_intro_blue_02.mp3",
+   "ann_intro_blue_03.mp3",
+   "ann_intro_blue_04.mp3"
+  ],
+  "introRed": [
+   "ann_intro_red_01.mp3",
+   "ann_intro_red_02.mp3",
+   "ann_intro_red_03.mp3",
+   "ann_intro_red_04.mp3"
+  ],
+  "round1": [
+   "ann_round_1_01.mp3",
+   "ann_round_1_02.mp3",
+   "ann_round_1_03.mp3"
+  ],
+  "round2": [
+   "ann_round_2_01.mp3",
+   "ann_round_2_02.mp3",
+   "ann_round_2_03.mp3"
+  ],
+  "round3": [
+   "ann_round_3_01.mp3",
+   "ann_round_3_02.mp3",
+   "ann_round_3_03.mp3"
+  ],
+  "round4": [
+   "ann_round_4_01.mp3",
+   "ann_round_4_02.mp3",
+   "ann_round_4_03.mp3"
+  ],
+  "round5": [
+   "ann_round_5_01.mp3",
+   "ann_round_5_02.mp3",
+   "ann_round_5_03.mp3"
+  ],
+  "roundFinal": [
+   "ann_round_final_01.mp3",
+   "ann_round_final_02.mp3",
+   "ann_round_final_03.mp3"
+  ],
+  "fight": [
+   "ann_fight_01.mp3",
+   "ann_fight_02.mp3",
+   "ann_fight_03.mp3",
+   "ann_fight_04.mp3",
+   "ann_fight_05.mp3"
+  ],
+  "bigHit": [
+   "ann_bighit_01.mp3",
+   "ann_bighit_02.mp3",
+   "ann_bighit_03.mp3",
+   "ann_bighit_04.mp3",
+   "ann_bighit_05.mp3"
+  ],
+  "combo": [
+   "ann_combo_01.mp3",
+   "ann_combo_02.mp3",
+   "ann_combo_03.mp3",
+   "ann_combo_04.mp3"
+  ],
+  "knockdown": [
+   "ann_kd_01.mp3",
+   "ann_kd_02.mp3",
+   "ann_kd_03.mp3",
+   "ann_kd_04.mp3",
+   "ann_kd_05.mp3"
+  ],
+  "getup": [
+   "ann_getup_01.mp3",
+   "ann_getup_02.mp3",
+   "ann_getup_03.mp3",
+   "ann_getup_04.mp3"
+  ],
+  "tear": [
+   "ann_tear_01.mp3",
+   "ann_tear_02.mp3",
+   "ann_tear_03.mp3",
+   "ann_tear_04.mp3",
+   "ann_tear_05.mp3"
+  ],
+  "headOff": [
+   "ann_headoff_01.mp3",
+   "ann_headoff_02.mp3",
+   "ann_headoff_03.mp3",
+   "ann_headoff_04.mp3"
+  ],
+  "jumpKick": [
+   "ann_jumpkick_01.mp3",
+   "ann_jumpkick_02.mp3",
+   "ann_jumpkick_03.mp3",
+   "ann_jumpkick_04.mp3"
+  ],
+  "dodge": [
+   "ann_dodge_01.mp3",
+   "ann_dodge_02.mp3",
+   "ann_dodge_03.mp3",
+   "ann_dodge_04.mp3"
+  ],
+  "lowHp": [
+   "ann_lowhp_01.mp3",
+   "ann_lowhp_02.mp3",
+   "ann_lowhp_03.mp3",
+   "ann_lowhp_04.mp3"
+  ],
+  "last10": [
+   "ann_last10_01.mp3",
+   "ann_last10_02.mp3",
+   "ann_last10_03.mp3",
+   "ann_last10_04.mp3"
+  ],
+  "roundEnd": [
+   "ann_roundend_01.mp3",
+   "ann_roundend_02.mp3",
+   "ann_roundend_03.mp3",
+   "ann_roundend_04.mp3",
+   "ann_roundend_05.mp3"
+  ],
+  "decision": [
+   "ann_decision_01.mp3",
+   "ann_decision_02.mp3",
+   "ann_decision_03.mp3",
+   "ann_decision_04.mp3"
+  ],
+  "draw": [
+   "ann_draw_01.mp3",
+   "ann_draw_02.mp3"
+  ],
+  "ko": [
+   "ann_ko_01.mp3",
+   "ann_ko_02.mp3",
+   "ann_ko_03.mp3",
+   "ann_ko_04.mp3",
+   "ann_ko_05.mp3"
+  ],
+  "winner": [
+   "ann_win_01.mp3",
+   "ann_win_02.mp3",
+   "ann_win_03.mp3",
+   "ann_win_04.mp3"
+  ],
+  "winnerBlue": [
+   "ann_win_blue_01.mp3",
+   "ann_win_blue_02.mp3",
+   "ann_win_blue_03.mp3"
+  ],
+  "winnerRed": [
+   "ann_win_red_01.mp3",
+   "ann_win_red_02.mp3",
+   "ann_win_red_03.mp3"
+  ],
+  "rematch": [
+   "ann_rematch_01.mp3",
+   "ann_rematch_02.mp3",
+   "ann_rematch_03.mp3",
+   "ann_rematch_04.mp3"
+  ]
+ },
+ "clips": {
+  "ann_intro_01": {
+   "event": "intro",
+   "text": "Ladies and gentlemen... welcome to ROBOT FIGHT!",
+   "file": "ann_intro_01.mp3",
+   "duration_s": 3.63
+  },
+  "ann_intro_02": {
+   "event": "intro",
+   "text": "The floor is lit! Welcome to ROBOT FIGHT!",
+   "file": "ann_intro_02.mp3",
+   "duration_s": 3.16
+  },
+  "ann_intro_03": {
+   "event": "intro",
+   "text": "This is ROBOT FIGHT! The marks are set... let's work!",
+   "file": "ann_intro_03.mp3",
+   "duration_s": 4.39
+  },
+  "ann_intro_04": {
+   "event": "intro",
+   "text": "Welcome to ROBOT FIGHT! Chassis ready... sparks ready!",
+   "file": "ann_intro_04.mp3",
+   "duration_s": 4.55
+  },
+  "ann_intro_blue_01": {
+   "event": "introBlue",
+   "text": "In the blue marks... a fighter built to work!",
+   "file": "ann_intro_blue_01.mp3",
+   "duration_s": 2.98
+  },
+  "ann_intro_blue_02": {
+   "event": "introBlue",
+   "text": "Blue marks! Ready to spark it up!",
+   "file": "ann_intro_blue_02.mp3",
+   "duration_s": 2.43
+  },
+  "ann_intro_blue_03": {
+   "event": "introBlue",
+   "text": "And now, the blue marks... let's see that chassis move!",
+   "file": "ann_intro_blue_03.mp3",
+   "duration_s": 3.37
+  },
+  "ann_intro_blue_04": {
+   "event": "introBlue",
+   "text": "From the blue marks... no tricks, just work!",
+   "file": "ann_intro_blue_04.mp3",
+   "duration_s": 3.03
+  },
+  "ann_intro_red_01": {
+   "event": "introRed",
+   "text": "In the red marks... built to finish the night!",
+   "file": "ann_intro_red_01.mp3",
+   "duration_s": 2.93
+  },
+  "ann_intro_red_02": {
+   "event": "introRed",
+   "text": "Red marks! That chassis came to trade!",
+   "file": "ann_intro_red_02.mp3",
+   "duration_s": 2.74
+  },
+  "ann_intro_red_03": {
+   "event": "introRed",
+   "text": "And now, the red marks... don't blink!",
+   "file": "ann_intro_red_03.mp3",
+   "duration_s": 2.82
+  },
+  "ann_intro_red_04": {
+   "event": "introRed",
+   "text": "From the red marks... hard joints, bad intentions!",
+   "file": "ann_intro_red_04.mp3",
+   "duration_s": 3.5
+  },
+  "ann_round_1_01": {
+   "event": "round1",
+   "text": "ROUND ONE! Spark it UP!",
+   "file": "ann_round_1_01.mp3",
+   "duration_s": 2.27
+  },
+  "ann_round_1_02": {
+   "event": "round1",
+   "text": "ROUND ONE! The floor is LIIIVE!",
+   "file": "ann_round_1_02.mp3",
+   "duration_s": 2.8
+  },
+  "ann_round_1_03": {
+   "event": "round1",
+   "text": "ROUND ONE! Let's WORK!",
+   "file": "ann_round_1_03.mp3",
+   "duration_s": 2.32
+  },
+  "ann_round_2_01": {
+   "event": "round2",
+   "text": "ROUND TWO! Back to work!",
+   "file": "ann_round_2_01.mp3",
+   "duration_s": 2.46
+  },
+  "ann_round_2_02": {
+   "event": "round2",
+   "text": "ROUND TWO! The floor is live!",
+   "file": "ann_round_2_02.mp3",
+   "duration_s": 2.66
+  },
+  "ann_round_2_03": {
+   "event": "round2",
+   "text": "ROUND TWO! Spark it UP!",
+   "file": "ann_round_2_03.mp3",
+   "duration_s": 2.4
+  },
+  "ann_round_3_01": {
+   "event": "round3",
+   "text": "ROUND THREE! Leave it all on the floor!",
+   "file": "ann_round_3_01.mp3",
+   "duration_s": 2.98
+  },
+  "ann_round_3_02": {
+   "event": "round3",
+   "text": "ROUND THREE! No more waiting!",
+   "file": "ann_round_3_02.mp3",
+   "duration_s": 2.53
+  },
+  "ann_round_3_03": {
+   "event": "round3",
+   "text": "ROUND THREE! Spark it UP!",
+   "file": "ann_round_3_03.mp3",
+   "duration_s": 2.43
+  },
+  "ann_round_4_01": {
+   "event": "round4",
+   "text": "ROUND FOUR! Still nobody's night!",
+   "file": "ann_round_4_01.mp3",
+   "duration_s": 2.77
+  },
+  "ann_round_4_02": {
+   "event": "round4",
+   "text": "ROUND FOUR! The floor is still live!",
+   "file": "ann_round_4_02.mp3",
+   "duration_s": 2.87
+  },
+  "ann_round_4_03": {
+   "event": "round4",
+   "text": "ROUND FOUR! Keep working!",
+   "file": "ann_round_4_03.mp3",
+   "duration_s": 2.46
+  },
+  "ann_round_5_01": {
+   "event": "round5",
+   "text": "ROUND FIVE! This one decides it!",
+   "file": "ann_round_5_01.mp3",
+   "duration_s": 2.9
+  },
+  "ann_round_5_02": {
+   "event": "round5",
+   "text": "ROUND FIVE! Everything on the floor!",
+   "file": "ann_round_5_02.mp3",
+   "duration_s": 2.98
+  },
+  "ann_round_5_03": {
+   "event": "round5",
+   "text": "ROUND FIVE! Spark it UP!",
+   "file": "ann_round_5_03.mp3",
+   "duration_s": 2.48
+  },
+  "ann_round_final_01": {
+   "event": "roundFinal",
+   "text": "FINAL ROUND! One of you goes dark!",
+   "file": "ann_round_final_01.mp3",
+   "duration_s": 2.82
+  },
+  "ann_round_final_02": {
+   "event": "roundFinal",
+   "text": "FINAL ROUND! The floor is yours!",
+   "file": "ann_round_final_02.mp3",
+   "duration_s": 2.82
+  },
+  "ann_round_final_03": {
+   "event": "roundFinal",
+   "text": "FINAL ROUND! Finish this!",
+   "file": "ann_round_final_03.mp3",
+   "duration_s": 2.48
+  },
+  "ann_fight_01": {
+   "event": "fight",
+   "text": "FIIIIGHT!",
+   "file": "ann_fight_01.mp3",
+   "duration_s": 0.94
+  },
+  "ann_fight_02": {
+   "event": "fight",
+   "text": "WORK!",
+   "file": "ann_fight_02.mp3",
+   "duration_s": 0.78
+  },
+  "ann_fight_03": {
+   "event": "fight",
+   "text": "Spark it UP!",
+   "file": "ann_fight_03.mp3",
+   "duration_s": 0.97
+  },
+  "ann_fight_04": {
+   "event": "fight",
+   "text": "Get to it!",
+   "file": "ann_fight_04.mp3",
+   "duration_s": 0.84
+  },
+  "ann_fight_05": {
+   "event": "fight",
+   "text": "NOW!",
+   "file": "ann_fight_05.mp3",
+   "duration_s": 0.78
+  },
+  "ann_bighit_01": {
+   "event": "bigHit",
+   "text": "What a SHOT!",
+   "file": "ann_bighit_01.mp3",
+   "duration_s": 0.97
+  },
+  "ann_bighit_02": {
+   "event": "bigHit",
+   "text": "That one LANDED!",
+   "file": "ann_bighit_02.mp3",
+   "duration_s": 1.25
+  },
+  "ann_bighit_03": {
+   "event": "bigHit",
+   "text": "Oh, that chassis felt it!",
+   "file": "ann_bighit_03.mp3",
+   "duration_s": 1.38
+  },
+  "ann_bighit_04": {
+   "event": "bigHit",
+   "text": "Clean shot!",
+   "file": "ann_bighit_04.mp3",
+   "duration_s": 0.91
+  },
+  "ann_bighit_05": {
+   "event": "bigHit",
+   "text": "Right on the metal!",
+   "file": "ann_bighit_05.mp3",
+   "duration_s": 1.07
+  },
+  "ann_combo_01": {
+   "event": "combo",
+   "text": "Combination! They're stacking it!",
+   "file": "ann_combo_01.mp3",
+   "duration_s": 2.35
+  },
+  "ann_combo_02": {
+   "event": "combo",
+   "text": "One, two, THREE!",
+   "file": "ann_combo_02.mp3",
+   "duration_s": 1.31
+  },
+  "ann_combo_03": {
+   "event": "combo",
+   "text": "That's a string! Keep working!",
+   "file": "ann_combo_03.mp3",
+   "duration_s": 2.25
+  },
+  "ann_combo_04": {
+   "event": "combo",
+   "text": "Back to back shots!",
+   "file": "ann_combo_04.mp3",
+   "duration_s": 1.31
+  },
+  "ann_kd_01": {
+   "event": "knockdown",
+   "text": "Chassis DOWWN!",
+   "file": "ann_kd_01.mp3",
+   "duration_s": 1.2
+  },
+  "ann_kd_02": {
+   "event": "knockdown",
+   "text": "On the floor!",
+   "file": "ann_kd_02.mp3",
+   "duration_s": 1.02
+  },
+  "ann_kd_03": {
+   "event": "knockdown",
+   "text": "That one put it down!",
+   "file": "ann_kd_03.mp3",
+   "duration_s": 1.38
+  },
+  "ann_kd_04": {
+   "event": "knockdown",
+   "text": "Knocked dowwwn!",
+   "file": "ann_kd_04.mp3",
+   "duration_s": 1.2
+  },
+  "ann_kd_05": {
+   "event": "knockdown",
+   "text": "The marks have it!",
+   "file": "ann_kd_05.mp3",
+   "duration_s": 1.07
+  },
+  "ann_getup_01": {
+   "event": "getup",
+   "text": "Back up! Still in it!",
+   "file": "ann_getup_01.mp3",
+   "duration_s": 1.88
+  },
+  "ann_getup_02": {
+   "event": "getup",
+   "text": "It's up! The work isn't done!",
+   "file": "ann_getup_02.mp3",
+   "duration_s": 2.06
+  },
+  "ann_getup_03": {
+   "event": "getup",
+   "text": "On its feet! Let's go!",
+   "file": "ann_getup_03.mp3",
+   "duration_s": 2.14
+  },
+  "ann_getup_04": {
+   "event": "getup",
+   "text": "It stands! The floor is live!",
+   "file": "ann_getup_04.mp3",
+   "duration_s": 2.32
+  },
+  "ann_tear_01": {
+   "event": "tear",
+   "text": "A piece comes OFF!",
+   "file": "ann_tear_01.mp3",
+   "duration_s": 1.46
+  },
+  "ann_tear_02": {
+   "event": "tear",
+   "text": "There goes a limb!",
+   "file": "ann_tear_02.mp3",
+   "duration_s": 1.12
+  },
+  "ann_tear_03": {
+   "event": "tear",
+   "text": "Torn away! Sparks on the floor!",
+   "file": "ann_tear_03.mp3",
+   "duration_s": 2.56
+  },
+  "ann_tear_04": {
+   "event": "tear",
+   "text": "Chassis coming apart!",
+   "file": "ann_tear_04.mp3",
+   "duration_s": 1.31
+  },
+  "ann_tear_05": {
+   "event": "tear",
+   "text": "That part is GONE!",
+   "file": "ann_tear_05.mp3",
+   "duration_s": 1.41
+  },
+  "ann_headoff_01": {
+   "event": "headOff",
+   "text": "The HEAD is OFF!",
+   "file": "ann_headoff_01.mp3",
+   "duration_s": 1.1
+  },
+  "ann_headoff_02": {
+   "event": "headOff",
+   "text": "Head gone! That chassis is blind!",
+   "file": "ann_headoff_02.mp3",
+   "duration_s": 2.59
+  },
+  "ann_headoff_03": {
+   "event": "headOff",
+   "text": "It lost the head!",
+   "file": "ann_headoff_03.mp3",
+   "duration_s": 1.12
+  },
+  "ann_headoff_04": {
+   "event": "headOff",
+   "text": "Head torn clean off!",
+   "file": "ann_headoff_04.mp3",
+   "duration_s": 1.38
+  },
+  "ann_jumpkick_01": {
+   "event": "jumpKick",
+   "text": "Look at that KICK!",
+   "file": "ann_jumpkick_01.mp3",
+   "duration_s": 1.2
+  },
+  "ann_jumpkick_02": {
+   "event": "jumpKick",
+   "text": "Off the floor! What a strike!",
+   "file": "ann_jumpkick_02.mp3",
+   "duration_s": 2.22
+  },
+  "ann_jumpkick_03": {
+   "event": "jumpKick",
+   "text": "A jumping shot!",
+   "file": "ann_jumpkick_03.mp3",
+   "duration_s": 1.15
+  },
+  "ann_jumpkick_04": {
+   "event": "jumpKick",
+   "text": "High kick! Beautiful work!",
+   "file": "ann_jumpkick_04.mp3",
+   "duration_s": 2.12
+  },
+  "ann_dodge_01": {
+   "event": "dodge",
+   "text": "It slips away!",
+   "file": "ann_dodge_01.mp3",
+   "duration_s": 1.18
+  },
+  "ann_dodge_02": {
+   "event": "dodge",
+   "text": "What a dodge!",
+   "file": "ann_dodge_02.mp3",
+   "duration_s": 1.07
+  },
+  "ann_dodge_03": {
+   "event": "dodge",
+   "text": "Flip! It got out!",
+   "file": "ann_dodge_03.mp3",
+   "duration_s": 1.75
+  },
+  "ann_dodge_04": {
+   "event": "dodge",
+   "text": "Missed! That chassis is quick!",
+   "file": "ann_dodge_04.mp3",
+   "duration_s": 2.06
+  },
+  "ann_lowhp_01": {
+   "event": "lowHp",
+   "text": "That chassis is sparking! It won't last!",
+   "file": "ann_lowhp_01.mp3",
+   "duration_s": 2.82
+  },
+  "ann_lowhp_02": {
+   "event": "lowHp",
+   "text": "One more clean shot could end this!",
+   "file": "ann_lowhp_02.mp3",
+   "duration_s": 1.91
+  },
+  "ann_lowhp_03": {
+   "event": "lowHp",
+   "text": "Running on fumes! Finish it!",
+   "file": "ann_lowhp_03.mp3",
+   "duration_s": 2.38
+  },
+  "ann_lowhp_04": {
+   "event": "lowHp",
+   "text": "The metal is failing! This is it!",
+   "file": "ann_lowhp_04.mp3",
+   "duration_s": 2.35
+  },
+  "ann_last10_01": {
+   "event": "last10",
+   "text": "TEN SECONDS!",
+   "file": "ann_last10_01.mp3",
+   "duration_s": 1.23
+  },
+  "ann_last10_02": {
+   "event": "last10",
+   "text": "Ten seconds left! Work!",
+   "file": "ann_last10_02.mp3",
+   "duration_s": 2.19
+  },
+  "ann_last10_03": {
+   "event": "last10",
+   "text": "The clock is almost gone!",
+   "file": "ann_last10_03.mp3",
+   "duration_s": 1.59
+  },
+  "ann_last10_04": {
+   "event": "last10",
+   "text": "Final seconds! Finish this!",
+   "file": "ann_last10_04.mp3",
+   "duration_s": 2.27
+  },
+  "ann_roundend_01": {
+   "event": "roundEnd",
+   "text": "That's the round!",
+   "file": "ann_roundend_01.mp3",
+   "duration_s": 1.07
+  },
+  "ann_roundend_02": {
+   "event": "roundEnd",
+   "text": "Time! Back to the marks!",
+   "file": "ann_roundend_02.mp3",
+   "duration_s": 2.06
+  },
+  "ann_roundend_03": {
+   "event": "roundEnd",
+   "text": "Round over! What a trade!",
+   "file": "ann_roundend_03.mp3",
+   "duration_s": 2.25
+  },
+  "ann_roundend_04": {
+   "event": "roundEnd",
+   "text": "And... time!",
+   "file": "ann_roundend_04.mp3",
+   "duration_s": 1.59
+  },
+  "ann_roundend_05": {
+   "event": "roundEnd",
+   "text": "The floor is clear! That's the round!",
+   "file": "ann_roundend_05.mp3",
+   "duration_s": 2.53
+  },
+  "ann_decision_01": {
+   "event": "decision",
+   "text": "We go to the cards!",
+   "file": "ann_decision_01.mp3",
+   "duration_s": 1.36
+  },
+  "ann_decision_02": {
+   "event": "decision",
+   "text": "No knockout... it's a decision!",
+   "file": "ann_decision_02.mp3",
+   "duration_s": 2.64
+  },
+  "ann_decision_03": {
+   "event": "decision",
+   "text": "The work gets a decision!",
+   "file": "ann_decision_03.mp3",
+   "duration_s": 1.59
+  },
+  "ann_decision_04": {
+   "event": "decision",
+   "text": "Close one! Decision on the floor!",
+   "file": "ann_decision_04.mp3",
+   "duration_s": 2.61
+  },
+  "ann_draw_01": {
+   "event": "draw",
+   "text": "We can't split them! A draw!",
+   "file": "ann_draw_01.mp3",
+   "duration_s": 2.3
+  },
+  "ann_draw_02": {
+   "event": "draw",
+   "text": "Even metal! Nobody takes the round!",
+   "file": "ann_draw_02.mp3",
+   "duration_s": 2.69
+  },
+  "ann_ko_01": {
+   "event": "ko",
+   "text": "It's a KNOCKOUUUT!",
+   "file": "ann_ko_01.mp3",
+   "duration_s": 1.38
+  },
+  "ann_ko_02": {
+   "event": "ko",
+   "text": "And that's a KNOCKOUT! The floor is closed!",
+   "file": "ann_ko_02.mp3",
+   "duration_s": 3.08
+  },
+  "ann_ko_03": {
+   "event": "ko",
+   "text": "OUT! That chassis is dark!",
+   "file": "ann_ko_03.mp3",
+   "duration_s": 2.19
+  },
+  "ann_ko_04": {
+   "event": "ko",
+   "text": "Knockout! What a finish!",
+   "file": "ann_ko_04.mp3",
+   "duration_s": 2.01
+  },
+  "ann_ko_05": {
+   "event": "ko",
+   "text": "It's over! A clean knockout!",
+   "file": "ann_ko_05.mp3",
+   "duration_s": 2.32
+  },
+  "ann_win_01": {
+   "event": "winner",
+   "text": "That's the night! What a fight!",
+   "file": "ann_win_01.mp3",
+   "duration_s": 2.14
+  },
+  "ann_win_02": {
+   "event": "winner",
+   "text": "The floor goes to the winner!",
+   "file": "ann_win_02.mp3",
+   "duration_s": 1.54
+  },
+  "ann_win_03": {
+   "event": "winner",
+   "text": "Winner! The work is done!",
+   "file": "ann_win_03.mp3",
+   "duration_s": 2.04
+  },
+  "ann_win_04": {
+   "event": "winner",
+   "text": "It takes the night!",
+   "file": "ann_win_04.mp3",
+   "duration_s": 1.07
+  },
+  "ann_win_blue_01": {
+   "event": "winnerBlue",
+   "text": "Blue marks take the night!",
+   "file": "ann_win_blue_01.mp3",
+   "duration_s": 1.41
+  },
+  "ann_win_blue_02": {
+   "event": "winnerBlue",
+   "text": "The floor goes to blue!",
+   "file": "ann_win_blue_02.mp3",
+   "duration_s": 1.54
+  },
+  "ann_win_blue_03": {
+   "event": "winnerBlue",
+   "text": "Blue wins it!",
+   "file": "ann_win_blue_03.mp3",
+   "duration_s": 0.94
+  },
+  "ann_win_red_01": {
+   "event": "winnerRed",
+   "text": "Red marks take the night!",
+   "file": "ann_win_red_01.mp3",
+   "duration_s": 1.44
+  },
+  "ann_win_red_02": {
+   "event": "winnerRed",
+   "text": "The floor goes to red!",
+   "file": "ann_win_red_02.mp3",
+   "duration_s": 1.41
+  },
+  "ann_win_red_03": {
+   "event": "winnerRed",
+   "text": "Red wins it!",
+   "file": "ann_win_red_03.mp3",
+   "duration_s": 0.94
+  },
+  "ann_rematch_01": {
+   "event": "rematch",
+   "text": "Rematch! Back to the marks!",
+   "file": "ann_rematch_01.mp3",
+   "duration_s": 2.14
+  },
+  "ann_rematch_02": {
+   "event": "rematch",
+   "text": "One more time! The floor is lit!",
+   "file": "ann_rematch_02.mp3",
+   "duration_s": 2.56
+  },
+  "ann_rematch_03": {
+   "event": "rematch",
+   "text": "They want it again! Spark it UP!",
+   "file": "ann_rematch_03.mp3",
+   "duration_s": 2.38
+  },
+  "ann_rematch_04": {
+   "event": "rematch",
+   "text": "Rematch! Let's work!",
+   "file": "ann_rematch_04.mp3",
+   "duration_s": 1.88
+  }
+ }
+}

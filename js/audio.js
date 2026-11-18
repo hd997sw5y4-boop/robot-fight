@@ -3,17 +3,10 @@
    Squared volume taper is from WW3D addons/master-volume.js. */
 
 const BASE = './sounds/';
-// Basic announcer (Kokoro TTS, Apache-2.0; original lines): only round start, round end,
-// knockdown and KO. A few clips per event, picked without immediate repeats.
-const ANNOUNCER = {
-  round1: ['ann_round_1_01.mp3', 'ann_round_1_02.mp3', 'ann_round_1_03.mp3'],
-  round2: ['ann_round_2_01.mp3', 'ann_round_2_02.mp3', 'ann_round_2_03.mp3'],
-  round3: ['ann_round_3_01.mp3', 'ann_round_3_02.mp3', 'ann_round_3_03.mp3'],
-  roundFinal: ['ann_round_final_01.mp3', 'ann_round_final_02.mp3', 'ann_round_final_03.mp3'],
-  roundEnd: ['ann_roundend_01.mp3', 'ann_roundend_02.mp3', 'ann_roundend_05.mp3'],
-  knockdown: ['ann_kd_01.mp3', 'ann_kd_02.mp3', 'ann_kd_03.mp3', 'ann_kd_05.mp3'],
-  ko: ['ann_ko_01.mp3', 'ann_ko_03.mp3', 'ann_ko_05.mp3'],
-};
+// Announcer clips are listed in sounds/announcer/manifest.json and registered by js/announcer.js.
+// They play dry on the voice bus; a light send into the arena reverb is applied here.
+const announcerFiles = new Set();
+const ANN_VER = 'excited-d-1';
 
 const BANK = {
   tick: ['ui_tick.ogg'],
@@ -99,22 +92,42 @@ function applyGains() {
   if (voice) set(voice, taper(voiceLevel));
 }
 
+async function decodeSound(name) {
+  if (!ctx || buffers.has(name)) return;
+  try {
+    const cache = name.startsWith('announcer/') ? '?v=' + ANN_VER : '';
+    const res = await fetch(BASE + name + cache);
+    if (!res.ok) return;
+    const raw = await res.arrayBuffer();
+    const buf = await ctx.decodeAudioData(raw.slice(0));
+    buffers.set(name, buf);
+  } catch (_) {}
+}
+
+export function registerSoundFiles(names) {
+  const added = [];
+  for (const n of names || []) {
+    const name = n.startsWith('announcer/') || n.includes('/') ? n : 'announcer/' + n;
+    if (!announcerFiles.has(name)) {
+      announcerFiles.add(name);
+      added.push(name);
+    }
+  }
+  if (added.length && ctx && (loaded || loading)) {
+    const p = Promise.all(added.map((n) => decodeSound(n)));
+    if (loading) loading = loading.then(() => p);
+    else loading = p.then(() => { loading = null; });
+  }
+}
+
 async function loadAll() {
   if (loaded) return;
   if (loading) return loading;
   if (!ctx) return;
   const files = new Set(['crowd_loop.ogg', 'buzz_loop.ogg', 'arena_hum.ogg']);
   for (const list of Object.values(BANK)) for (const f of list) files.add(f);
-  for (const list of Object.values(ANNOUNCER)) for (const f of list) files.add('announcer/' + f);
-  loading = Promise.all([...files].map(async (name) => {
-    try {
-      const res = await fetch(BASE + name);
-      if (!res.ok) return;
-      const raw = await res.arrayBuffer();
-      const buf = await ctx.decodeAudioData(raw.slice(0));
-      buffers.set(name, buf);
-    } catch (_) {}
-  })).then(() => {
+  for (const f of announcerFiles) files.add(f);
+  loading = Promise.all([...files].map((name) => decodeSound(name))).then(() => {
     loaded = true;
     loading = null;
     hookConvolver();
@@ -424,42 +437,51 @@ export function playSfx(kind, opts = {}) {
   }
 }
 
-// Announcer line for an event: 'round' (opts.n, opts.final), 'roundEnd', 'knockdown', 'ko'.
-// One voice channel: round/KO calls cut off whatever is playing; a knockdown call is skipped
-// if the announcer is mid-line. Crowd and arena hum duck slightly under the voice.
-export function announce(event, opts = {}) {
+// Play one dry announcer file on the single voice channel. Crowd/hum duck under the line.
+let voiceSources = [];
+
+export function stopVoice() {
+  for (const src of voiceSources) { try { src.stop(); } catch (_) {} }
+  voiceSources = [];
+  voiceSrc = null;
+}
+
+export function isVoiceBusy() {
+  return performance.now() < voiceUntil || !!voiceSrc;
+}
+
+export function voiceClipDuration(file) {
+  const name = file.startsWith('announcer/') ? file : 'announcer/' + file;
+  const buf = buffers.get(name);
+  return buf ? buf.duration : 0;
+}
+
+export function playVoiceClip(file, opts = {}) {
   unlockAudio();
-  if (!ctx || !voice || voiceLevel <= 0 || masterLevel <= 0) return false;
-  let key = event;
-  if (event === 'round') key = opts.final || opts.n > 3 ? 'roundFinal' : 'round' + Math.max(1, opts.n || 1);
-  const list = ANNOUNCER[key];
-  if (!list) return false;
-  const now = performance.now();
-  if (event === 'knockdown' && now < voiceUntil) return false;
-  const files = list.filter((f) => buffers.has('announcer/' + f));
-  if (!files.length) {
-    // First round right after the first click: the clips may still be decoding.
-    if (loading && !opts.retry) loading.then(() => { if (performance.now() - now < 2500) announce(event, { ...opts, delay: 0, retry: true }); });
-    return false;
-  }
-  const file = pick(files, 'ann:' + key);
-  const buf = buffers.get('announcer/' + file);
-  if (voiceSrc) { try { voiceSrc.stop(); } catch (_) {} voiceSrc = null; }
+  if (!ctx || !voice || voiceLevel <= 0 || masterLevel <= 0) return 0;
+  const name = file.startsWith('announcer/') ? file : 'announcer/' + file;
+  const buf = buffers.get(name);
+  if (!buf) return 0;
+  if (opts.cut !== false) stopVoice();
   const src = ctx.createBufferSource();
   src.buffer = buf;
   src.connect(voice);
   const delay = opts.delay || 0;
   src.start(ctx.currentTime + delay);
   voiceSrc = src;
-  voiceUntil = now + (delay + buf.duration) * 1000 + 150;
+  voiceSources.push(src);
+  voiceUntil = performance.now() + (delay + buf.duration) * 1000 + 150;
   applyGains();
   src.onended = () => {
-    if (voiceSrc === src) voiceSrc = null;
+    const mine = voiceSrc === src;
+    voiceSources = voiceSources.filter((s) => s !== src);
+    if (mine) voiceSrc = null;
     setTimeout(applyGains, 160);
+    // A cut (stopVoice) must not run the previous line's end hook.
+    if (mine && typeof opts.onended === 'function') opts.onended();
   };
-  return true;
+  return buf.duration;
 }
-if (typeof window !== 'undefined') window.RFAnnounce = announce; // shell (non-module) hook
 
 function stopCrowd() {
   if (!crowdSrc) return;

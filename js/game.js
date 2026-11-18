@@ -10,7 +10,8 @@ import { initJointLimits, applyJointLimits } from './joints.js';
 import { setWiresLow } from './wires.js';
 import { createApiBrain, wantsApiBrain, initApiBrainUI } from './api-brain.js';
 import { getSettings, isSettingsOpen, initSettings, updateFps, cycleCameraMode } from './settings.js';
-import { announce, unlockAudio, playSfx, playHit, setBuzz, startCrowd } from './audio.js';
+import { unlockAudio, playSfx, playHit, setBuzz, startCrowd } from './audio.js';
+import { announce, announceIntroSeconds } from './announcer.js';
 import { buildArena as buildArenaVisual, addArenaLights, addFloorReflection } from './arena.js';
 // [stadium-arena hook] stadium scenery lives in its own module.
 import { initStadium, stadiumOwnsEnv, stadiumApplyEnv, stadiumSetGfx, updateStadium } from './arena/stadium.js';
@@ -1105,6 +1106,8 @@ function setAnim(f, name, fade = 0.2) {
   else next.fadeIn(fadeT);
   next.play();
   f.current = clipName;
+  // [announcer hook] dodge clips exist for later use; call only when one actually starts.
+  if ((MODEL.animations.dodgeVariants || []).includes(clipName)) announce('dodge', { delay: 0.05 });
   f.locoActive = !oneshot && isLocoClip(clipName);
   if (oneshot) fadeLocoOut(f, fadeT);
   return next;
@@ -1472,6 +1475,9 @@ function tryAttack(f, kind, clipName) {
   setAnim(f, clip, 0.18); // long enough to blend over the skipped lead-in (no pops)
   setFighterMove(f, 0, 0); // no walking velocity carried into the strike
   playSfx('whoosh');
+  // [announcer hook]
+  const flips = MODEL.animations.flipSpecial || MODEL.animations.kickSpecial || [];
+  if (kind === 'kick' && flips.includes(clip)) announce('jumpKick', { delay: 0.18 });
   const action = f.actions[clip] || f.actions[kind];
   if (action) {
     // Faster strikes: punches ~1.3x, kicks ~1.15x (damage slows them again), starting just
@@ -1745,6 +1751,12 @@ function applyHit(atk, def, spec, kind, strikeBone) {
       def._lastHeavy = null;
       knockDown(def, fwd, force, hit.partId);
     } else {
+      // [announcer hook] combo / heavy shot / low health (knockdowns speak for themselves).
+      atk._hitCombo = (atk._lastLand != null && now - atk._lastLand < 1.15) ? (atk._hitCombo || 0) + 1 : 1;
+      atk._lastLand = now;
+      if (atk._hitCombo >= 3) announce('combo', { n: atk._hitCombo, delay: 0.12 });
+      else if (heavy) announce('bigHit', { delay: 0.1 });
+      if (def.health <= COMBAT.maxHealth * 0.25) announce('lowHp', { side: def === p1 ? 0 : 1, delay: 0.2 });
       def.state = 'hit';
       def.stateT = 0;
       const clip = stumbleClip || pickHitClip(def, hit.partId);
@@ -2016,7 +2028,8 @@ function knockDown(def, fwd, force, partId) {
   if (act) {
     act.time = spec.from;
     act.timeScale = spec.speed;
-  }  announce('knockdown', { delay: 0.35 });
+  }
+  announce('knockdown', { delay: 0.35 }); // [announcer hook]
 }
 
 function stepDown(f, dt) {
@@ -2885,6 +2898,7 @@ function beginGetUp(f) {
   const act = setAnim(f, clip, 0.25);
   // The whole clip, paced to COMBAT.getupTime.
   if (act) act.timeScale = act.getClip().duration / Math.max(0.6, COMBAT.getupTime || 1.25);
+  announce('getup', { delay: 0.2 }); // [announcer hook]
 }
 
 const _hpA = new THREE.Vector3();
@@ -3095,12 +3109,15 @@ function tick() {
   if (match.phase === 'intro') {
     if (!match.introT) document.getElementById('banner').classList.add('show');
     match.introT += dt;
-    if (match.introT > 1.05) {
+    // [announcer hook] hold the "Round N" card until the walkout / round call finishes.
+    const hold = announceIntroSeconds() || 1.05;
+    if (match.introT > hold) {
       match.phase = 'fight';
       document.getElementById('banner').classList.remove('show');
       startRoundClock();
       playSfx('bell');
       startCrowd();
+      announce('fight', { delay: 0.05 });
     }
   }
   if (match.phase === 'fight' && !match.over) stepRound(dt);
