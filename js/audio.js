@@ -546,3 +546,9 @@ export function startCrowd() {
   ensureCrowd();
   ensureHum();
 }
+
+// [stadium-broadcast hook] read-only access for js/arena/music.js: reuse this context and the
+// master bus (so Master volume applies) and know when the announcer is talking (to duck music).
+export function getAudioGraph() {
+  return ctx && master ? { ctx, master, voiceActive: () => performance.now() < voiceUntil } : null;
+}

@@ -7,6 +7,10 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { STADIUM } from './stadium-config.js';
+// [stadium-broadcast] extras driven from the same init/update hooks (no new game.js loop hooks).
+import { initBroadcast, updateBroadcast } from './broadcast.js';
+import { initCrowdCam } from './crowdcam.js';
+import { initMusic, updateMusic } from './music.js';
 
 const ARENAS = ['stadium', 'industrial'];
 
@@ -22,7 +26,8 @@ function readArena() {
 let current = readArena();
 let ctx = null;
 let gfx = 'high';
-let built = null; // { group, lights, env, tick }
+let built = null; // { group, lights, env, tick, screens }
+let buildSerial = 0;
 const hiddenIndustrial = [];
 
 /** True while the stadium owns scene.background / environment / fog. */
@@ -262,6 +267,7 @@ function build(scene, renderer, pmrem, key) {
   group.name = 'stadiumArena';
   const lights = [];
   const tickers = [];
+  const screenMeshes = [];
   const rnd = mulberry(1337);
 
   const texLoader = new THREE.TextureLoader();
@@ -619,6 +625,7 @@ function build(scene, renderer, pmrem, key) {
     s.position.set(Math.sin(a) * (B.size / 2 + 0.01), 0, Math.cos(a) * (B.size / 2 + 0.01));
     s.rotation.y = a;
     board.add(s);
+    screenMeshes.push(s);
   }
   const ribbon3 = ribbonTex(2);
   const ringLed = new THREE.Mesh(new THREE.CylinderGeometry(B.size * 0.62, B.size * 0.62, 0.55, 64, 1, true),
@@ -663,6 +670,7 @@ function build(scene, renderer, pmrem, key) {
     const s = new THREE.Mesh(new THREE.PlaneGeometry(13, 5.9), bigMat);
     s.position.z = 0.21;
     holder.add(s);
+    screenMeshes.push(s);
     group.add(holder);
   }
 
@@ -691,7 +699,8 @@ function build(scene, renderer, pmrem, key) {
 
   scene.add(group);
   const stats = { seats: seatCount, crowd: crowdCount, truss: members.length, gfx: key };
-  return { group, lights, env, stats, tick: (dt) => { for (const t of tickers) t(dt); } };
+  const screens = { meshes: screenMeshes, heavy: [seats, torsos, heads], serial: ++buildSerial };
+  return { group, lights, env, stats, screens, tick: (dt) => { for (const t of tickers) t(dt); } };
 }
 
 const ENV_GAIN = 0.4;
@@ -863,6 +872,15 @@ function injectPicker() {
  * Called once from game.js after the Industrial arena (mat) is built.
  * ctx: { scene, renderer, pmrem, industrial, gfx, applyHdri, getHdri, trackLight, untrackLight, refreshLights }
  */
+/** [stadium-broadcast] Scoreboard / end-wall screen meshes (null when Industrial). */
+export function stadiumScreens() {
+  return built ? built.screens : null;
+}
+
+export function stadiumGfx() {
+  return gfx;
+}
+
 export function initStadium(c) {
   ctx = c;
   gfx = c.gfx === 'low' ? 'low' : 'high';
@@ -870,9 +888,14 @@ export function initStadium(c) {
   window.__rfSetArena = setArena;
   window.__rfGetArena = getArena;
   if (stadiumOwnsEnv()) rebuild();
+  try { initCrowdCam(c); } catch (e) { console.warn('[crowd cam]', e); }
+  try { initBroadcast(c); } catch (e) { console.warn('[broadcast]', e); }
+  try { initMusic(c); } catch (e) { console.warn('[music]', e); }
 }
 
 /** Per-frame: scrolls LED ribbons. Cheap (texture offsets only). */
 export function updateStadium(dt) {
   if (built && dt > 0) built.tick(Math.min(dt, 0.1));
+  updateMusic(dt);
+  updateBroadcast(dt);
 }

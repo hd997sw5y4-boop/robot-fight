@@ -94,3 +94,14 @@ The arena reverb impulse (~1.6 s, early reflections plus a darkening tail) is ge
 ## Stadium arena (original design)
 
 The stadium (`js/arena/stadium.js`) is an original layout built from code: stepped concrete bowls, instanced seats and crowd, roof truss, lights and screens. Screen and LED-board graphics are drawn at runtime on canvases with generic text (Robot Fight / Window Workshop Games); no third-party logos, leagues or brands. Its only file asset is ambientCG Concrete034 (CC0 1.0, above).
+
+## Background music — CC0 1.0 (OpenGameArt)
+
+Re-encoded to small Ogg Vorbis files in `sounds/music/`; mixed low in `js/arena/music.js`. No attribution required (credit given anyway).
+
+- **Cathedral in the forest (ambient loop)** — congusbongus, https://opengameart.org/content/cathedral-in-the-forest-ambient-loop — CC0 1.0. Menus and intros. Game file: `sounds/music/menu_cathedral.ogg`.
+- **Tense Future Loop** — gmason, https://opengameart.org/content/tense-future-loop — CC0 1.0. Fights (quieter). Game file: `sounds/music/fight_tense_future.ogg`.
+
+## Stadium broadcast and crowd watch
+
+The scoreboard feed, replay graphics and crowd-watch seat (`js/arena/broadcast.js`, `js/arena/crowdcam.js`) are original code with no third-party assets.

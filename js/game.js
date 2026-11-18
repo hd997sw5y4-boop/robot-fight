@@ -14,6 +14,7 @@ import { announce, unlockAudio, playSfx, playHit, setBuzz, startCrowd } from './
 import { buildArena as buildArenaVisual, addArenaLights, addFloorReflection } from './arena.js';
 // [stadium-arena hook] stadium scenery lives in its own module.
 import { initStadium, stadiumOwnsEnv, stadiumApplyEnv, stadiumSetGfx, updateStadium } from './arena/stadium.js';
+import { updateCrowdCam } from './arena/crowdcam.js'; // [stadium-broadcast hook]
 import {
   initArenaPhysics,
   attachFighter,
@@ -2751,6 +2752,8 @@ function updateFollowCamera(dt, mode) {
 }
 
 function updateCamera(dt) {
+  // [stadium-broadcast hook] crowd-watch seat (V-cycle 'crowd') and VR own the camera when active.
+  if (updateCrowdCam(camera, dt)) { setFirstPersonHide(false); camModeLive = 'crowd'; return; }
   const mode = match.over ? 'arena' : cameraMode();
   if (mode !== camModeLive) {
     camModeLive = mode;
@@ -3225,6 +3228,8 @@ function onLoad(gltf) {
     trackLight,
     untrackLight(l) { const i = litLights.indexOf(l); if (i >= 0) litLights.splice(i, 1); },
     refreshLights: () => applyLight(getSettings().light),
+    // [stadium-broadcast hook] read-only getters for crowd cam / broadcast feed / music.
+    camera, canvas, getFighters: () => [p1, p2], getMatch: () => match,
   });
   initArenaPhysics();
   p1 = makeFighter(gltf, MODEL.colors.p1, 'p1');

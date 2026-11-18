@@ -39,6 +39,10 @@ The part-to-bone map lives in `js/config.js` (`DAMAGE.bind`) so a later Mixamo-r
 - **Stadium** (default): an original indoor stadium around the same fight mat, in `js/arena/stadium.js` with its config/flag in `js/arena/stadium-config.js` (`STADIUM.enabled`, `STADIUM.defaultArena`). Two tiered bowls with instanced seats and crowd, roof truss, ring spot cans with fake light cones, flood banks, a center-hung four-sided scoreboard, end-wall screens and LED ribbon boards. Low graphics uses fewer crowd/seat instances, a simpler truss, fewer cones and no extra lights. Only the existing mat spotlight casts shadows.
 - **Industrial**: the original chrome mat under the Poly Haven Industrial Pipe and Valve HDRI.
 
+- **Crowd watch** (`js/arena/crowdcam.js`): camera view `crowd` in the V-key cycle and Settings → Camera view — a seat in the lower bowl; drag to look, double-click to recenter. On headsets that support `immersive-vr` an **Enter VR** button seats you there (seated `local` reference space, meters; no camera motion is applied in VR).
+- **Broadcast feed** (`js/arena/broadcast.js`): the hanging scoreboard and end-wall screens show a 384×216 live feed (16 fps, 8 fps in VR, no extra shadow pass) that auto-cuts between wide, ringside low, overhead and close-ups. Big hits, knockdowns, torn-off parts and the KO get a slow-motion instant replay from a different angle with a REPLAY tag (a ring buffer of fighter node transforms, read-only state polling). Off on Low graphics (static screen art).
+- **Music** (`js/arena/music.js`): two CC0 loops, quieter in fights, ducked under the announcer, through the game's own audio master bus. Settings → Sound → Music (saved as `rf_music`). Starts after the first click or key press.
+
 Pick one in Settings → Display → Arena (saved in `localStorage` as `rf_arena`). Switching disposes the stadium's geometry, textures, lights and environment map. The mat, ring colliders and grounding are the same in both. Hooks in `js/game.js` are marked `[stadium-arena hook]`.
 
 The octagon cage/fence is turned off for now (`ARENA.cage` in `js/config.js`); an invisible ring collider still keeps fighters and loose parts on the mat.
