@@ -57,15 +57,23 @@ export function initArenaPhysics() {
     const ang = i * Math.PI / 4 + Math.PI / 8;
     corners.push(new THREE.Vector3(Math.cos(ang) * r, 0, Math.sin(ang) * r));
   }
+  // Visual cage is waist-to-chest (ARENA.cageHeight). Same footprint: inner face
+  // flush with the mat flats (apothem). A taller invisible extension of that wall
+  // keeps jump / knockback from leaving the ring — one cage, not two.
+  const visH = ARENA.cageHeight || 1.48;
+  const physH = Math.max(visH, 2.15);
+  const halfT = 0.06;
   for (let i = 0; i < 8; i++) {
     const A = corners[i];
     const B = corners[(i + 1) % 8];
     const mid = A.clone().add(B).multiplyScalar(0.5);
     const dir = B.clone().sub(A);
     const len = dir.length();
+    const outward = mid.clone().setY(0).normalize();
+    mid.addScaledVector(outward, halfT); // inner face at apothem a
     const wall = new CANNON.Body({ mass: 0, material: matCage, type: CANNON.Body.STATIC });
-    wall.addShape(new CANNON.Box(new CANNON.Vec3(len / 2, 1.7, 0.09)));
-    wall.position.set(mid.x, 1.7, mid.z);
+    wall.addShape(new CANNON.Box(new CANNON.Vec3(len / 2, physH / 2, halfT)));
+    wall.position.set(mid.x, physH / 2, mid.z);
     const yaw = Math.atan2(dir.x, dir.z) + Math.PI / 2;
     wall.quaternion.setFromEuler(0, yaw, 0);
     wall.collisionFilterGroup = G.ARENA;
@@ -75,8 +83,8 @@ export function initArenaPhysics() {
   }
   for (const c of corners) {
     const post = new CANNON.Body({ mass: 0, material: matCage, type: CANNON.Body.STATIC });
-    post.addShape(new CANNON.Cylinder(0.16, 0.16, 3.2, 8));
-    post.position.set(c.x, 1.6, c.z);
+    post.addShape(new CANNON.Cylinder(0.11, 0.11, physH, 8));
+    post.position.set(c.x, physH / 2, c.z);
     post.collisionFilterGroup = G.ARENA;
     post.collisionFilterMask = G.FIGHTER | G.DEBRIS;
     post.userData = { kind: 'post' };

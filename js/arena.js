@@ -1,138 +1,36 @@
 'use strict';
-/* Cage, chrome mat, lights, and (optional) visible fence aimed at the approved concept art. */
+/* Octagon MMA cage, painted metal mat (ambientCG Metal001 + decals), lights, and fade. */
 import * as THREE from 'three';
-import { ARENA } from './config.js';
+import { ARENA, SIZE } from './config.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
-
-const chromeTexLoader = new THREE.TextureLoader();
-let chromeMaps = null;
-let chromeWaiters = [];
-
-function loadImage(url) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = url;
-  });
-}
-
-function mixChromeMaps(chromeColor, chromeRough, chromeMetal, rustColor, rustRough) {
-  const size = 1024;
-  const c = document.createElement('canvas');
-  c.width = c.height = size;
-  const g = c.getContext('2d', { willReadFrequently: true });
-  const scratch = document.createElement('canvas');
-  scratch.width = scratch.height = size;
-  const sg = scratch.getContext('2d', { willReadFrequently: true });
-  const blit = (img) => { sg.clearRect(0, 0, size, size); sg.drawImage(img, 0, 0, size, size); return sg.getImageData(0, 0, size, size).data; };
-  const col = blit(chromeColor);
-  const rgh = blit(chromeRough);
-  const met = blit(chromeMetal);
-  const rst = blit(rustColor);
-  const rrg = blit(rustRough);
-  const albedo = g.createImageData(size, size);
-  const rough = g.createImageData(size, size);
-  const metal = g.createImageData(size, size);
-  for (let i = 0; i < col.length; i += 4) {
-    // Rust mask: reddish patches only, contrast-crushed so most of the mat stays chrome.
-    const rust = Math.max(0, (rst[i] * 1.15 - rst[i + 1] * 0.45 - rst[i + 2] * 0.2) / 255);
-    const scuff = Math.max(0, (rgh[i] / 255 - 0.42) * 1.6);
-    const stain = Math.min(1, rust * rust * 3.2 + scuff * 0.55);
-    const cr = col[i], cg = col[i + 1], cb = col[i + 2];
-    // Brighten the base toward chrome silver, then overlay rust and darker scuffs.
-    const sr = Math.min(255, cr * 1.35 + 18);
-    const sgv = Math.min(255, cg * 1.32 + 20);
-    const sb = Math.min(255, cb * 1.28 + 24);
-    albedo.data[i] = sr * (1 - stain) + rst[i] * stain;
-    albedo.data[i + 1] = sgv * (1 - stain) + rst[i + 1] * stain;
-    albedo.data[i + 2] = sb * (1 - stain) + rst[i + 2] * stain;
-    albedo.data[i + 3] = 255;
-    const chromeR = 0.08 + (rgh[i] / 255) * 0.28;
-    const rustR = 0.42 + (rrg[i] / 255) * 0.5;
-    const rv = Math.min(1, chromeR * (1 - stain) + rustR * stain);
-    const r8 = Math.round(rv * 255);
-    rough.data[i] = rough.data[i + 1] = rough.data[i + 2] = r8;
-    rough.data[i + 3] = 255;
-    const chromeM = 0.88 + (met[i] / 255) * 0.12;
-    const rustM = 0.22 + (met[i] / 255) * 0.15;
-    const m8 = Math.round(Math.min(1, chromeM * (1 - stain) + rustM * stain) * 255);
-    metal.data[i] = metal.data[i + 1] = metal.data[i + 2] = m8;
-    metal.data[i + 3] = 255;
-  }
-  const toTex = (data, srgb) => {
-    const cv = document.createElement('canvas');
-    cv.width = cv.height = size;
-    cv.getContext('2d').putImageData(data, 0, 0);
-    const tex = new THREE.CanvasTexture(cv);
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.anisotropy = 8;
-    tex.needsUpdate = true;
-    if (srgb) tex.colorSpace = THREE.SRGBColorSpace;
-    return tex;
-  };
-  return { map: toTex(albedo, true), roughnessMap: toTex(rough, false), metalnessMap: toTex(metal, false) };
-}
-
-function requestChromeMaps() {
-  if (chromeMaps) return Promise.resolve(chromeMaps);
-  return Promise.all([
-    loadImage('./textures/chrome_color.jpg'),
-    loadImage('./textures/chrome_rough.jpg'),
-    loadImage('./textures/chrome_metal.jpg'),
-    loadImage('./textures/rust_color.jpg'),
-    loadImage('./textures/rust_rough.jpg'),
-  ]).then(([c, r, m, rc, rr]) => {
-    chromeMaps = mixChromeMaps(c, r, m, rc, rr);
-    const n = chromeTexLoader.load('./textures/chrome_normal.jpg');
-    n.wrapS = n.wrapT = THREE.RepeatWrapping;
-    n.colorSpace = THREE.NoColorSpace;
-    chromeMaps.normalMap = n;
-    for (const fn of chromeWaiters) fn(chromeMaps);
-    chromeWaiters = [];
-    return chromeMaps;
-  }).catch((err) => { console.warn('Chrome mat textures failed', err); return null; });
-}
-requestChromeMaps();
-
-function applyChromeMaps(mat, maps, repeat) {
-  if (!mat || !maps) return;
-  const wrap = (tex) => {
-    const t = tex.clone();
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.repeat.set(repeat, repeat);
-    t.needsUpdate = true;
-    return t;
-  };
-  mat.map = wrap(maps.map);
-  mat.roughnessMap = wrap(maps.roughnessMap);
-  mat.metalnessMap = wrap(maps.metalnessMap);
-  if (maps.normalMap) {
-    mat.normalMap = wrap(maps.normalMap);
-    mat.normalScale = new THREE.Vector2(0.55, 0.55);
-  }
-  mat.needsUpdate = true;
-}
-
+// Woven chain-link: diagonal wires with a bright top edge and a dark underside,
+// so it reads as round steel wire instead of flat lines. Alpha-tested so the
+// fence sorts correctly and casts a real diamond shadow on the mat.
 function chainlinkTexture() {
+  const N = 512;
   const c = document.createElement('canvas');
-  c.width = c.height = 256;
+  c.width = c.height = N;
   const g = c.getContext('2d');
-  g.clearRect(0, 0, 256, 256);
-  g.strokeStyle = 'rgba(210,210,214,0.92)';
-  g.lineWidth = 5;
-  g.lineJoin = 'round';
-  const s = 28;
-  for (let y = -s; y <= 256 + s; y += s) {
-    for (let x = -s; x <= 256 + s; x += s) {
-      g.beginPath();
-      g.moveTo(x, y + s / 2);
-      g.lineTo(x + s / 2, y);
-      g.lineTo(x + s, y + s / 2);
-      g.lineTo(x + s / 2, y + s);
-      g.closePath();
-      g.stroke();
+  g.clearRect(0, 0, N, N);
+  const s = 64;
+  g.lineCap = 'round';
+  const wire = (x0, y0, x1, y1) => {
+    g.strokeStyle = 'rgba(40,42,46,1)'; g.lineWidth = 9;
+    g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke();
+    g.strokeStyle = 'rgba(178,182,188,1)'; g.lineWidth = 6;
+    g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke();
+    g.strokeStyle = 'rgba(245,247,250,1)'; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(x0 - 1, y0 - 1); g.lineTo(x1 - 1, y1 - 1); g.stroke();
+  };
+  for (let k = -N; k <= 2 * N; k += s) {
+    wire(k, 0, k + N, N);
+    wire(k, N, k + N, 0);
+  }
+  g.fillStyle = 'rgba(220,224,230,1)';
+  for (let y = 0; y <= N; y += s / 2) {
+    for (let x = ((y / (s / 2)) % 2) * (s / 2); x <= N; x += s) {
+      g.beginPath(); g.arc(x, y, 4.5, 0, Math.PI * 2); g.fill();
     }
   }
   const t = new THREE.CanvasTexture(c);
@@ -140,6 +38,83 @@ function chainlinkTexture() {
   t.anisotropy = 8;
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
+}
+
+// Painted markings only (transparent canvas): start lines, corner wedges, scuffs, edge text.
+// Layered as a decal over the Metal001 mat base — not a replacement for it.
+function matDecalTexture(a) {
+  const N = 2048;
+  const c = document.createElement('canvas');
+  c.width = c.height = N;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, N, N);
+  const k = N / (2 * (a / Math.cos(Math.PI / 8)) + 0.4); // px per world unit
+  const cx = N / 2;
+  const toPx = (x, z) => [cx + x * k, cx + z * k];
+  for (let i = 0; i < 900; i++) {
+    const rad = Math.random() * a * 0.95;
+    const t = Math.random() * Math.PI * 2;
+    const [x, y] = toPx(Math.cos(t) * rad, Math.sin(t) * rad);
+    g.strokeStyle = `rgba(${Math.random() < 0.5 ? '255,255,255' : '0,0,0'},${0.03 + Math.random() * 0.05})`;
+    g.lineWidth = 1 + Math.random() * 3;
+    const ang = Math.random() * Math.PI * 2;
+    const len = 10 + Math.random() * 60;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(ang) * len, y + Math.sin(ang) * len); g.stroke();
+  }
+  const startX = 2.15 * SIZE;
+  for (const [x, col] of [[-startX, '#2f74ff'], [startX, '#e23b3b']]) {
+    const [px, py] = toPx(x, 0);
+    g.fillStyle = col;
+    g.globalAlpha = 0.85;
+    g.fillRect(px - 0.06 * k, py - 0.7 * k, 0.12 * k, 1.4 * k);
+    g.globalAlpha = 1;
+  }
+  const wedge = (ang, col) => {
+    g.fillStyle = col;
+    g.globalAlpha = 0.28;
+    g.beginPath();
+    const r0 = a * 0.78;
+    const r1 = a * 1.02;
+    g.moveTo(...toPx(Math.cos(ang - 0.2) * r0, Math.sin(ang - 0.2) * r0));
+    g.lineTo(...toPx(Math.cos(ang - 0.2) * r1, Math.sin(ang - 0.2) * r1));
+    g.lineTo(...toPx(Math.cos(ang + 0.2) * r1, Math.sin(ang + 0.2) * r1));
+    g.lineTo(...toPx(Math.cos(ang + 0.2) * r0, Math.sin(ang + 0.2) * r0));
+    g.closePath();
+    g.fill();
+    g.globalAlpha = 1;
+  };
+  wedge(Math.PI, '#2f74ff');
+  wedge(0, '#e23b3b');
+  g.fillStyle = 'rgba(255,255,255,0.55)';
+  g.font = `800 ${Math.round(0.42 * k)}px ui-sans-serif, system-ui, sans-serif`;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  for (const [z, rot] of [[a * 0.8, 0], [-a * 0.8, Math.PI]]) {
+    const [px, py] = toPx(0, z);
+    g.save(); g.translate(px, py); g.rotate(rot); g.fillText('ROBOT  FIGHT', 0, 0); g.restore();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  return { tex, size: N / k };
+}
+
+function beamTexture() {
+  const c = document.createElement('canvas');
+  c.width = 4; c.height = 256;
+  const g = c.getContext('2d');
+  const grd = g.createLinearGradient(0, 0, 0, 256);
+  grd.addColorStop(0, '#888');
+  grd.addColorStop(0.06, '#fff');
+  grd.addColorStop(0.55, '#3a3a3a');
+  grd.addColorStop(1, '#000');
+  g.fillStyle = grd; g.fillRect(0, 0, 4, 256);
+  return new THREE.CanvasTexture(c);
+}
+
+function merged(list, mat) {
+  const geos = list.map(({ geo, m }) => { const g2 = geo.clone(); g2.applyMatrix4(m); return g2; });
+  return new THREE.Mesh(mergeGeometries(geos, false), mat);
 }
 
 function logoTexture() {
@@ -167,55 +142,62 @@ function logoTexture() {
   return t;
 }
 
-export const FENCE_TOP = 2.82;
-let cageFadeList = [];
-const _camXZ = new THREE.Vector3();
-const _posXZ = new THREE.Vector3();
-
-export function updateCageFade(camera, focus, dt) {
-  if (!cageFadeList.length || !camera) return;
-  _camXZ.set(camera.position.x, 0, camera.position.z);
-  const origin = focus ? _posXZ.set(focus.x, 0, focus.z) : _posXZ.set(0, 0, 0);
-  const camDir = _camXZ.clone().sub(origin);
-  if (camDir.lengthSq() < 1e-6) return;
-  camDir.normalize();
-  const k = dt <= 0 ? 1 : 1 - Math.pow(0.0008, dt);
-  for (const piece of cageFadeList) {
-    const outward = piece.pos.clone().setY(0).sub(origin);
-    if (outward.lengthSq() < 1e-8) continue;
-    outward.normalize();
-    // 1 = piece sits on the camera side of the ring (between camera and fighters).
-    const facing = outward.dot(camDir);
-    const t = Math.max(0, Math.min(1, (facing - 0.08) / 0.62));
-    const target = 1 - t * (1 - 0.12);
-    for (const mesh of piece.meshes) {
-      const mat = mesh.material;
-      if (!mat) continue;
-      mat.opacity = mat.opacity + (target - (mat.opacity ?? 1)) * k;
-      mat.transparent = true;
-      mat.depthWrite = mat.opacity > 0.92 && piece.kind === 'post';
-      mesh.castShadow = mat.opacity > 0.55;
-    }
+// World-XZ UVs so the tiled Metal001 plate reads even across the octagon, not polar-warped.
+function uvWorldXZ(geometry, tile) {
+  const pos = geometry.attributes.position;
+  const uv = new Float32Array(pos.count * 2);
+  for (let i = 0; i < pos.count; i++) {
+    uv[i * 2] = pos.getX(i) / tile;
+    uv[i * 2 + 1] = pos.getZ(i) / tile;
   }
+  geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
 }
+
+function loadMatMetalMaps() {
+  const loader = new THREE.TextureLoader();
+  const wrap = (url, srgb) => {
+    const t = loader.load(url);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 8;
+    t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    return t;
+  };
+  return {
+    map: wrap('./textures/mat_metal_color.jpg', true),
+    normalMap: wrap('./textures/mat_metal_normal.jpg', false),
+    roughnessMap: wrap('./textures/mat_metal_rough.jpg', false),
+    metalnessMap: wrap('./textures/mat_metal_metalness.jpg', false),
+  };
+}
+
+function cageHeight() {
+  return ARENA.cageHeight || 1.48;
+}
+
+export const FENCE_TOP = 1.48;
 
 export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal }) {
   const group = new THREE.Group();
   const a = ARENA.apothem;
   const r = a / Math.cos(Math.PI / 8);
+  const H = cageHeight();
 
-  const floorMat = new THREE.MeshPhysicalMaterial({
-    color: 0xc8ced6,
-    metalness: 0.93,
-    roughness: 0.24,
-    envMapIntensity: 1.15,
-    clearcoat: 0.28,
-    clearcoatRoughness: 0.22,
+  // Base mat: ambientCG Metal001 (CC0), tiled in world XZ. Replaces the chrome mat.
+  const matMaps = loadMatMetalMaps();
+  const floorGeo = new THREE.CylinderGeometry(r, r, ARENA.floorThickness, 8);
+  uvWorldXZ(floorGeo, 2.15); // ~2.15 m per tile across the ~13 m octagon
+  const floorMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    metalness: 1,
+    roughness: 1,
+    map: matMaps.map,
+    normalMap: matMaps.normalMap,
+    normalScale: new THREE.Vector2(0.85, 0.85),
+    roughnessMap: matMaps.roughnessMap,
+    metalnessMap: matMaps.metalnessMap,
+    envMapIntensity: 0.85,
   });
-  const floor = new THREE.Mesh(new THREE.CylinderGeometry(r, r, ARENA.floorThickness, 8), floorMat);
-  const paintChrome = (maps) => applyChromeMaps(floorMat, maps, 4.2);
-  if (chromeMaps) paintChrome(chromeMaps);
-  else chromeWaiters.push(paintChrome);
+  const floor = new THREE.Mesh(floorGeo, floorMat);
   floor.position.y = -ARENA.floorThickness / 2;
   floor.rotation.y = Math.PI / 8;
   floor.receiveShadow = true;
@@ -223,19 +205,19 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
 
   const logo = new THREE.Mesh(
     new THREE.CircleGeometry(2.35, 64),
-    new THREE.MeshPhysicalMaterial({
+    new THREE.MeshStandardMaterial({
       map: logoTexture(),
       transparent: true,
-      metalness: 0.85,
-      roughness: 0.28,
-      envMapIntensity: 1.1,
+      metalness: 0.55,
+      roughness: 0.35,
+      envMapIntensity: 0.9,
       emissive: 0xffffff,
-      emissiveIntensity: 0.04,
+      emissiveIntensity: 0.06,
       depthWrite: false,
     }),
   );
   logo.rotation.x = -Math.PI / 2;
-  logo.position.y = 0.002;
+  logo.position.y = 0.004;
   logo.receiveShadow = true;
   group.add(logo);
 
@@ -249,20 +231,22 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
   const inner = new THREE.Mesh(new THREE.RingGeometry(a - 0.2, a - 0.04, 8), ringMat);
   inner.rotation.x = -Math.PI / 2;
   inner.rotation.z = Math.PI / 8;
-  inner.position.y = 0.003;
+  inner.position.y = 0.008;
   group.add(inner);
 
-  const edge = new THREE.Mesh(
-    new THREE.CylinderGeometry(r + 0.07, r + 0.07, 0.14, 8),
-    new THREE.MeshPhysicalMaterial({ color: 0xb7bec6, metalness: 0.92, roughness: 0.22, envMapIntensity: 1.2 }),
-  );
-  // Solid trim cylinder: keep its top just under the mat top (y=0). At 0.02 its lid sat at
-  // y=0.09 over the whole floor and the robots' feet sank into it.
-  edge.position.y = -0.07 - 0.001;
+  // Raised rim around the mat: open band plus a top lip (not a solid disc over the paint).
+  const edgeMat = new THREE.MeshStandardMaterial({ color: 0x1a1c20, metalness: 0.55, roughness: 0.4, side: THREE.DoubleSide });
+  const edge = new THREE.Mesh(new THREE.CylinderGeometry(r + 0.07, r + 0.07, 0.14, 8, 1, true), edgeMat);
+  edge.position.y = 0.02;
   edge.rotation.y = Math.PI / 8;
   edge.receiveShadow = true;
-  edge.castShadow = true;
   group.add(edge);
+  const lip = new THREE.Mesh(new THREE.RingGeometry(r - 0.12, r + 0.07, 8), edgeMat);
+  lip.rotation.x = -Math.PI / 2;
+  lip.rotation.z = Math.PI / 8;
+  lip.position.y = 0.09;
+  lip.receiveShadow = true;
+  group.add(lip);
 
   const wall = new THREE.Mesh(
     new THREE.CylinderGeometry(22, 22, 14, 32, 1, true),
@@ -273,98 +257,180 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
   wall.userData.voidWall = true;
   group.add(wall);
 
-  const postMat = new THREE.MeshStandardMaterial({
-    color: 0x1b1d22,
-    metalness: 0.65,
-    roughness: 0.38,
-    map: tiled(metalColor, 1, 3),
-    roughnessMap: tiled(metalRough, 1, 3),
-  });
-  const padMat = new THREE.MeshStandardMaterial({ color: 0x15171b, metalness: 0.15, roughness: 0.7 });
-  const railMat = new THREE.MeshStandardMaterial({
-    color: 0x2a2d33,
-    metalness: 0.7,
-    roughness: 0.35,
-    map: tiled(metalColor, 3, 0.4),
-    roughnessMap: tiled(metalRough, 3, 0.4),
-  });
-  const fixtureMat = new THREE.MeshStandardMaterial({
-    color: 0xfff4dc,
-    emissive: 0xffe7b0,
-    emissiveIntensity: 1.6,
-    roughness: 0.3,
-  });
+  const paint = matDecalTexture(a);
+  const matDecal = new THREE.Mesh(
+    new THREE.PlaneGeometry(paint.size, paint.size),
+    new THREE.MeshStandardMaterial({
+      map: paint.tex,
+      transparent: true,
+      roughness: 0.55,
+      metalness: 0.15,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    }),
+  );
+  matDecal.rotation.x = -Math.PI / 2;
+  matDecal.position.y = 0.005;
+  matDecal.receiveShadow = true;
+  matDecal.renderOrder = 1;
+  group.add(matDecal);
 
-  const postH = 3.2;
+  const strip = new THREE.Mesh(
+    new THREE.RingGeometry(a - 0.035, a - 0.005, 8),
+    new THREE.MeshBasicMaterial({ color: 0x9fc4ff, toneMapped: false }),
+  );
+  strip.material.color.multiplyScalar(2.2);
+  strip.rotation.x = -Math.PI / 2;
+  strip.rotation.z = Math.PI / 8;
+  strip.position.y = 0.01;
+  group.add(strip);
+
+  const postMat = new THREE.MeshStandardMaterial({
+    color: 0x24272d, metalness: 0.8, roughness: 0.32,
+    map: tiled(metalColor, 1, 3), roughnessMap: tiled(metalRough, 1, 3),
+  });
+  const vinylMat = new THREE.MeshStandardMaterial({ color: 0x0d0e11, metalness: 0.0, roughness: 0.42 });
+  const railMat = new THREE.MeshStandardMaterial({
+    color: 0x3a3e45, metalness: 0.85, roughness: 0.3,
+    map: tiled(metalColor, 3, 0.4), roughnessMap: tiled(metalRough, 3, 0.4),
+  });
+  const padColor = (i) => {
+    const ang = i * Math.PI / 4 + Math.PI / 8;
+    const x = Math.cos(ang);
+    if (x < -0.9) return 0x1d4fc4;
+    if (x > 0.9) return 0xb81f1f;
+    return 0x121317;
+  };
+
+  // Short cage: waist-to-chest on the ~2.74 m robots. Posts sit on the mat top (y = 0).
+  const postH = H + 0.08;
+  const fenceTop = H;
+  const padH = H - 0.16;
+  const padY = padH / 2; // bottom at y = 0
+  const capY = padH;
+  const ledTopY = Math.max(0.2, padH - 0.08);
   const corners = [];
-  const cageFade = [];
+  const postGeo = new THREE.CylinderGeometry(0.09, 0.11, postH, 14);
+  const padGeo = new THREE.CylinderGeometry(0.2, 0.2, padH, 16);
+  const capGeo = new THREE.SphereGeometry(0.2, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+  const ledGeo = new THREE.TorusGeometry(0.205, 0.022, 8, 28);
+  const postParts = [];
+  const blackPads = [];
+  const m4 = new THREE.Matrix4();
   for (let i = 0; i < 8; i++) {
     const ang = i * Math.PI / 4 + Math.PI / 8;
     const x = Math.cos(ang) * r;
     const z = Math.sin(ang) * r;
     corners.push(new THREE.Vector3(x, 0, z));
-    if (ARENA.cage) {
-      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.11, postH, 12), postMat.clone());
-      post.position.set(x, postH / 2, z);
-      post.castShadow = true;
-      post.receiveShadow = true;
-      post.material.transparent = true;
-      group.add(post);
-      const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 2.4, 12), padMat.clone());
-      pad.position.set(x, 1.35, z);
+    postParts.push({ geo: postGeo, m: new THREE.Matrix4().makeTranslation(x, postH / 2, z) });
+    const col = padColor(i);
+    if (col === 0x121317) {
+      blackPads.push({ geo: padGeo, m: new THREE.Matrix4().makeTranslation(x, padY, z) });
+      blackPads.push({ geo: capGeo, m: new THREE.Matrix4().makeTranslation(x, capY, z) });
+    } else {
+      const pm = new THREE.MeshStandardMaterial({ color: col, roughness: 0.4, metalness: 0.05 });
+      const pad = new THREE.Mesh(padGeo, pm);
+      pad.position.set(x, padY, z);
       pad.castShadow = true;
-      pad.material.transparent = true;
-      group.add(pad);
-      cageFade.push({ kind: 'post', meshes: [post, pad], pos: new THREE.Vector3(x, 1.2, z) });
+      const cap = new THREE.Mesh(capGeo, pm);
+      cap.position.set(x, capY, z);
+      const led = new THREE.Mesh(ledGeo, new THREE.MeshBasicMaterial({ color: new THREE.Color(col).multiplyScalar(3.2), toneMapped: false }));
+      led.rotation.x = Math.PI / 2;
+      led.position.set(x, ledTopY, z);
+      const led2 = led.clone();
+      led2.position.y = 0.18;
+      group.add(pad, cap, led, led2);
     }
   }
+  const posts = merged(postParts, postMat);
+  posts.castShadow = posts.receiveShadow = true;
+  const pads = merged(blackPads, vinylMat);
+  pads.castShadow = true;
+  group.add(posts, pads);
 
-  const railHeights = [0.62, 1.45, 2.28];
-  const yAxis = new THREE.Vector3(0, 1, 0);
   const linkTex = chainlinkTexture();
   const linkMat = new THREE.MeshStandardMaterial({
     map: linkTex,
-    transparent: true,
+    alphaTest: 0.5,
     side: THREE.DoubleSide,
-    color: 0x9aa0a8,
-    metalness: 0.7,
-    roughness: 0.35,
-    // No alphaTest: we fade near-side panels to ~12% and alphaTest would discard the wires.
-    depthWrite: false,
+    color: 0xb4bac2,
+    metalness: 0.85,
+    roughness: 0.3,
   });
-  linkTex.repeat.set(6, 3);
+  const fenceH = Math.max(0.4, fenceTop - 0.36);
+  linkTex.repeat.set(7, Math.max(1.1, 3.2 * (fenceH / 2.34)));
 
-  if (ARENA.cage) for (let i = 0; i < 8; i++) {
+  const xAxis = new THREE.Vector3(1, 0, 0);
+  const railGeoCache = {};
+  const rails = [];
+  const fences = [];
+  const topPads = [];
+  const kickPads = [];
+  const kickTrim = [];
+  const q = new THREE.Quaternion();
+  const sc = new THREE.Vector3(1, 1, 1);
+  const kickH = 0.34;
+  for (let i = 0; i < 8; i++) {
     const apos = corners[i];
     const bpos = corners[(i + 1) % 8];
     const dir = new THREE.Vector3().subVectors(bpos, apos);
     const len = dir.length();
     const mid = new THREE.Vector3().addVectors(apos, bpos).multiplyScalar(0.5);
-    const along = dir.clone().normalize();
-    // Cylinders are Y-up; mapping +Y onto the side direction is never a 180° singularity.
-    const railQ = new THREE.Quaternion().setFromUnitVectors(yAxis, along);
-    const sideMeshes = [];
-    for (const h of railHeights) {
-      const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, len, 8), railMat.clone());
-      rail.quaternion.copy(railQ);
-      rail.position.set(mid.x, h, mid.z);
-      rail.castShadow = true;
-      rail.material.transparent = true;
-      group.add(rail);
-      sideMeshes.push(rail);
+    q.setFromUnitVectors(xAxis, dir.clone().normalize());
+    const key = len.toFixed(3);
+    if (!railGeoCache[key]) {
+      railGeoCache[key] = {
+        rail: new THREE.CylinderGeometry(0.03, 0.03, len, 8).rotateZ(Math.PI / 2),
+        top: new THREE.CylinderGeometry(0.1, 0.1, len, 12).rotateZ(Math.PI / 2),
+        fence: new THREE.PlaneGeometry(len, fenceH),
+        kick: new THREE.BoxGeometry(len - 0.3, kickH, 0.12),
+        trim: new THREE.BoxGeometry(len - 0.3, 0.035, 0.125),
+      };
     }
-    // PlaneGeometry faces +Z. Yaw so +Z points outward (center -> side midpoint).
-    const fence = new THREE.Mesh(new THREE.PlaneGeometry(len, 2.55), linkMat.clone());
-    fence.rotation.set(0, Math.atan2(mid.x, mid.z), 0);
-    fence.position.set(mid.x, 1.48, mid.z);
-    fence.castShadow = true;
-    group.add(fence);
-    sideMeshes.push(fence);
-    cageFade.push({ kind: 'side', meshes: sideMeshes, pos: mid.clone() });
+    const G = railGeoCache[key];
+    // Mid rail sits between the kick pad and the top pad.
+    const midRailY = kickH + (fenceTop - kickH) * 0.42;
+    rails.push({ geo: G.rail, m: m4.clone().compose(new THREE.Vector3(mid.x, midRailY, mid.z), q, sc) });
+    topPads.push({ geo: G.top, m: m4.clone().compose(new THREE.Vector3(mid.x, fenceTop, mid.z), q, sc) });
+    fences.push({ geo: G.fence, m: m4.clone().compose(new THREE.Vector3(mid.x, kickH + fenceH / 2, mid.z), q, sc) });
+    // Kick pads sit on the mat (bottom at y = 0). Inner face stays near the mat flat (apothem).
+    kickPads.push({ geo: G.kick, m: m4.clone().compose(new THREE.Vector3(mid.x, kickH / 2, mid.z), q, sc) });
+    kickTrim.push({ geo: G.trim, m: m4.clone().compose(new THREE.Vector3(mid.x, kickH - 0.02, mid.z), q, sc) });
   }
+  const trimMat = new THREE.MeshStandardMaterial({ color: 0xc0262a, roughness: 0.4, emissive: 0x400808 });
+  const fencePanels = [];
+  const fadeMat = (m) => { const c = m.clone(); c.transparent = true; return c; };
+  for (let i = 0; i < 8; i++) {
+    const side = new THREE.Group();
+    const parts = [
+      merged([fences[i]], fadeMat(linkMat)),
+      merged([topPads[i]], fadeMat(vinylMat)),
+    ];
+    for (const m of parts) { m.castShadow = true; m.receiveShadow = true; side.add(m); }
+    parts[0].userData.isFence = true;
+    const apos = corners[i];
+    const bpos = corners[(i + 1) % 8];
+    side.userData.normal = new THREE.Vector3((apos.x + bpos.x) / 2, 0, (apos.z + bpos.z) / 2).normalize();
+    side.userData.opacity = 1;
+    side.userData.parts = parts;
+    fencePanels.push(side);
+    group.add(side);
+  }
+  group.userData.fencePanels = fencePanels;
+  const railMesh = merged(rails, railMat);
+  railMesh.castShadow = true;
+  const kickMesh = merged(kickPads, vinylMat);
+  kickMesh.receiveShadow = true;
+  kickMesh.castShadow = true;
+  group.add(railMesh, kickMesh, merged(kickTrim, trimMat));
 
-  // Overhead spots (visual fixtures + actual lights added by caller via exported positions).
+  const fixtureMat = new THREE.MeshStandardMaterial({
+    color: 0xfff4dc, emissive: 0xffe7b0, emissiveIntensity: 2.4, roughness: 0.3,
+  });
   const fixturePos = [];
+  const beamAlpha = beamTexture();
   for (let i = 0; i < 4; i++) {
     const ang = i * Math.PI / 2 + Math.PI / 4;
     const fx = Math.cos(ang) * 3.4;
@@ -377,11 +443,47 @@ export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal })
     can.position.set(fx, fy + 0.2, fz);
     group.add(can);
     fixturePos.push(new THREE.Vector3(fx, fy, fz));
+    const target = new THREE.Vector3(0, 0.4, 0);
+    const from = new THREE.Vector3(fx, fy, fz);
+    const dist = from.distanceTo(target);
+    const beam = new THREE.Mesh(
+      new THREE.ConeGeometry(Math.tan(Math.PI / 6.5) * dist * 0.6, dist, 24, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: 0xfff1d0, alphaMap: beamAlpha, transparent: true, opacity: 0.022,
+        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false,
+      }),
+    );
+    beam.geometry.rotateX(Math.PI);
+    beam.geometry.translate(0, dist / 2, 0);
+    beam.position.copy(from);
+    beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), target.clone().sub(from).normalize());
+    beam.renderOrder = 5;
+    beam.userData.beam = true;
+    group.add(beam);
   }
 
   scene.add(group);
-  cageFadeList = ARENA.cage ? cageFade : [];
-  return { group, fixturePos, fenceTop: FENCE_TOP };
+  return { group, fixturePos, fencePanels, fenceTop: H };
+}
+
+const _cv = new THREE.Vector3();
+export function updateCageFade(panels, camera, dt) {
+  if (!panels) return;
+  _cv.set(camera.position.x, 0, camera.position.z);
+  if (_cv.lengthSq() < 1e-8) return;
+  _cv.normalize();
+  for (const p of panels) {
+    const facing = p.userData.normal.dot(_cv);
+    const target = facing > 0.55 ? 0.14 : facing > 0.1 ? 0.6 : 1;
+    const o = p.userData.opacity += (target - p.userData.opacity) * Math.min(1, dt * 6);
+    for (const mesh of p.userData.parts) {
+      const m = mesh.material;
+      m.opacity = o;
+      m.depthWrite = o > 0.9;
+      if (mesh.userData.isFence) m.alphaTest = o < 0.99 ? 0.05 : 0.5;
+      mesh.castShadow = true;
+    }
+  }
 }
 
 export function addArenaLights(scene, fixturePos) {
@@ -389,7 +491,6 @@ export function addArenaLights(scene, fixturePos) {
   scene.add(hemi);
   const spots = [];
   for (const p of fixturePos) {
-    // Spots stay punchy for overhead drama; ambient/fill carry the visibility lift.
     const s = new THREE.SpotLight(0xfff1d0, 20, 20, Math.PI / 6.2, 0.5, 1.05);
     s.position.copy(p);
     s.target.position.set(0, 0.4, 0);
@@ -427,9 +528,7 @@ export function addArenaLights(scene, fixturePos) {
   return { hemi, spots, fill, fill2, rim, rimL, rimR };
 }
 
-// Glossy floor reflections: a planar mirror pass alpha-mixed over the mat. Bright highlights
-// (lights, glowing eyes, sparks) mix in stronger so the scuffed
-// chrome reads as polished, not as a mirror (alpha-mixed over the mat); a small blur matches the mat's roughness.
+// Kept for callers that still import it; the painted Metal001 mat does not use a planar mirror.
 const FloorReflectShader = {
   name: 'FloorReflectShader',
   uniforms: {
@@ -466,7 +565,6 @@ const FloorReflectShader = {
       c += texture2D( tDiffuse, uv - vec2( texel.x * 2.0, 0.0 ) ).rgb * 0.16;
       c += texture2D( tDiffuse, uv + vec2( 0.0, texel.y * 3.0 ) ).rgb * 0.16;
       c += texture2D( tDiffuse, uv - vec2( 0.0, texel.y * 3.0 ) ).rgb * 0.16;
-      // Real mirror mix (dark robots reflect dark), plus a little extra for bright highlights.
       float lum = dot( c, vec3( 0.299, 0.587, 0.114 ) );
       float a = clamp( strength + max( lum - knee, 0.0 ) * 0.6, 0.0, 0.85 );
       gl_FragColor = vec4( c * color, a );

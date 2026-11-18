@@ -1043,7 +1043,7 @@ function pickChipGeo() {
 const _sv = new THREE.Vector3();
 const _sn = new THREE.Vector3();
 const _sc = new THREE.Vector3();
-const SKIN_MAX = IS_MOBILE ? 14 : 40;
+const SKIN_MAX = IS_MOBILE ? 6 : 12;
 let skinRing = [];
 function skinnedWorld(mesh, i, out, cache) {
   let v = cache.get(i);
@@ -1157,7 +1157,7 @@ function keepSkinPiece(scene, mesh) {
   }
 }
 
-const CHIP_MAX = IS_MOBILE ? 140 : 360;
+const CHIP_MAX = IS_MOBILE ? 8 : 16;
 const chipBatches = new Map(); // `${geo}|${mat}` -> InstancedMesh
 let chipRing = []; // resting chips in order: { key, slot }
 const chipsLive = [];
@@ -1175,52 +1175,36 @@ function chipBatch(scene, gi, mk) {
   return im;
 }
 export function shedChips(f, partId, point, dir, force, scene, opts = {}) {
+  // Low-count debris from the robot's own armour: sampled skin/plate pieces, team-tinted
+  // by the model's materials. Generic PCB / wire / gear / bolt chips are no longer spawned.
+  // Real limbs (head, arm, hand) come off through detachPart / detachSub, not a chip shower.
   if (!point || !scene) return 0;
-  const heavy = force >= 4.2;
-  let n = opts.count != null ? opts.count : (force < 2.2 ? (Math.random() < 0.35 ? 1 : 0) : Math.round(1 + Math.random() * 2 + (heavy ? 2 + Math.random() * 2 : 0)));
-  if (opts.blocked) n = Math.random() < 0.3 ? 1 : 0;
-  const part = f && f.parts && f.parts[partId];
-  if (part && part.max) n += Math.round((1 - part.hp / part.max) * 1.5 * Math.random()); // battered parts shed more
-  if (IS_MOBILE) n = Math.min(n, 2); // phones: fewer pieces per hit
+  if (opts.blocked) return 0;
+  const heavy = force >= 4.2 || !!opts.plate;
+  let n;
+  if (opts.count != null) n = opts.count;
+  else if (force < 2.2) n = Math.random() < 0.35 ? 1 : 0;
+  else if (heavy) n = 1 + (Math.random() < 0.4 ? 1 : 0);
+  else n = 1;
+  if (IS_MOBILE) n = Math.min(n, 1);
   const d = dir ? dir.clone().setY(0).normalize() : new THREE.Vector3(0, 0, 1);
   let skins = 0;
-  if (n > 0 && f && !opts.blocked && force >= 2.2) {
-    // A torn patch of the robot's own skin from right where it was hit (one, two on heavy hits).
-    const want = heavy && !IS_MOBILE ? 2 : 1;
-    for (let k = 0; k < want; k++) {
-      const c = k ? point.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.1 * SIZE, (Math.random() - 0.5) * 0.1 * SIZE, (Math.random() - 0.5) * 0.1 * SIZE)) : point;
-      let m = null;
-      try { m = sampleSkinPiece(f, partId, c, (0.045 + Math.random() * 0.03 + Math.min(0.03, force * 0.004)) * SIZE); } catch (e) { m = null; }
-      if (!m) break;
-      launchPiece(f, m, 0.1 * SIZE, point, d, force, scene);
-      keepSkinPiece(scene, m);
-      skins++;
-    }
-    // Arm hits can snap a real finger segment off the hand.
-    if (partId && partId.startsWith('arm') && Math.random() < (heavy ? 0.45 : 0.2)) {
-      const b = fingerBone(f, partId);
-      if (b) {
-        const a = b.getWorldPosition(new THREE.Vector3()), e = b.children[0].getWorldPosition(new THREE.Vector3());
-        let m = null;
-        try { m = sampleSkinPiece(f, partId, a.lerp(e, 0.5), Math.max(0.02 * SIZE, a.distanceTo(e) * 0.75), 120); } catch (err) { m = null; }
-        if (m) { launchPiece(f, m, 0.05 * SIZE, point, d, force, scene); keepSkinPiece(scene, m); skins++; }
-      }
-    }
+  for (let k = 0; k < n; k++) {
+    const c = k
+      ? point.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.12 * SIZE, (Math.random() - 0.5) * 0.1 * SIZE, (Math.random() - 0.5) * 0.12 * SIZE))
+      : point;
+    const big = (heavy && k === 0);
+    const radius = (big
+      ? (0.11 + Math.random() * 0.06 + Math.min(0.05, force * 0.008))
+      : (0.055 + Math.random() * 0.03)) * SIZE;
+    let m = null;
+    try { m = sampleSkinPiece(f, partId, c, radius, big ? 280 : 160); } catch (e) { m = null; }
+    if (!m) continue;
+    launchPiece(f, m, (big ? 0.35 : 0.14) * SIZE, point, d, force, scene);
+    keepSkinPiece(scene, m);
+    skins++;
   }
-  for (let i = skins; i < n + (skins ? 1 : 0); i++) {
-    const gi = pickChipGeo();
-    const def = CHIP_GEOS[gi];
-    const mk = def.mat || (Math.random() < 0.5 ? (f && f.id === 'p1' ? 'p1' : 'p2') : (Math.random() < 0.6 ? 'chrome' : 'dark'));
-    const mesh = new THREE.Mesh(def.g, CHIP_MATS[mk]);
-    mesh.userData.shared = true;
-    mesh.scale.setScalar(SIZE * (0.8 + Math.random() * 0.5));
-    mesh.position.copy(point).add(new THREE.Vector3((Math.random() - 0.5) * 0.12, (Math.random() - 0.5) * 0.12, (Math.random() - 0.5) * 0.12));
-    mesh.quaternion.setFromEuler(new THREE.Euler(Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28));
-    mesh.castShadow = true;
-    const rec = launchPiece(f, mesh, def.m * SIZE, point, d, force, scene);
-    chipsLive.push({ mesh, phys: rec, gi, mk });
-  }
-  return n;
+  return skins;
 }
 const _cm = new THREE.Matrix4();
 function stepChips(scene) {
@@ -1448,7 +1432,7 @@ export function applyPartHit(f, partId, damage, point, dir, scene, opts = {}) {
   const dentAmt = (opts.blocked ? 0.4 : 1) * Math.min(2.6, (0.4 + force * 0.32) * (1 + Math.min(1.2, part.wear * 0.08)));
   dentPart(part, point, dir, dentAmt);
   emitSparks(point, dir, opts.blocked ? 8 : 18 + Math.min(16, Math.round(force * 3)));
-  shedChips(f, partId, point, dir, force, scene, { blocked: opts.blocked });
+  shedChips(f, partId, point, dir, force, scene, { blocked: opts.blocked, plate: !opts.blocked && (force >= 4.2 || dmg >= 10) });
   if (partId === 'head' && !opts.blocked && point) maybeBlowEye(f, point, dir, force);
   addSparkScene(scene);
   let wrecked = false;

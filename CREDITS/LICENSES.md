@@ -80,11 +80,14 @@ Original lines written for the game (Window Workshop Games), voiced with the Kok
 
 The arena reverb impulse (~1.6 s, early reflections plus a darkening tail) is generated in code at startup (`hookConvolver` in `js/audio.js`); no recording is used. The sub "thump" layer under impacts, falls and footsteps is a synthesized Web Audio sine sweep.
 
+Walking footsteps layer existing CC0 Kenney `thud_*` + `clank_h_*` (and sometimes `metal_m_*`) with a light rubberduck `servo_*` and a short sub thump, pitched per plant, synced to foot contacts. The older Thimras `stomp_m_*` and Kenney `stomp_k_*` concrete-stomp layers are no longer used for walking.
+
 ## ambientCG textures — CC0 1.0
 
+- **Metal001** — https://ambientcg.com/view?id=Metal001 — octagon fighting mat base (1K JPG color, OpenGL normal, roughness, metalness; `textures/mat_metal_*.jpg`), tiled in world XZ. Painted start lines, corner wedges, ROBOT FIGHT text and the LED edge are a transparent decal layered on top (`matDecalTexture` in `js/arena.js`).
 - **Metal009** — https://ambientcg.com/view?id=Metal009 — cage/post metal (`textures/metal_*.jpg`).
-- **Metal008** (scratched metal) — https://ambientcg.com/view?id=Metal008 — chrome mat color, roughness, metalness, and normal (`textures/chrome_*.jpg`).
-- **Rust004** — https://ambientcg.com/view?id=Rust004 — rust and grunge masks mixed into the mat (`textures/rust_*.jpg`).
+- **Metal008** (scratched metal) — https://ambientcg.com/view?id=Metal008 — previously the chrome mat; files remain at `textures/chrome_*.jpg` but are no longer used as the mat material.
+- **Rust004** — https://ambientcg.com/view?id=Rust004 — rust and grunge masks previously mixed into the chrome mat (`textures/rust_*.jpg`); unused by the current Metal001 mat.
 - **Concrete034** — https://ambientcg.com/view?id=Concrete034 — stadium stands, walls and arena floor (`textures/stadium/concrete_*.jpg`; 1K color + normal, roughness resized to 512).
 
 ## Poly Haven HDRI — CC0 1.0

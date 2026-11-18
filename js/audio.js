@@ -26,7 +26,7 @@ const BANK = {
   punchM: ['punch_0.ogg', 'punch_1.ogg', 'punch_2.ogg'],
   punchH: ['punch_2.ogg', 'punch_3.ogg', 'punch_4.ogg'],
   block: ['block_0.ogg', 'block_1.ogg', 'block_2.ogg', 'block_3.ogg'],
-  // Servo stomps: Thimras metal steps and Kenney concrete steps, both pitched down with low end.
+  // Legacy stomp banks (no longer used for walking; kept on disk / in the bank).
   stompM: ['stomp_m_01.ogg', 'stomp_m_05.ogg', 'stomp_m_09.ogg', 'stomp_m_14.ogg', 'stomp_m_20.ogg'],
   stompK: ['stomp_k_0.ogg', 'stomp_k_1.ogg', 'stomp_k_2.ogg', 'stomp_k_3.ogg', 'stomp_k_4.ogg'],
   fall: ['crash_0.ogg', 'crash_2.ogg', 'crash_4.ogg'],
@@ -343,20 +343,23 @@ export function playHit(opts = {}) {
   const blocked = !!opts.blocked;
   const heavy = !!opts.heavy;
   const kick = !!opts.kick;
+  const hard = opts.hard != null ? Math.max(0, Math.min(1, opts.hard)) : (heavy ? 0.75 : 0.25);
+  const impact = 0.8 + hard * 0.45;
   if (blocked) {
-    playGroup('block', { vol: 0.9, rate: 0.74, rateVar: 0.08 });
-    playGroup('plateM', { vol: 0.55, rate: 0.92, rateVar: 0.08 });
-    subThump({ vol: 0.45, f0: 75, f1: 40, dur: 0.18 });
+    playGroup('block', { vol: 0.95, rate: 0.74, rateVar: 0.08 });
+    playGroup('plateM', { vol: 0.62, rate: 0.92, rateVar: 0.08 });
+    playGroup('metalM', { vol: 0.4, rate: 0.88, rateVar: 0.08, delay: 0.006 });
+    subThump({ vol: 0.52, f0: 75, f1: 40, dur: 0.18 });
     return;
   }
   const metal = heavy ? 'metalH' : 'metalM';
-  playGroup(metal, { vol: 0.95, rate: kick ? 0.68 : 0.76, rateVar: 0.08 });
-  playGroup(heavy || kick ? 'plateH' : 'plateM', { vol: heavy ? 0.85 : 0.65, rateVar: 0.08, delay: 0.004 });
-  playGroup('thud', { vol: heavy ? 0.9 : 0.7, rateVar: 0.06, delay: 0.008 });
-  playGroup(heavy || kick ? 'punchH' : 'punchM', { vol: heavy ? 0.5 : 0.35, rate: 0.72, delay: 0.012, rateVar: 0.06 });
-  subThump({ vol: heavy ? 0.95 : 0.65, f0: heavy ? 80 : 95, f1: heavy ? 32 : 42, dur: heavy ? 0.34 : 0.22 });
-  if (heavy && limited('rattle', 120)) playGroup('rattle', { vol: 0.42, delay: 0.06, rateVar: 0.1 });
-  if (limited('spark', 40)) playGroup('spark', { vol: heavy ? 0.45 : 0.26, rate: 0.85, rateVar: 0.14 });
+  playGroup(metal, { vol: Math.min(1, 0.85 * impact + (heavy ? 0.12 : 0)), rate: kick ? 0.68 : 0.76, rateVar: 0.08 });
+  playGroup(heavy || kick ? 'plateH' : 'plateM', { vol: (heavy ? 0.9 : 0.65) * impact, rateVar: 0.08, delay: 0.004 });
+  playGroup('thud', { vol: (heavy ? 0.95 : 0.7) * impact, rateVar: 0.06, delay: 0.008 });
+  playGroup(heavy || kick ? 'punchH' : 'punchM', { vol: (heavy ? 0.55 : 0.35) * impact, rate: 0.72, delay: 0.012, rateVar: 0.06 });
+  subThump({ vol: heavy ? 1 : 0.55 + hard * 0.35, f0: heavy ? 76 : 95, f1: heavy ? 30 : 42, dur: heavy ? 0.38 : 0.22 });
+  if ((heavy || hard > 0.55) && limited('rattle', 120)) playGroup('rattle', { vol: 0.42 + hard * 0.12, delay: 0.06, rateVar: 0.1 });
+  if (limited('spark', 40)) playGroup('spark', { vol: heavy ? 0.5 : 0.26 + hard * 0.12, rate: 0.85, rateVar: 0.14 });
   if (heavy && limited('crowdHit', 420)) {
     playGroup(Math.random() < 0.55 ? 'crowdBig' : 'crowdHit', { bus: crowd, vol: 0.78, rateVar: 0.03, volVar: 0.08 });
   }
@@ -377,14 +380,19 @@ export function playSfx(kind, opts = {}) {
     return;
   }
   if (kind === 'step') {
-    // Weighty servo stomp: metal foot + concrete thud + sub, and now and then a servo whirr.
-    if (!limited('step', 70)) return;
-    const v = opts.vol == null ? 0.62 : opts.vol;
+    // Metal foot on the metal mat: a weighty thud plus a slight clank / servo.
+    // Variations come from the thud/clank/metal/servo banks plus random pitch.
+    // The old concrete stomp_m / stomp_k layers are no longer used for walking.
+    if (!limited('step', 80)) return;
+    const v = opts.vol == null ? 0.4 : opts.vol;
     const r = opts.rate || 1;
-    playGroup('stompM', { vol: v, rate: r, rateVar: 0.06 });
-    playGroup('stompK', { vol: v * 0.7, rate: r * 0.95, rateVar: 0.06, delay: 0.005 });
-    subThump({ vol: v * 0.75, f0: 70, f1: 34, dur: 0.2 });
-    if (Math.random() < 0.3 && limited('servo', 200)) playGroup('servo', { vol: v * 0.35, rate: 0.7, rateVar: 0.08, delay: 0.03 });
+    playGroup('thud', { vol: v, rate: r * 0.86, rateVar: 0.1 });
+    playGroup('clank', { vol: v * 0.36, rate: r * 1.02, rateVar: 0.12, delay: 0.008 });
+    if (Math.random() < 0.55) playGroup('metalM', { vol: v * 0.2, rate: r * 0.92, rateVar: 0.1, delay: 0.012 });
+    subThump({ vol: v * 0.38, f0: 78, f1: 36, dur: 0.14 });
+    if (Math.random() < 0.55 && limited('servo', 180)) {
+      playGroup('servo', { vol: v * 0.2, rate: 0.62 + Math.random() * 0.2, rateVar: 0.08, delay: 0.02 });
+    }
     return;
   }
   if (kind === 'cage') {

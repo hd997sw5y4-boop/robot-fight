@@ -94,9 +94,10 @@ export const ARENA = {
   floorThickness: 0.28,
   // Visual floor-mesh top and physics plane share this Y so feet and colliders agree.
   matTop: 0,
-  // Visible fence/posts/rails. Physics ring walls stay on either way so fighters and debris stay in.
-  // Set true later to bring the cage back.
-  cage: false,
+  // Short MMA cage (waist-to-chest). Visuals and physics share this height for the
+  // visible rail; physics also uses a taller extension of the same wall so jump-outs stay in.
+  cage: true,
+  cageHeight: 1.48,
   // Two-bone stance IK is off: the solver was twisting legs and lifting feet off the mat.
   stanceIK: false,
   // HDRI environment + backdrop (on by default via settings.js; the player's toggle is saved).
@@ -142,14 +143,14 @@ export const COMBAT = {
   fistShell: 0.16 * SIZE,  // fist surface beyond the hand bone (contact tolerance)
   kickShell: 0.15 * SIZE,
   blockReduction: 0.82,
-  hitStun: 0.3,        // light hitstun (18f)
-  hitStunHeavy: 0.53,  // hooks, body shots, most kicks (32f)
+  hitStun: 0.34,       // light hitstun
+  hitStunHeavy: 0.58,  // hooks, body shots, most kicks
   counterExtra: 0.17,  // caught mid-swing: +10f
   blockStunTail: 0.08, // guard stays locked this long after its pushback
   hitInvuln: 0.08,     // only stops one blow registering twice; combos can land
-  hitRock: 0.26 * SIZE,       // metres a light hit knocks a robot back (walked out with the back-step)
+  hitRock: 0.42 * SIZE,       // metres a light hit knocks a robot back (walked out with the back-step)
   stumbleForce: 3.8,   // impact force that turns a hit into a stepped stumble-back
-  stumbleDist: 0.75 * SIZE,   // metres travelled over the StumbleBackwards steps
+  stumbleDist: 1.05 * SIZE,   // metres travelled over the StumbleBackwards steps
   separate: 1.1 * SIZE,       // soft spacing: closer than this, the CPU steps back (with its walk)
   separateDown: 0.6 * SIZE,   // how close a robot may walk to one lying on the mat (ground attacks)
   separateHard: 0.92 * SIZE,  // emergency push-apart only (physics capsules normally keep 0.95)
@@ -180,11 +181,13 @@ export const COMBAT = {
 };
 
 export const GFX_PRESETS = {
-  low: { pixelCap: 1, shadows: false, shadowSize: 512, exposure: 1.4 },
-  // medium: Macs / Retina / integrated GPUs. Floor mirror at half resolution, jumbotron at
+  // minScale: how far auto-resolution may drop below the cap to hold frame rate.
+  // bloom: UnrealBloom on High only (visors, sparks, LED rings, light shafts).
+  low: { pixelCap: 1, shadows: false, shadowSize: 512, exposure: 1.4, bloom: false, minScale: 0.6 },
+  // medium: Macs / Retina / integrated GPUs. Jumbotron at
   // 10 fps, medium crowd (stadium-config quality.medium); debris and HDRI as High.
-  medium: { pixelCap: 1.5, shadows: true, shadowSize: 1024, exposure: 1.55, mirror: 512 },
-  high: { pixelCap: 2, shadows: true, shadowSize: 2048, exposure: 1.55, mirror: 1024 },
+  medium: { pixelCap: 1.5, shadows: true, shadowSize: 1024, exposure: 1.55, bloom: false, minScale: 0.55 },
+  high: { pixelCap: 2, shadows: true, shadowSize: 2048, exposure: 1.55, bloom: true, minScale: 0.5 },
   // phones/tablets (js/mobile.js): applied on top of low/high: pixel ratio and shadow caps.
   mobile: { pixelCap: 1.5, shadowSize: 1024 }, // Low on a phone uses 1.25
 };

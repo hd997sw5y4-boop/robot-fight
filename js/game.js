@@ -3,6 +3,10 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { HDRLoader as RGBELoader } from 'three/addons/loaders/HDRLoader.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { IS_MOBILE } from './mobile.js';
 import { SIZE, MODEL, ARENA, COMBAT, DAMAGE, GFX_PRESETS, LOOP_CLIPS, getFighterStats } from './config.js';
 import { CLIP_SPEEDS } from './clip-speeds.js';
@@ -15,9 +19,10 @@ import { broadcastMain } from './arena/broadcast.js';
 let prevCamMode = null;
 import { unlockAudio, playSfx, playHit, setBuzz, startCrowd } from './audio.js';
 import { announce, announceIntroSeconds } from './announcer.js';
-import { buildArena as buildArenaVisual, addArenaLights, addFloorReflection } from './arena.js';
+import { buildArena as buildArenaVisual, addArenaLights, updateCageFade } from './arena.js';
 // [stadium-arena hook] stadium scenery lives in its own module.
 import { initStadium, stadiumOwnsEnv, stadiumApplyEnv, stadiumSetGfx, updateStadium } from './arena/stadium.js';
+import { initPitCrew, setPitCrewGfx, updatePitCrew } from './arena/pit-crew.js';
 import { updateCrowdCam } from './arena/crowdcam.js'; // [stadium-broadcast hook]
 import { postfightCamera } from './arena/postfight.js'; // [postfight hook]
 import {
@@ -120,6 +125,55 @@ let fovTarget = clampFov(getSettings().fov);
 let fovLive = fovTarget;
 const camera = new THREE.PerspectiveCamera(fovLive, 1, 0.1, 80);
 camera.position.set(0, 3.2 * SIZE, 12.5 * SIZE);
+
+// Bloom on High: visors, sparks, LED rings and light shafts. Multisampled target
+// keeps anti-aliasing, which a plain composer would lose.
+const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, {
+  type: THREE.HalfFloatType, samples: IS_MOBILE ? 0 : 4,
+}));
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.4, 0.4, 0.9);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+let useBloom = false;
+
+// Auto resolution: lower the render scale when frames run slow, raise it back when there is headroom.
+const dyn = { scale: 1, acc: 0, n: 0, cooldown: 0 };
+function gfxPreset() {
+  return IS_MOBILE
+    ? { ...GFX_PRESETS[gfxKey], pixelCap: gfxKey === 'low' ? 1.25 : GFX_PRESETS.mobile.pixelCap, shadowSize: Math.min(GFX_PRESETS[gfxKey].shadowSize, GFX_PRESETS.mobile.shadowSize) }
+    : GFX_PRESETS[gfxKey];
+}
+function basePixelRatio() {
+  return Math.min(window.devicePixelRatio || 1, gfxPreset().pixelCap);
+}
+function applyPixelRatio() {
+  const pr = Math.max(0.5, basePixelRatio() * dyn.scale);
+  renderer.setPixelRatio(pr);
+  composer.setPixelRatio(pr);
+}
+function stepDynamicRes(dt) {
+  if (dt <= 0) return;
+  dyn.acc += dt; dyn.n += 1; dyn.cooldown -= dt;
+  if (dyn.acc < 1) return;
+  const fps = dyn.n / dyn.acc;
+  dyn.acc = 0; dyn.n = 0;
+  if (dyn.cooldown > 0) return;
+  const min = gfxPreset().minScale || 0.6;
+  let next = dyn.scale;
+  if (fps < 50) next = Math.max(min, dyn.scale - 0.1);
+  else if (fps > 58 && dyn.scale < 1) next = Math.min(1, dyn.scale + 0.05);
+  if (next !== dyn.scale) {
+    dyn.scale = next;
+    dyn.cooldown = 1.5;
+    applyPixelRatio();
+    resize();
+  }
+}
+function renderFrame() {
+  if (useBloom) composer.render();
+  else renderer.render(scene, camera);
+}
 
 function applyFov(v) {
   fovTarget = clampFov(v);
@@ -261,9 +315,12 @@ function applyGfx(key) {
   setChromeLow(gfxKey === 'low');
   setWiresLow(gfxKey === 'low');
   setDebrisLow(gfxKey === 'low');
+  setPitCrewGfx(gfxKey);
   stadiumSetGfx(gfxKey); // [stadium-arena hook]
-  const p = IS_MOBILE ? { ...GFX_PRESETS[gfxKey], pixelCap: gfxKey === 'low' ? 1.25 : GFX_PRESETS.mobile.pixelCap, shadowSize: Math.min(GFX_PRESETS[gfxKey].shadowSize, GFX_PRESETS.mobile.shadowSize) } : GFX_PRESETS[gfxKey];
-  renderer.setPixelRatio(Math.max(1, Math.min(window.devicePixelRatio || 1, p.pixelCap)));
+  const p = gfxPreset();
+  useBloom = !!p.bloom;
+  dyn.scale = 1;
+  applyPixelRatio();
   renderer.toneMappingExposure = p.exposure * lightMul;
   renderer.shadowMap.enabled = p.shadows;
   scene.traverse((o) => {
@@ -334,6 +391,7 @@ function resize() {
   const w = window.innerWidth;
   const h = Math.max(window.innerHeight, 1);
   renderer.setSize(w, h, false);
+  composer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
@@ -564,6 +622,15 @@ function makeFighter(gltf, color, side) {
   const box2 = meshBox(model);
   if (box2) model.position.y = -box2.min.y + MODEL.footOffset;
   tint(model, color);
+  // Tiny pieces (fingers, bolts) skip shadow casting; the large plates still shadow the mat.
+  model.updateMatrixWorld(true);
+  const _b = new THREE.Box3();
+  const _sz = new THREE.Vector3();
+  model.traverse((o) => {
+    if (!o.isMesh) return;
+    _b.setFromObject(o).getSize(_sz);
+    if (Math.max(_sz.x, _sz.y, _sz.z) < 0.22) o.castShadow = false;
+  });
   addVisor(model, color);
   root.add(model);
 
@@ -2257,10 +2324,10 @@ function armSelfClear(f) {
 // Procedural flinch: a damped spring that snaps the spine/neck/head away from the blow and
 // back, layered on top of whatever clip is playing, so every connect visibly lands.
 const FLINCH_W = {
-  head: { Spine: 0.08, Spine1: 0.12, Spine2: 0.18, Neck: 0.3, Head: 0.42 },
-  torso: { Spine: 0.34, Spine1: 0.3, Spine2: 0.22, Neck: 0.08, Head: 0.06 },
-  arm: { Spine: 0.15, Spine1: 0.2, Spine2: 0.3, Neck: 0.1, Head: 0.1 },
-  leg: { Spine: 0.3, Spine1: 0.18, Spine2: 0.1, Neck: 0.04, Head: 0.04 },
+  head: { Spine: 0.16, Spine1: 0.28, Spine2: 0.42, Neck: 0.78, Head: 1.0 },
+  torso: { Spine: 0.62, Spine1: 0.7, Spine2: 0.58, Neck: 0.36, Head: 0.28, LeftShoulder: 0.22, RightShoulder: 0.22 },
+  arm: { Spine: 0.28, Spine1: 0.38, Spine2: 0.52, Neck: 0.22, Head: 0.2, LeftShoulder: 0.3, RightShoulder: 0.3 },
+  leg: { Spine: 0.5, Spine1: 0.32, Spine2: 0.2, Neck: 0.1, Head: 0.1 },
 };
 function startFlinch(f, dir, amp, zone) {
   if (!f || !f.flinchBones) return;
@@ -2275,7 +2342,7 @@ function applyFlinch(f, dt) {
   if (!fl) return;
   fl.t += dt;
   const t = fl.t;
-  const rise = 0.045;
+  const rise = 0.028;
   const env = t < rise ? Math.sin((t / rise) * Math.PI / 2) : Math.exp(-(t - rise) * 6.5) * Math.cos((t - rise) * 9);
   if (t > 0.9) { f.flinch = null; return; }
   // Axis that tips "up" toward the blow direction (world), applied per bone in parent space.
@@ -2320,9 +2387,8 @@ function applyHit(atk, def, spec, kind, strikeBone, contact) {
   applyPartHit(def, hit.partId, dmg, hit.point, hit.dir, scene, { blocked, force, final: def.health <= 0 });
   applyStrikeWear(atk, kind || 'punch', strikeBone, blocked, force, scene, hit.dir);
   hitLight.color.setHex(blocked ? 0x88ccff : 0xffc060);
-  hitLight.intensity = 12 + Math.min(8, force);
+  hitLight.intensity = 14 + Math.min(12, force * 1.4);
   hitLight.position.copy(hit.point);
-  playHit({ blocked, heavy: !blocked && (dmg >= 7 || force >= 4.2), kick: kind === 'kick' });
   // Heavy: a hard-hitting blow, a stepped-in strike, or a full kick (measured: a planted kick
   // lands at force ~3.1-3.4, a planted punch ~2.4; stepping in adds ~1).
   const heavy = !blocked && (dmg >= 7 || force >= 4.2 || (kind === 'kick' && force >= 3.3));
@@ -2332,29 +2398,27 @@ function applyHit(atk, def, spec, kind, strikeBone, contact) {
   // Impact weight: a shake scaled by how hard it landed (Settings shake toggle respected
   // in addShake) and a bright flash right at the contact point.
   const hard = Math.max(0, Math.min(1, (force - 2) / 4 + (heavy ? 0.25 : 0) + (counter ? 0.25 : 0)));
-  addShake(blocked ? 0.03 : 0.04 + hard * 0.12);
-  hitFlash(hit.point, blocked ? 0.4 : 0.55 + hard * 0.75, blocked ? 0x9fd0ff : 0xfff0c8);
+  playHit({ blocked, heavy, kick: kind === 'kick', hard });
+  addShake(blocked ? 0.06 : (heavy ? 0.22 + hard * 0.14 : 0.11 + hard * 0.1));
+  hitFlash(hit.point, blocked ? 0.45 : 0.7 + hard * 0.85, blocked ? 0x9fd0ff : 0xfff0c8);
   const fwd = hit.dir;
   // Attacker feels the connect: the drive stops and the torso recoils a touch off the target.
   atk.atkContact = true;
   atk.backOff = 0.3; def.backOff = 0.3;
-  startFlinch(atk, fwd.clone().negate(), blocked ? 0.1 : 0.07, 'torso');
-  // Defender visibly takes it: a spine/neck snap away from the blow by zone (smaller on guard).
-  startFlinch(def, fwd, blocked ? 0.12 : Math.min(0.62, 0.3 + force * 0.045), blocked ? 'arm' : hitZone(hit.partId));
-  // No free sliding: a blocked hit is absorbed by the guard, a light hit only rocks the robot
-  // a few centimetres (hidden inside its in-place hit clip), and a solid hit becomes a real
-  // stumble-back whose travel is spread over the clip's own steps (see stepFighter 'hit').
+  startFlinch(atk, fwd.clone().negate(), blocked ? 0.16 : 0.12, 'torso');
+  // Defender visibly takes it: a strong head/body snap away from the blow (smaller on guard).
+  const flinchAmp = blocked
+    ? Math.min(0.42, 0.2 + force * 0.04)
+    : heavy
+      ? Math.min(1.2, 0.88 + force * 0.06)
+      : Math.min(0.78, 0.5 + force * 0.05);
+  startFlinch(def, fwd, flinchAmp, blocked ? 'arm' : hitZone(hit.partId));
+  // Knockback always walks out through hitPush / setFighterMove (physics owns the body;
+  // no freeze frames, no slow motion). Heavier blows travel farther and start immediately.
   const solid = !blocked && (force >= COMBAT.stumbleForce || heavy);
   const stumbleClip = solid && def.actions.StumbleBackwards ? 'StumbleBackwards' : null;
   if (blocked) {
-    // Guard pushback: ~55% of a light hit's, stepped out with the backward walk.
-    def.guardPush = { x: fwd.x, z: fwd.z, dist: COMBAT.hitRock * 0.55 * Math.min(1.4, 0.8 + force * 0.1), t0: 0, t1: 0.22, legs: true, t: 0 };
-  }
-  if (!(def.phys && def.phys.body)) {
-    const kb = blocked ? 0 : COMBAT.hitRock * (0.8 + force * 0.08);
-    def.root.position.x += fwd.x * kb;
-    def.root.position.z += fwd.z * kb;
-    placeInOctagon(def.root.position, 0.55, true);
+    def.guardPush = { x: fwd.x, z: fwd.z, dist: COMBAT.hitRock * 0.7 * Math.min(1.5, 0.85 + force * 0.1), t0: 0, t1: 0.22, legs: true, t: 0 };
   }
   if (def.health <= 0 || isCatastrophic(def)) {
     ko(def, atk, { dir: fwd, force, partId: hit.partId, kind: kind || 'punch' });
@@ -2389,15 +2453,19 @@ function applyHit(atk, def, spec, kind, strikeBone, contact) {
       def.state = 'hit';
       def.stateT = 0;
       const clip = stumbleClip || pickHitClip(def, hit.partId);
-      setAnim(def, clip, 0.12);
+      setAnim(def, clip, 0.07);
       const act = def.actions[clip];
       const clipDur = act ? act.getClip().duration / Math.max(0.2, act.timeScale || 1) : COMBAT.hitStun;
       const stun = ((stumbleClip ? COMBAT.hitStunHeavy : COMBAT.hitStun) + (counter ? COMBAT.counterExtra : 0)) / statOf(def, 'recovery');
       def.hitDur = stumbleClip ? Math.max(stun, Math.min(clipDur * 0.9, 0.65)) : stun; // short, clear stun windows
       // Knockback travel is walked out: the backward walk plays under the hit clip (see 'hit').
       def.hitPush = stumbleClip
-        ? { x: fwd.x, z: fwd.z, dist: COMBAT.stumbleDist * Math.min(1.25, 0.8 + force * 0.05), t0: 0.06, t1: def.hitDur * 0.85, legs: false }
-        : { x: fwd.x, z: fwd.z, dist: COMBAT.hitRock * Math.min(1.4, 0.8 + force * 0.1), t0: 0.02, t1: Math.max(0.24, stun * 0.85), legs: true };
+        ? { x: fwd.x, z: fwd.z, dist: COMBAT.stumbleDist * Math.min(1.35, 0.85 + force * 0.06), t0: 0, t1: def.hitDur * 0.85, legs: false }
+        : { x: fwd.x, z: fwd.z, dist: COMBAT.hitRock * Math.min(1.55, 0.9 + force * 0.12), t0: 0, t1: Math.max(0.24, stun * 0.85), legs: true };
+      if (def.hitPush) {
+        const v0 = (def.hitPush.dist / Math.max(0.05, def.hitPush.t1)) * (Math.PI / 2) * 0.35;
+        setFighterMove(def, def.hitPush.x * v0, def.hitPush.z * v0);
+      }
     }
   }
 }
@@ -3407,7 +3475,6 @@ function updateLoco(f, sidestep, inout, dt, actualSpeed, moveSpeeds) {
 
 function stepFootSounds(f, dt) {
   if (!f || f.state === 'ko' || f.state === 'down' || f.state === 'getup') return;
-  if (f.state !== 'walk') return;
   const top = matTopY();
   f._footSfx = f._footSfx || { L: { y: top, t: 0 }, R: { y: top, t: 0 } };
   for (const side of ['L', 'R']) {
@@ -3422,7 +3489,7 @@ function stepFootSounds(f, dt) {
     const nowDown = y <= top + 0.038 * SIZE;
     if (wasUp && nowDown && rec.t > 0.16) {
       rec.t = 0;
-      playSfx('step', { vol: 0.48, rate: 0.94 + Math.random() * 0.12 });
+      playSfx('step', { vol: 0.4, rate: 0.86 + Math.random() * 0.2 });
     }
     rec.y = y;
   }
@@ -3469,7 +3536,7 @@ const lookT = new THREE.Vector3();
 let shakeAmp = 0;
 function addShake(amount) {
   if (!getSettings().shake) return;
-  shakeAmp = Math.min(0.45, shakeAmp + amount);
+  shakeAmp = Math.min(0.58, shakeAmp + amount);
 }
 
 // Contact flash: an additive glow sprite, timed on wall-clock so it stays visible on impact.
@@ -3747,6 +3814,7 @@ function updateCamera(dt) {
 
 let p1;
 let p2;
+let cagePanels = null;
 const match = { phase: 'intro', introT: 0, over: false, winner: null, roundLeft: null, roundIndex: 1, roundTimeOverride: null };
 const clock = new THREE.Clock();
 
@@ -4100,7 +4168,10 @@ function tick() {
   setBuzz(isSettingsOpen() ? 0 : buzzFromFighters());
   syncHud(dt);
   updateStadium(dt); // [stadium-arena hook]
-  renderer.render(scene, camera);
+  updatePitCrew(dt);
+  updateCageFade(cagePanels, camera, rawDt);
+  renderFrame();
+  stepDynamicRes(rawDt);
 }
 
 function buzzFromFighters() {
@@ -4167,7 +4238,7 @@ function onLoad(gltf) {
   const built = buildArenaVisual(scene, { tiled, metalColor, metalRough, metalMetal });
   const lightRig = addArenaLights(scene, built.fixturePos);
   syncEnvironment(); // the void wall exists now: hide it if the HDRI backdrop is on
-  addFloorReflection(scene).then((m) => { floorMirror = m; m.visible = gfxKey !== 'low'; setMirrorRes(m); }).catch(() => {});
+  // Painted Metal001 mat (with decals) replaces the chrome floor, so the planar mirror is not added.
   if (lightRig) {
     trackLight(lightRig.hemi);
     trackLight(lightRig.fill);
@@ -4180,6 +4251,8 @@ function onLoad(gltf) {
   fighterRims = [makeFighterRim(0xc8e0ff), makeFighterRim(0xffd4b8)];
   applyLight(getSettings().light);
   // [stadium-arena hook] scenery-only; mat, walls and physics stay as built above.
+  cagePanels = built.fencePanels;
+  initPitCrew(scene);
   initStadium({
     scene, renderer, pmrem, industrial: built, gfx: gfxKey,
     applyHdri, getHdri: () => !!(getSettings().hdri || ARENA.hdri),
@@ -4248,7 +4321,7 @@ function onLoad(gltf) {
     applyMalfunctions(p2, 0);
     stepDamage(scene, 0);
     syncHud();
-    renderer.render(scene, camera);
+    renderFrame();
   };
   window.__rfSetHdri = (on) => applyHdri(!!on);
   window.__rfHdriReady = () => !!hdriEnv;
