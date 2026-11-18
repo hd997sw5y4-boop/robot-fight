@@ -176,8 +176,10 @@ export const STAT_KEYS = ['speed', 'power', 'armor', 'reach', 'recovery', 'tough
 export const STAT_BUDGET = 36;
 export const FIGHTER_PROFILES = {
   striker: { id: 'striker', name: 'Striker', blurb: 'Fast feet, quick hands, recovers fast. Lighter hits and plating.',
+    strengths: ['Fast footwork', 'Quick strikes', 'Quick recovery'], weaknesses: ['Light hitter', 'Thin armor'],
     stats: { speed: 8, power: 5, armor: 5, reach: 6, recovery: 7, toughness: 5 } },
   bruiser: { id: 'bruiser', name: 'Bruiser', blurb: 'Hits hard, heavy plating, tough parts. Slow to move and to recover.',
+    strengths: ['Hard hitter', 'Heavy armor', 'Tough parts'], weaknesses: ['Slow', 'Slow recovery'],
     stats: { speed: 4, power: 7, armor: 7, reach: 6, recovery: 5, toughness: 7 } },
 };
 export const SIDE_PROFILE = { p1: 'striker', p2: 'bruiser' };
@@ -275,4 +277,24 @@ export function getFighterStats(sideOrId = 'p1') {
     }),
   });
 }
-if (typeof window !== 'undefined') window.RFFighterStats = getFighterStats;
+
+// The shape the fighter-select / tale-of-the-tape reader (js/shell/profiles.js) expects:
+// absolute stats in its units (power = mean strike damage, speed = m/s, armor = effective part
+// hit points = part hp x armor, reach = kick reach in m) plus a recovery multiplier.
+export function fighterProfile(side = 'p1') {
+  const g = getFighterStats(side);
+  const p = FIGHTER_PROFILES[g.id];
+  return {
+    id: g.id, name: g.name, blurb: g.blurb,
+    stats: {
+      power: +((g.real.punchDamage + g.real.kickDamage) / 2).toFixed(2),
+      speed: g.real.moveSpeed,
+      armor: Math.round(g.real.partHp * g.mul.armor),
+      reach: g.real.kickReach,
+    },
+    recovery: g.mul.recovery,
+    strengths: p.strengths.slice(), weaknesses: p.weaknesses.slice(),
+    ratings: g.ratings,
+  };
+}
+if (typeof window !== 'undefined') { window.RFFighterStats = getFighterStats; window.RFFighterProfile = fighterProfile; }

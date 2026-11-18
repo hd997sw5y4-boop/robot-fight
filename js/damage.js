@@ -2,7 +2,7 @@ import { playSfx } from './audio.js';
 import { announce } from './announcer.js';
 import { spawnDebris, clearPhysicsDebris, PART_MASS, stepPhysics } from './physics.js';
 import * as THREE from 'three';
-import { DAMAGE, ARENA } from './config.js';
+import { DAMAGE, ARENA, SIZE } from './config.js';
 import { addWires, clearWires, stepWires } from './wires.js';
 
 const _v = new THREE.Vector3();
@@ -858,6 +858,103 @@ function emitSmoke(point) {
 const oilDrops = [];
 const puddles = [];
 const OIL_GEO = new THREE.SphereGeometry(0.016, 6, 4);
+// ---- Small debris: plates, panel shards, bolts, finger segments, chunks ----
+// Solid hits knock chips off the struck part (heavier hits shed more). Each chip is a rigid
+// physics piece that bounces and comes to rest on the mat; once at rest it leaves physics and
+// is folded into an InstancedMesh batch (one draw call per shape+material), so hundreds stay
+// on the mat until the match ends. Past CHIP_MAX resting chips the oldest batch slot is reused.
+const CHIP_GEOS = [
+  { g: new THREE.BoxGeometry(0.11, 0.012, 0.08), m: 0.12 },           // armor plate
+  { g: new THREE.TetrahedronGeometry(0.045), m: 0.06 },                 // panel shard
+  { g: new THREE.CylinderGeometry(0.012, 0.012, 0.05, 6), m: 0.05 },   // bolt
+  { g: new THREE.BoxGeometry(0.028, 0.028, 0.06), m: 0.06 },           // finger segment
+  { g: new THREE.DodecahedronGeometry(0.03), m: 0.1 },                  // chunk
+];
+const CHIP_MATS = {
+  chrome: new THREE.MeshStandardMaterial({ color: 0xc9ced6, metalness: 1, roughness: 0.22 }),
+  dark: new THREE.MeshStandardMaterial({ color: 0x3a3e45, metalness: 0.8, roughness: 0.45 }),
+  p1: new THREE.MeshStandardMaterial({ color: 0x3f7dff, metalness: 0.55, roughness: 0.38 }),
+  p2: new THREE.MeshStandardMaterial({ color: 0xff4040, metalness: 0.55, roughness: 0.38 }),
+};
+const CHIP_MAX = 360;
+const chipBatches = new Map(); // `${geo}|${mat}` -> InstancedMesh
+let chipRing = []; // resting chips in order: { key, slot }
+const chipsLive = [];
+function chipBatch(scene, gi, mk) {
+  const key = gi + '|' + mk;
+  let im = chipBatches.get(key);
+  if (!im) {
+    im = new THREE.InstancedMesh(CHIP_GEOS[gi].g, CHIP_MATS[mk], CHIP_MAX);
+    im.count = 0; im.castShadow = true; im.receiveShadow = true; im.frustumCulled = false;
+    im.userData.shared = true; im.userData.free = [];
+    scene.add(im);
+    chipBatches.set(key, im);
+  }
+  if (im.parent !== scene) scene.add(im);
+  return im;
+}
+export function shedChips(f, partId, point, dir, force, scene, opts = {}) {
+  if (!point || !scene) return 0;
+  const heavy = force >= 4.2;
+  let n = opts.count != null ? opts.count : (force < 2.2 ? (Math.random() < 0.35 ? 1 : 0) : Math.round(1 + Math.random() * 2 + (heavy ? 2 + Math.random() * 2 : 0)));
+  if (opts.blocked) n = Math.random() < 0.3 ? 1 : 0;
+  const part = f && f.parts && f.parts[partId];
+  if (part && part.max) n += Math.round((1 - part.hp / part.max) * 1.5 * Math.random()); // battered parts shed more
+  const d = dir ? dir.clone().setY(0).normalize() : new THREE.Vector3(0, 0, 1);
+  for (let i = 0; i < n; i++) {
+    let gi = Math.floor(Math.random() * CHIP_GEOS.length);
+    if (gi === 3 && !(partId && partId.startsWith('arm'))) gi = 2; // finger segments come off arms
+    const mk = Math.random() < 0.45 ? (f && f.id === 'p1' ? 'p1' : 'p2') : (Math.random() < 0.6 ? 'chrome' : 'dark');
+    const mesh = new THREE.Mesh(CHIP_GEOS[gi].g, CHIP_MATS[mk]);
+    mesh.userData.shared = true;
+    mesh.scale.setScalar(SIZE * (0.75 + Math.random() * 0.6));
+    mesh.position.copy(point).add(new THREE.Vector3((Math.random() - 0.5) * 0.12, (Math.random() - 0.5) * 0.12, (Math.random() - 0.5) * 0.12));
+    mesh.quaternion.setFromEuler(new THREE.Euler(Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28));
+    mesh.castShadow = true;
+    scene.add(mesh);
+    const sp = 1.6 + force * 0.35 + Math.random() * 1.2;
+    const rec = spawnDebris({
+      mesh, small: true, mass: CHIP_GEOS[gi].m * SIZE,
+      velocity: new THREE.Vector3(d.x * sp + (Math.random() - 0.5) * 2.2, 1.2 + Math.random() * 2.2, d.z * sp + (Math.random() - 0.5) * 2.2),
+      angularVelocity: new THREE.Vector3((Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30),
+      ownerId: f && f.id,
+    });
+    chipsLive.push({ mesh, phys: rec, gi, mk });
+  }
+  return n;
+}
+const _cm = new THREE.Matrix4();
+function stepChips(scene) {
+  for (let i = chipsLive.length - 1; i >= 0; i--) {
+    const c = chipsLive[i];
+    if (!c.phys.frozen) continue;
+    // At rest: into the batch, out of the scene graph.
+    const im = chipBatch(scene, c.gi, c.mk);
+    if (chipRing.length >= CHIP_MAX) {
+      // Only past CHIP_MAX chips on the mat: the oldest resting chip gives up its slot.
+      const old = chipRing.shift();
+      const oim = chipBatches.get(old.key);
+      oim.setMatrixAt(old.slot, _cm.makeScale(0, 0, 0)); oim.instanceMatrix.needsUpdate = true;
+      oim.userData.free.push(old.slot);
+    }
+    const slot = im.userData.free.length ? im.userData.free.pop() : (im.count < CHIP_MAX ? im.count++ : null);
+    c.mesh.updateMatrix();
+    if (slot != null) {
+      im.setMatrixAt(slot, c.mesh.matrix);
+      im.instanceMatrix.needsUpdate = true;
+      chipRing.push({ key: c.gi + '|' + c.mk, slot });
+    }
+    scene.remove(c.mesh);
+    chipsLive.splice(i, 1);
+  }
+}
+function clearChips(scene) {
+  for (const c of chipsLive) scene.remove(c.mesh);
+  chipsLive.length = 0;
+  chipRing = [];
+  for (const im of chipBatches.values()) { im.count = 0; im.userData.free = []; }
+}
+
 const oilDropMat = new THREE.MeshStandardMaterial({ color: 0x0c0a07, roughness: 0.12, metalness: 0.5 });
 const PUDDLE_GEO = new THREE.PlaneGeometry(2, 2);
 // A few irregular, soft-edged blob masks (overlapping lobes) so puddles never read as discs.
@@ -1022,6 +1119,7 @@ export function applyPartHit(f, partId, damage, point, dir, scene, opts = {}) {
   const dentAmt = (opts.blocked ? 0.4 : 1) * Math.min(2.6, (0.4 + force * 0.32) * (1 + Math.min(1.2, part.wear * 0.08)));
   dentPart(part, point, dir, dentAmt);
   emitSparks(point, dir, opts.blocked ? 8 : 18 + Math.min(16, Math.round(force * 3)));
+  shedChips(f, partId, point, dir, force, scene, { blocked: opts.blocked });
   addSparkScene(scene);
   let wrecked = false;
   const isLeg = partId.startsWith('leg');
@@ -1053,6 +1151,7 @@ export function applyPartHit(f, partId, damage, point, dir, scene, opts = {}) {
 
 export function stepDamage(scene, dt) {
   addSparkScene(scene);
+  stepChips(scene);
   stepWires(dt);
   stepOil(scene, dt);
   const floor = ARENA.floorY + 0.02;
@@ -1301,10 +1400,11 @@ export function clearAllDebris(scene, keepPieces = false) {
     return;
   }
   clearPhysicsDebris();
+  clearChips(scene);
   clearWires();
   for (const d of debrisList) {
     d.obj.traverse((o) => {
-      if (o.isMesh && o.geometry && !o.userData.deformReady) {
+      if (o.isMesh && o.geometry && !o.userData.deformReady && !o.userData.shared) {
         o.geometry.dispose();
       }
     });

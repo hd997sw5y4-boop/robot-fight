@@ -151,15 +151,16 @@ export function impactVelocity(atk, def, dir) {
   return along;
 }
 
-export function spawnDebris({ mesh, mass, velocity, angularVelocity, ownerId }) {
+export function spawnDebris({ mesh, mass, velocity, angularVelocity, ownerId, small }) {
   mesh.updateWorldMatrix(true, true);
   const box = new THREE.Box3().setFromObject(mesh);
   const size = box.getSize(new THREE.Vector3());
-  const hx = Math.max(0.05, size.x / 2);
-  const hy = Math.max(0.05, size.y / 2);
-  const hz = Math.max(0.05, size.z / 2);
+  const minH = small ? 0.012 : 0.05; // small chips get a box that fits them (no hovering)
+  const hx = Math.max(minH, size.x / 2);
+  const hy = Math.max(minH, size.y / 2);
+  const hz = Math.max(minH, size.z / 2);
   const body = new CANNON.Body({
-    mass: Math.max(0.8, mass || 3),
+    mass: small ? Math.max(0.05, mass || 0.15) : Math.max(0.8, mass || 3),
     material: matDebris,
     linearDamping: 0.08,
     angularDamping: 0.1,
@@ -180,12 +181,12 @@ export function spawnDebris({ mesh, mass, velocity, angularVelocity, ownerId }) 
   body.collisionFilterMask = G.ARENA | G.DEBRIS;
   body.userData = { kind: 'debris', ownerId: ownerId || null };
   world.addBody(body);
-  const rec = { mesh, body, mass, settled: false, still: 0, lastClank: 0, ownerId: ownerId || null, live: 0 };
+  const rec = { mesh, body, mass, settled: false, still: 0, lastClank: 0, ownerId: ownerId || null, live: 0, small: !!small };
   body.addEventListener('collide', (e) => {
     if (rec.settled) return;
     const other = e.body === body ? e.target : e.body;
     const impact = e.contact && e.contact.getImpactVelocityAlongNormal ? Math.abs(e.contact.getImpactVelocityAlongNormal()) : 0;
-    if (impact < 0.9) return;
+    if (impact < (rec.small ? 2.2 : 0.9)) return;
     const now = performance.now();
     if (now - rec.lastClank < 70) return;
     rec.lastClank = now;
@@ -219,7 +220,18 @@ function settle(d) {
 function capDebris() {
   const cap = DEBRIS_CAP[debrisLow ? 'low' : 'high'];
   const live = debris.filter((d) => !d.frozen);
-  const moving = live.filter((d) => !d.settled);
+  // In-flight chips: past the cap the oldest drop out of physics where they are (on the mat).
+  const chips = live.filter((d) => d.small);
+  const maxChips = debrisLow ? 14 : 36;
+  if (chips.length > maxChips) {
+    const old = chips.sort((a, b) => b.live - a.live).slice(0, chips.length - maxChips);
+    for (const d of old) {
+      d.body.position.y = Math.min(d.body.position.y, (ARENA.matTop || 0) + 0.02);
+      d.mesh.position.set(d.body.position.x, d.body.position.y, d.body.position.z);
+      world.removeBody(d.body); d.settled = true; d.frozen = true;
+    }
+  }
+  const moving = live.filter((d) => !d.settled && !d.small);
   if (moving.length > cap.dynamic) {
     const cand = moving.filter((d) => d.live > 0.6 && d.body.position.y < 0.62 * SIZE)
       .sort((a, b) => (a.mass - b.mass) || (b.live - a.live));
@@ -248,7 +260,12 @@ function syncDebris(dt) {
       const onMat = d.body.position.y < 0.62 * SIZE;
       if (onMat && v < 0.32 && w < 0.85) {
         d.still += dt;
-        if (d.still > 0.4) settle(d);
+        if (d.still > 0.4) {
+          settle(d);
+          // Small chips leave the physics world as soon as they rest: the mesh stays put
+          // (damage.js folds it into an instanced batch).
+          if (d.small) { world.removeBody(d.body); d.frozen = true; }
+        }
       } else {
         d.still = 0;
       }
