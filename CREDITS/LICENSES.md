@@ -77,7 +77,12 @@ Full-quality WAV masters were downloaded from Mixkit and recompressed to mono OG
 - **Metal009** — https://ambientcg.com/view?id=Metal009 — cage/post metal (`textures/metal_*.jpg`).
 - **Metal008** (scratched metal) — https://ambientcg.com/view?id=Metal008 — chrome mat color, roughness, metalness, and normal (`textures/chrome_*.jpg`).
 - **Rust004** — https://ambientcg.com/view?id=Rust004 — rust and grunge masks mixed into the mat (`textures/rust_*.jpg`).
+- **Concrete034** — https://ambientcg.com/view?id=Concrete034 — stadium stands, walls and arena floor (`textures/stadium/concrete_*.jpg`; 1K color + normal, roughness resized to 512).
 
 ## Poly Haven HDRI — CC0 1.0
 
 [Industrial Pipe and Valve 01](https://polyhaven.com/a/industrial_pipe_and_valve_01) 2K HDRI (`hdris/industrial_pipe_and_valve_01_2k.hdr`), used when `ARENA.hdri` or the Settings toggle is on. License: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/). Credit is optional.
+
+## Stadium arena (original design)
+
+The stadium (`js/arena/stadium.js`) is an original layout built from code: stepped concrete bowls, instanced seats and crowd, roof truss, lights and screens. Screen and LED-board graphics are drawn at runtime on canvases with generic text (Robot Fight / Window Workshop Games); no third-party logos, leagues or brands. Its only file asset is ambientCG Concrete034 (CC0 1.0, above).

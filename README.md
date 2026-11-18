@@ -34,6 +34,13 @@ The part-to-bone map lives in `js/config.js` (`DAMAGE.bind`) so a later Mixamo-r
 - **Sound effects:** CC0 and royalty-free clips (no credit required). Sources and licenses are listed in `CREDITS/LICENSES.md`.
 - **Physics:** [cannon-es](https://github.com/pmndrs/cannon-es) (MIT), vendored from the official package. Fighter capsules, cage/posts, ragdoll knockdowns and KOs, and detached parts that bounce then settle.
 
+## Arenas
+
+- **Stadium** (default): an original indoor stadium around the same fight mat, in `js/arena/stadium.js` with its config/flag in `js/arena/stadium-config.js` (`STADIUM.enabled`, `STADIUM.defaultArena`). Two tiered bowls with instanced seats and crowd, roof truss, ring spot cans with fake light cones, flood banks, a center-hung four-sided scoreboard, end-wall screens and LED ribbon boards. Low graphics uses fewer crowd/seat instances, a simpler truss, fewer cones and no extra lights. Only the existing mat spotlight casts shadows.
+- **Industrial**: the original chrome mat under the Poly Haven Industrial Pipe and Valve HDRI.
+
+Pick one in Settings → Display → Arena (saved in `localStorage` as `rf_arena`). Switching disposes the stadium's geometry, textures, lights and environment map. The mat, ring colliders and grounding are the same in both. Hooks in `js/game.js` are marked `[stadium-arena hook]`.
+
 The octagon cage/fence is turned off for now (`ARENA.cage` in `js/config.js`); an invisible ring collider still keeps fighters and loose parts on the mat.
 
 The menu/arcade shell can start and end fights through `js/api.js` (`startFight`, `onFightEnd`, `setFighterConfig` with paint colors and AI personality). Flip attacks and win celebrations will use upcoming Mixamo clips (`MODEL.animations.flipSpecial` / `victory`); missing names are skipped until that pack is in the GLB.

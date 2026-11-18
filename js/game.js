@@ -8,6 +8,8 @@ import { CLIP_SPEEDS } from './clip-speeds.js';
 import { getSettings, isSettingsOpen, initSettings, updateFps, setFov } from './settings.js';
 import { unlockAudio, playSfx, playHit, setBuzz, startCrowd } from './audio.js';
 import { buildArena as buildArenaVisual, addArenaLights } from './arena.js';
+// [stadium-arena hook] stadium scenery lives in its own module.
+import { initStadium, stadiumOwnsEnv, stadiumApplyEnv, stadiumSetGfx, updateStadium } from './arena/stadium.js';
 import {
   initArenaPhysics,
   attachFighter,
@@ -126,6 +128,8 @@ let hdriEnabled = false;
 
 function applyHdri(on) {
   hdriEnabled = !!on;
+  // [stadium-arena hook] the stadium owns background/env/fog while it is the active arena.
+  if (stadiumOwnsEnv()) { stadiumApplyEnv(); return; }
   if (hdriEnabled) {
     if (!hdriEnv) {
       loadHdri().then((ok) => { if (ok && hdriEnabled) applyHdri(true); });
@@ -173,7 +177,8 @@ function loadHdri() {
   return hdriLoading;
 }
 
-loadHdri().then((ok) => {
+// [stadium-arena hook] skip the 6.7 MB HDRI download until Industrial is picked.
+if (!stadiumOwnsEnv()) loadHdri().then((ok) => {
   if (ok && (getSettings().hdri || ARENA.hdri)) applyHdri(true);
 });
 
@@ -182,6 +187,7 @@ const litLights = [];
 
 function applyGfx(key) {
   gfxKey = key === 'low' ? 'low' : 'high';
+  stadiumSetGfx(gfxKey); // [stadium-arena hook]
   const p = GFX_PRESETS[gfxKey];
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, p.pixelCap));
   renderer.toneMappingExposure = p.exposure * lightMul;
@@ -1719,6 +1725,7 @@ function tick() {
   hitLight.intensity = Math.max(0, hitLight.intensity - dt * 28);
   setBuzz(isSettingsOpen() ? 0 : buzzFromFighters());
   syncHud();
+  updateStadium(dt); // [stadium-arena hook]
   renderer.render(scene, camera);
 }
 
@@ -1786,6 +1793,14 @@ function onLoad(gltf) {
   }
   fighterRims = [makeFighterRim(0xc8e0ff), makeFighterRim(0xffd4b8)];
   applyLight(getSettings().light);
+  // [stadium-arena hook] scenery-only; mat, walls and physics stay as built above.
+  initStadium({
+    scene, renderer, pmrem, industrial: built, gfx: gfxKey,
+    applyHdri, getHdri: () => !!(getSettings().hdri || ARENA.hdri),
+    trackLight,
+    untrackLight(l) { const i = litLights.indexOf(l); if (i >= 0) litLights.splice(i, 1); },
+    refreshLights: () => applyLight(getSettings().light),
+  });
   initArenaPhysics();
   p1 = makeFighter(gltf, MODEL.colors.p1, 'p1');
   p2 = makeFighter(gltf, MODEL.colors.p2, 'p2');
