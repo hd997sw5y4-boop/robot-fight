@@ -12,6 +12,8 @@ import { createApiBrain, wantsApiBrain, initApiBrainUI } from './api-brain.js';
 import { getSettings, isSettingsOpen, initSettings, updateFps, cycleCameraMode } from './settings.js';
 import { announce, unlockAudio, playSfx, playHit, setBuzz, startCrowd } from './audio.js';
 import { buildArena as buildArenaVisual, addArenaLights, addFloorReflection } from './arena.js';
+// [stadium-arena hook] stadium scenery lives in its own module.
+import { initStadium, stadiumOwnsEnv, stadiumApplyEnv, stadiumSetGfx, updateStadium } from './arena/stadium.js';
 import {
   initArenaPhysics,
   attachFighter,
@@ -163,6 +165,8 @@ function applyHdri(on) {
 }
 
 function syncEnvironment() {
+  // [stadium-arena hook] the stadium owns background/env/fog while it is the active arena.
+  if (stadiumOwnsEnv()) { stadiumApplyEnv(); return; }
   const on = hdriEnabled && !!hdriEnv;
   if (on) {
     scene.environment = hdriEnv;
@@ -207,7 +211,8 @@ function loadHdri() {
 }
 
 // Start fetching straight away (on by default); applied as soon as it's ready.
-loadHdri().then(() => syncEnvironment());
+// [stadium-arena hook] skip the 6.7 MB HDRI download until Industrial is picked.
+if (!stadiumOwnsEnv()) loadHdri().then(() => syncEnvironment());
 
 let lightMul = Math.max(0.5, Math.min(2, getSettings().light || 1));
 const litLights = [];
@@ -218,6 +223,7 @@ function applyGfx(key) {
   if (floorMirror) floorMirror.visible = gfxKey !== 'low';
   setChromeLow(gfxKey === 'low');
   setWiresLow(gfxKey === 'low');
+  stadiumSetGfx(gfxKey); // [stadium-arena hook]
   const p = GFX_PRESETS[gfxKey];
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, p.pixelCap));
   renderer.toneMappingExposure = p.exposure * lightMul;
@@ -3142,6 +3148,7 @@ function tick() {
   hitLight.intensity = Math.max(0, hitLight.intensity - dt * 28);
   setBuzz(isSettingsOpen() ? 0 : buzzFromFighters());
   syncHud();
+  updateStadium(dt); // [stadium-arena hook]
   renderer.render(scene, camera);
 }
 
@@ -3211,6 +3218,14 @@ function onLoad(gltf) {
   }
   fighterRims = [makeFighterRim(0xc8e0ff), makeFighterRim(0xffd4b8)];
   applyLight(getSettings().light);
+  // [stadium-arena hook] scenery-only; mat, walls and physics stay as built above.
+  initStadium({
+    scene, renderer, pmrem, industrial: built, gfx: gfxKey,
+    applyHdri, getHdri: () => !!(getSettings().hdri || ARENA.hdri),
+    trackLight,
+    untrackLight(l) { const i = litLights.indexOf(l); if (i >= 0) litLights.splice(i, 1); },
+    refreshLights: () => applyLight(getSettings().light),
+  });
   initArenaPhysics();
   p1 = makeFighter(gltf, MODEL.colors.p1, 'p1');
   p2 = makeFighter(gltf, MODEL.colors.p2, 'p2');
