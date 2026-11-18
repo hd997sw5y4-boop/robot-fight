@@ -199,12 +199,45 @@ export function spawnDebris({ mesh, mass, velocity, angularVelocity, ownerId }) 
 export function getPhysicsDebris() { return debris; }
 
 export function clearPhysicsDebris() {
-  for (const d of debris) world.removeBody(d.body);
+  for (const d of debris) if (!d.frozen) world.removeBody(d.body);
   debris.length = 0;
 }
 
+// Debris stays for the whole match; only its physics is capped. Past MAX_DYNAMIC moving
+// pieces, the oldest small ones lying on the mat are settled (static + asleep); past
+// MAX_BODIES bodies, the oldest small settled pieces lose their body and stay as frozen meshes.
+const DEBRIS_CAP = { high: { dynamic: 18, bodies: 44 }, low: { dynamic: 8, bodies: 20 } };
+let debrisLow = false;
+export function setDebrisLow(on) { debrisLow = !!on; }
+function settle(d) {
+  d.settled = true;
+  d.body.velocity.setZero();
+  d.body.angularVelocity.setZero();
+  d.body.type = CANNON.Body.STATIC;
+  d.body.sleep();
+}
+function capDebris() {
+  const cap = DEBRIS_CAP[debrisLow ? 'low' : 'high'];
+  const live = debris.filter((d) => !d.frozen);
+  const moving = live.filter((d) => !d.settled);
+  if (moving.length > cap.dynamic) {
+    const cand = moving.filter((d) => d.live > 0.6 && d.body.position.y < 0.62 * SIZE)
+      .sort((a, b) => (a.mass - b.mass) || (b.live - a.live));
+    for (let i = 0; i < Math.min(cand.length, moving.length - cap.dynamic); i++) settle(cand[i]);
+  }
+  if (live.length > cap.bodies) {
+    const cand = live.filter((d) => d.settled).sort((a, b) => (a.mass - b.mass) || (b.live - a.live));
+    for (let i = 0; i < Math.min(cand.length, live.length - cap.bodies); i++) {
+      world.removeBody(cand[i].body);
+      cand[i].frozen = true; // the mesh stays exactly where it came to rest
+    }
+  }
+}
+
 function syncDebris(dt) {
+  capDebris();
   for (const d of debris) {
+    if (d.frozen) continue;
     d.live = (d.live || 0) + dt;
     if (d.live > 0.2 && (d.body.collisionFilterMask & G.FIGHTER) === 0) {
       d.body.collisionFilterMask = G.ARENA | G.FIGHTER | G.DEBRIS;
@@ -212,16 +245,10 @@ function syncDebris(dt) {
     if (!d.settled) {
       const v = d.body.velocity.length();
       const w = d.body.angularVelocity.length();
-      const onMat = d.body.position.y < 0.62;
+      const onMat = d.body.position.y < 0.62 * SIZE;
       if (onMat && v < 0.32 && w < 0.85) {
         d.still += dt;
-        if (d.still > 0.4) {
-          d.settled = true;
-          d.body.velocity.setZero();
-          d.body.angularVelocity.setZero();
-          d.body.type = CANNON.Body.STATIC;
-          d.body.sleep();
-        }
+        if (d.still > 0.4) settle(d);
       } else {
         d.still = 0;
       }

@@ -350,3 +350,9 @@ html, body { margin: 0; height: 100%; background: #07080c; color: #eef2f6; font-
 
 #overlay .hint, #againHint { margin: 10px 0 0; color: #9aa3ad; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
 #overlay.late { transition: opacity 0.4s ease; }
+
+/* Titles follow the robots: game.js (placeTitles) sets these so the round / fight / KO call
+   sits above both heads in every camera view, scaled down when there's no room. */
+#banner { padding-top: var(--rf-title-top, clamp(96px, 15vh, 150px)); }
+#banner span { display: inline-block; transform: scale(var(--rf-title-scale, 1)); transform-origin: top center; }
+body .rfs-call { top: var(--rf-title-top, clamp(96px, 15vh, 150px)); transform: scale(var(--rf-title-scale, 1)); transform-origin: top center; }

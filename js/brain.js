@@ -47,6 +47,12 @@ export function createPacedBrain(getProfile) {
     downSeen: false,
     groundGo: false,
     t: 0,
+    tempo: 1,         // fight pacing: drifts between cautious (<1) and pressure (>1) phases
+    tempoGoal: 1,
+    tempoT: 0,
+    lastHp: null,     // [self, opp] health last frame: momentum from who is landing
+    oppWasAtk: false,
+    punishOk: false,
   };
 
   function setMode(mode, len) {
@@ -64,7 +70,23 @@ export function createPacedBrain(getProfile) {
 
   function think(snap) {
     const prof = getProfile() || {};
-    const aggr = prof.aggression || 1;
+    const { self: me0, opp: op0 } = snap;
+    // Pacing and momentum. A slow random drift picks pressure or patient phases; landing hits
+    // pushes the tempo up, eating them cools it (back off and reset). A robot near KO that is
+    // well behind goes all in (comeback): higher tempo, longer combos, fewer pauses.
+    s.tempoT -= snap.dt;
+    if (s.tempoT <= 0) { s.tempoGoal = rand(0.7, 1.45); s.tempoT = rand(4, 9); }
+    if (s.lastHp) {
+      const dealt = Math.max(0, s.lastHp[1] - op0.health);
+      const took = Math.max(0, s.lastHp[0] - me0.health);
+      s.tempoGoal = Math.max(0.6, Math.min(1.7, s.tempoGoal + dealt * 0.02 - took * 0.015));
+    }
+    s.lastHp = [me0.health, op0.health];
+    const comeback = me0.health < 25 && op0.health > me0.health * 2;
+    const goal = comeback ? Math.max(1.5, s.tempoGoal) : s.tempoGoal;
+    s.tempo += (goal - s.tempo) * Math.min(1, snap.dt * 0.8);
+    s.comeback = comeback;
+    const aggr = (prof.aggression || 1) * s.tempo;
     const react = prof.react != null ? prof.react : 0.4;
     // Difficulty sets how fast the robot answers what it sees.
     const reactDelay = prof.think ? prof.think[0] + prof.think[1] * 0.6 : 0.26;
@@ -87,6 +109,19 @@ export function createPacedBrain(getProfile) {
     if (wasAttacking && !nowAttacking && s.mode === 'strike') {
       s.combo -= 1;
       if (s.combo <= 0 || self.state === 'hit') endCombo(prof, aggr, self);
+    }
+
+    // Whiff / blocked-strike punish: the opponent's attack just ended within reach and we were
+    // not hit by it: answer straight away with a short combo (decided once per attack).
+    const oppEnded = s.oppWasAtk && !opp.attacking;
+    s.oppWasAtk = opp.attacking;
+    if (opp.attacking && s.seenAttackT < 0) s.punishOk = Math.random() < Math.min(0.75, 0.25 + react * 0.6);
+    if (oppEnded && s.punishOk && self.canAct && self.state !== 'hit' && !opp.down && snap.dist / SIZE <= snap.strikeRange.kick / SIZE + 0.15) {
+      s.punishOk = false;
+      s.combo = Math.random() < 0.5 ? 2 : 1;
+      s.plan = snap.dist / SIZE <= snap.strikeRange.punch / SIZE + 0.05 ? 'punch' : 'kick';
+      s.guardUntil = 0;
+      setMode('strike', 1.4);
     }
 
     if (!self.canAct) return intent;
@@ -126,6 +161,12 @@ export function createPacedBrain(getProfile) {
       if (s.seenAttackT < 0) { s.seenAttackT = s.t; s.guardDecided = false; }
       if (!s.guardDecided && s.t - s.seenAttackT >= reactDelay + reactLag) {
         s.guardDecided = true;
+        // Heavy strike coming: sometimes back-flip clear of it (harder CPUs more often).
+        if (opp.heavy && self.canFlip && self.edge < 0.8 && Math.random() < (prof.dodge != null ? prof.dodge : 0.1)) {
+          intent.dodge = 'back';
+          setMode('reset', 0.5);
+          return intent;
+        }
         const r = Math.random();
         if (r < react && self.canBlock) s.guardUntil = s.t + 0.45;
         else if (r < react + (1 - react) * 0.3) setMode('reset', 0.35);
@@ -159,11 +200,12 @@ export function createPacedBrain(getProfile) {
         // walk straight in and keep it there.
         intent.strafe = opp.edge > 0.7 || s.burst ? 0 : 0.25 * s.circleDir * Math.sin(s.t * 1.9);
         if (dist <= want + 0.06 && self.cooldown <= 0) {
-          if (Math.random() < 0.12) { // feint on ~12% of entries
+          if (Math.random() < (s.tempo < 0.9 ? 0.22 : 0.1)) { // feints, more in patient phases
             setMode('feint', rand(0.3, 0.42));
           } else {
             const r = Math.random();
             s.combo = r < 0.3 / aggr ? 1 : (r < 0.75 ? 2 : 3);
+            if (s.comeback || (s.tempo > 1.25 && Math.random() < 0.4)) s.combo += 1; // pressure phase: longer strings
             setMode('strike', 2.5);
             s.burst = false;
           }
@@ -181,6 +223,8 @@ export function createPacedBrain(getProfile) {
           else if (kickOk) kind = 'kick';
           if (kind) {
             intent.attack = kind;
+            // Now and then a kick becomes a jump kick (it closes a little distance in the air).
+            if (kind === 'kick' && self.canFlip && Math.random() < (prof.jump != null ? prof.jump : 0.05)) intent.attack = 'jump';
             s.plan = planStrike(prof, self) || 'punch'; // next one in the chain
           } else intent.move = dist > punchR ? 1 : -0.6;
         }

@@ -129,10 +129,11 @@ export function prepareFighterDamage(f) {
   const parts = {};
   for (const id of DAMAGE.order) {
     const spec = DAMAGE.parts[id];
+    const hp = Math.round(spec.hp * ((f.stat && f.stat.toughness) || 1)); // stat profile: part toughness
     parts[id] = {
       id,
-      max: spec.hp,
-      hp: spec.hp,
+      max: hp,
+      hp,
       canDetach: !!spec.detach,
       detached: false,
       bones: [],
@@ -206,7 +207,8 @@ function prepareSubParts(f) {
   const boneSub = new Map();
   for (const id of DAMAGE.subOrder) {
     const spec = DAMAGE.sub[id];
-    const sub = { id, parent: spec.parent, limb: subLimb(id), max: spec.hp, hp: spec.hp, detached: false, rootBones: [], stump: null, oilAcc: 0, sparkAcc: 0, lostT: 0 };
+    const shp = Math.round(spec.hp * ((f.stat && f.stat.toughness) || 1));
+    const sub = { id, parent: spec.parent, limb: subLimb(id), max: shp, hp: shp, detached: false, rootBones: [], stump: null, oilAcc: 0, sparkAcc: 0, lostT: 0 };
     f.model.traverse((o) => {
       if ((o.isBone || o.type === 'Bone') && spec.root.includes(normName(o.name))) sub.rootBones.push(o);
     });
@@ -961,10 +963,12 @@ export function applyPartHit(f, partId, damage, point, dir, scene, opts = {}) {
   addSparkScene(scene);
   let wrecked = false;
   const isLeg = partId.startsWith('leg');
-  // Legs bend instead of breaking: a leg (or its foot) is torn off only by the final leg hit,
-  // the one that empties that leg's health or KOs the robot (opts.final). A final hit near
-  // the foot takes the foot; otherwise the whole leg goes.
-  const legFinal = isLeg && !opts.blocked && (part.hp <= 0 || opts.final);
+  // Legs bend instead of breaking: an emptied leg stays on, bent as far as it goes. A leg (or
+  // its foot) comes off only when the KO blow itself lands on a leg that was already badly
+  // damaged before it (at or under 35% health). A final hit near the foot takes the foot;
+  // otherwise the whole leg goes. (Tearing any emptied or KO-hit leg off made nearly every
+  // match end on a leg finisher.)
+  const legFinal = isLeg && !opts.blocked && opts.final && hpBefore <= part.max * 0.35;
   if (legFinal && part.canDetach && !part.detached) {
     const foot = f.subs && f.subs['foot' + partId.slice(-1)];
     if (part.hp > 0 && foot && !foot.detached && point && subWorldPos(foot, _v2).distanceTo(point) < 0.38) detachSub(f, foot, dir, scene);
@@ -1223,7 +1227,16 @@ function restoreMesh(mesh) {
   }
 }
 
-export function clearAllDebris(scene) {
+// Debris (torn-off parts, fingers, plates) never fades during a match: it stays on the mat
+// (frozen once settled, see physics.js syncDebris) and is cleared only when a new match starts.
+// Between rounds of one match (keepPieces) only the effects and stump wires are cleared.
+export function clearAllDebris(scene, keepPieces = false) {
+  if (keepPieces) {
+    clearWires(true);
+    for (const s of sparks) scene.remove(s.m);
+    sparks.length = 0;
+    return;
+  }
   clearPhysicsDebris();
   clearWires();
   for (const d of debrisList) {

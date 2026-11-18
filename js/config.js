@@ -24,7 +24,11 @@ export const MODEL = {
     kick: 'Kicking',
     kickVariants: ['Kicking', 'MmaKick', 'RoundhouseKick', 'SideKick', 'MeiaLuaDeFrente', 'LegSweep', 'KneeKickLead'],
     kickSpecial: ['FlipKick', 'ChapaGiratoria', 'SpinFlipKick', 'MeiaLuaDeCompasso'],
-    flipSpecial: ['FlipKick', 'ChapaGiratoria', 'Backflip', 'FrontFlip', 'BackFlipToUppercut', 'SpinFlipKick', 'MeiaLuaDeCompasso'],
+    flipSpecial: ['FlipKick', 'ChapaGiratoria', 'BackFlipToUppercut', 'SpinFlipKick', 'MeiaLuaDeCompasso'],
+    // Airborne moves: the root holds the clip's own height (no grounding pull) until landing.
+    jumpKicks: ['FlipKick', 'SpinFlipKick'],
+    dodgeBack: 'Backflip',
+    dodgeFront: 'FrontFlip',
     victory: 'Victory',
     victoryVariants: ['Victory', 'VictoryIdle', 'Taunt'],
     dodgeVariants: ['Dodging', 'DodgingBack'],
@@ -128,6 +132,16 @@ export const COMBAT = {
   downRest: 0.85,      // seconds lying still before getting up (same every time: robots don't tire)
   downMax: 4.2,        // safety: get up by this long after the knockdown started
   getupTime: 1.25,     // the GettingUp clip is played over about this long
+  // Flips (O back flip, P front flip, U jump kick; pad RB flip, R3 jump kick).
+  dodge: {
+    back: 1.75 * SIZE,      // metres a back flip carries the robot away
+    frontPast: 1.0 * SIZE,  // a front flip lands this far beyond the opponent (when there's room)
+    frontShort: 1.0 * SIZE, // otherwise it just goes this far forward (never into the body)
+    cooldown: 2.2,          // seconds between flips
+    ringMargin: 0.75 * SIZE, // landing spot stays this far inside the ring
+    maxLegDamage: 0.55,     // a leg damaged past this (or a lost leg / foot) can't flip
+  },
+  jumpKickTravel: 0.6 * SIZE, // a jump kick closes up to this much distance in the air
   // Stomp / ground punch on a downed robot (key I, pad Y).
   ground: {
     reach: 1.05 * SIZE,      // nearest lying body segment must be this close (root XZ)
@@ -149,6 +163,26 @@ export const GFX_PRESETS = {
 // Per-part wrecking. Names in `bind` are normalized (lowercase, no "mixamorig",
 // dots, colons, or underscores) so Mixamo bones like mixamorig:Head / LeftArm match.
 // Torso can be crushed but stays attached.
+// Per-fighter stat profiles. Each stat is a 1-10 rating; every profile spends the same total
+// (STAT_BUDGET), so fighters differ but none is strictly better. A rating maps to a fight-code
+// multiplier around 1.0 (statMul): 6 -> 1.00, each point = 5%.
+//   speed:     walk speeds and strike playback speed
+//   power:     damage dealt
+//   armor:     damage taken is divided by it
+//   reach:     strike range the fighter (and its AI) works at
+//   recovery:  hitstun, attack recovery, time down, get-up speed, dodge cooldown
+//   toughness: part hit points (how much a head/arm/leg takes before it fails)
+export const STAT_KEYS = ['speed', 'power', 'armor', 'reach', 'recovery', 'toughness'];
+export const STAT_BUDGET = 36;
+export const FIGHTER_PROFILES = {
+  striker: { id: 'striker', name: 'Striker', blurb: 'Fast feet, quick hands, recovers fast. Lighter hits and plating.',
+    stats: { speed: 8, power: 5, armor: 5, reach: 6, recovery: 7, toughness: 5 } },
+  bruiser: { id: 'bruiser', name: 'Bruiser', blurb: 'Hits hard, heavy plating, tough parts. Slow to move and to recover.',
+    stats: { speed: 4, power: 7, armor: 7, reach: 6, recovery: 5, toughness: 7 } },
+};
+export const SIDE_PROFILE = { p1: 'striker', p2: 'bruiser' };
+export const statMul = (rating) => 1 + (rating - 6) * 0.05;
+
 export const DAMAGE = {
   parts: {
     head: { hp: 40, label: 'Head', detach: true },
@@ -212,3 +246,33 @@ export const DAMAGE = {
   heavySmoke: 0.5,
   punchArm: 'armR',
 };
+
+// Read-only fighter stats for the UI (fighter select, tale of the tape): the profile's ratings,
+// the multipliers fight code applies, and the real resulting numbers. Pass a side ('p1'/'p2')
+// or a profile id ('striker'/'bruiser'). Returns a fresh frozen object every call.
+export function getFighterStats(sideOrId = 'p1') {
+  const id = FIGHTER_PROFILES[sideOrId] ? sideOrId : (SIDE_PROFILE[sideOrId] || 'striker');
+  const p = FIGHTER_PROFILES[id];
+  const mul = {};
+  for (const k of STAT_KEYS) mul[k] = +statMul(p.stats[k]).toFixed(3);
+  const partHp = Object.values(DAMAGE.parts).reduce((a, q) => a + Math.round(q.hp * mul.toughness), 0);
+  const r2 = (v) => +v.toFixed(2);
+  return Object.freeze({
+    id: p.id, name: p.name, blurb: p.blurb,
+    ratings: Object.freeze({ ...p.stats }), total: STAT_KEYS.reduce((a, k) => a + p.stats[k], 0), budget: STAT_BUDGET,
+    mul: Object.freeze(mul),
+    real: Object.freeze({
+      moveSpeed: r2(COMBAT.moveSpeed * mul.speed),            // m/s
+      strikeSpeed: r2(mul.speed),                              // x clip speed
+      punchDamage: r2(COMBAT.punch.damage * mul.power),
+      kickDamage: r2(COMBAT.kick.damage * mul.power),
+      damageTaken: r2(1 / mul.armor),                          // x incoming damage
+      punchReach: r2(COMBAT.punch.reach * mul.reach),          // m
+      kickReach: r2(COMBAT.kick.reach * mul.reach),            // m
+      hitStun: r2(COMBAT.hitStun / mul.recovery),              // s
+      downRest: r2(COMBAT.downRest / mul.recovery),            // s
+      partHp,                                                  // total part hit points
+    }),
+  });
+}
+if (typeof window !== 'undefined') window.RFFighterStats = getFighterStats;

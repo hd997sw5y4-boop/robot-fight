@@ -58,7 +58,13 @@ function removeGroup(g) {
   if (i >= 0) groups.splice(i, 1);
 }
 
-export function clearWires() {
+// stumpsOnly: a new round repairs the robots, so wires hanging from their stumps go; wires
+// on the torn-off pieces lying on the mat stay with them until the match ends.
+export function clearWires(stumpsOnly = false) {
+  if (stumpsOnly) {
+    for (const g of groups.slice()) if (!g.piece) removeGroup(g);
+    return;
+  }
   while (groups.length) removeGroup(groups[0]);
   for (const b of bolts) { b.line.parent && b.line.parent.remove(b.line); b.line.geometry.dispose(); }
   bolts.length = 0;
