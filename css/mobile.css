@@ -1,0 +1,104 @@
+/* Phones / tablets only (html.rf-mobile, set by js/mobile.js). Desktop is untouched, except
+   the WebGL-lost notice, which only ever appears after a context loss. */
+#rfGlLost { position: fixed; inset: 0; z-index: 99999; display: flex; align-items: center; justify-content: center; background: rgba(6, 8, 14, .82); color: #fff; font: 600 16px/1.35 system-ui, sans-serif; text-align: center; cursor: pointer; }
+#rfGlLost div { display: flex; flex-direction: column; gap: 8px; padding: 18px 22px; border: 1px solid rgba(154,171,255,.5); border-radius: 12px; background: rgba(20,24,40,.9); }
+#rfGlLost span { font-weight: 400; opacity: .85; }
+
+html.rf-mobile, html.rf-mobile body { -webkit-tap-highlight-color: transparent; -webkit-text-size-adjust: 100%; overscroll-behavior: none; }
+html.rf-mobile body { touch-action: manipulation; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+html.rf-mobile canvas#c { touch-action: none; }
+html.rf-mobile button, html.rf-mobile select, html.rf-mobile [data-act], html.rf-mobile [data-fs] { touch-action: manipulation; cursor: pointer; }
+
+/* Rotate hint in portrait (landscape is the better view; portrait still works). */
+#rfRotate { display: none; }
+@media (orientation: portrait) {
+  html.rf-mobile #rfRotate:not(.gone) { display: flex; position: fixed; left: 50%; bottom: calc(10px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 9000; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px; background: rgba(14,18,32,.86); border: 1px solid rgba(154,171,255,.45); color: #dfe4ff; font: 600 12px system-ui, sans-serif; white-space: nowrap; }
+  html.rf-mobile #rfRotate button { all: unset; padding: 0 4px; font-size: 15px; opacity: .8; }
+}
+
+/* No sticky hover effects on touch. */
+@media (hover: none) {
+  html.rf-mobile .fs-tile:not(.locked):hover { transform: skewX(-6deg); box-shadow: none; }
+  html.rf-mobile .fs-chip:hover { transform: none; }
+}
+
+/* ---------- shell menus on a phone ---------- */
+html.rf-mobile .rfs kbd, html.rf-mobile .fs-hint, html.rf-mobile .rfs-controls { display: none !important; }
+html.rf-mobile .rfs-press { font-size: 0 !important; }
+html.rf-mobile .rfs-press::after { content: 'Tap to start'; font-size: 15px; letter-spacing: .12em; text-transform: uppercase; }
+html.rf-mobile .rfs-screen.on { overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+html.rf-mobile .rfs-screen {
+  padding: max(10px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+}
+html.rf-mobile .rfs-screen.rfs-center, html.rf-mobile .rfs-screen.rfs-left { align-items: safe center; }
+html.rf-mobile .rfs-title .rfs-brand b { font-size: clamp(40px, 12vmin, 84px); }
+html.rf-mobile .rfs-title { gap: 10px; }
+html.rf-mobile .rfs-mainwrap { align-items: flex-start; margin: auto 0; }
+html.rf-mobile .rfs-brand b { font-size: clamp(28px, 8vmin, 48px); }
+html.rf-mobile .rfs-menu { gap: 6px; margin-top: 8px; }
+html.rf-mobile .rfs-btn { min-height: 44px; padding: 8px 14px; }
+html.rf-mobile .rfs-btn small { font-size: 11.5px; }
+html.rf-mobile .rfs-card { padding: 14px 14px; max-width: calc(100vw - 28px); }
+@media (orientation: landscape) and (max-height: 500px) {
+  html.rf-mobile .rfs-mainwrap .rfs-col { width: 100%; }
+  html.rf-mobile .rfs-menu { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; max-width: 620px; }
+  html.rf-mobile .rfs-menu .rfs-btn:focus { transform: none; }
+}
+
+/* ---------- fighter select on a phone: scrollable, compact, Fight always visible ---------- */
+html.rf-mobile .fs {
+  --u: 0.7px;
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  grid-template-rows: auto minmax(150px, 1fr) auto auto;
+  padding: max(8px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left));
+  gap: 8px 12px;
+}
+html.rf-mobile .fs-side { padding: 10px 11px; gap: 7px; }
+html.rf-mobile .fs-tog, html.rf-mobile .fs-lock, html.rf-mobile .fs-mini { min-height: 36px; font-size: 11px; }
+html.rf-mobile .fs-note { font-size: 10.5px; }
+html.rf-mobile .fs-stat { font-size: 10.5px; }
+html.rf-mobile .fs-top b { font-size: 22px; }
+html.rf-mobile .fs-top small { font-size: 9.5px; }
+html.rf-mobile .fs-foot {
+  position: sticky; bottom: 0; z-index: 5; margin: 0 calc(-1 * max(12px, env(safe-area-inset-left)));
+  padding: 8px max(12px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  background: linear-gradient(180deg, rgba(8,10,16,0), rgba(8,10,16,.92) 35%);
+  justify-content: space-between;
+}
+html.rf-mobile .fs-foot .rfs-go { min-width: 140px; min-height: 46px; }
+@media (orientation: portrait) {
+  html.rf-mobile .fs {
+    --u: 0.62px;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto minmax(190px, 30vh) auto auto auto;
+  }
+  html.rf-mobile .fs-top { grid-column: 1 / -1; grid-row: 1; }
+  html.rf-mobile .fs-vsmark { grid-column: 1 / -1; grid-row: 2; }
+  html.rf-mobile .fs-mid { grid-column: 1 / -1; grid-row: 3; }
+  html.rf-mobile .fs-side[data-side="p1"] { grid-column: 1; grid-row: 4; }
+  html.rf-mobile .fs-side[data-side="p2"] { grid-column: 2; grid-row: 4; }
+  html.rf-mobile .fs-foot { grid-column: 1 / -1; grid-row: 5; }
+  html.rf-mobile .fs-chips { grid-template-columns: repeat(4, 1fr); }
+  html.rf-mobile .fs-ctrl.fs-ctrl3 { grid-template-columns: 1fr 1fr; }
+}
+html.rf-mobile nav.rfs-menu .rfs-btn { padding: 8px 12px 8px 44px; min-height: 46px; }
+html.rf-mobile nav.rfs-menu .rfs-btn::before { left: 12px; font-size: 13px; }
+html.rf-mobile #bottom { display: none !important; } /* keyboard hint bar */
+html.rf-mobile #rfPostfight .pf-skip { right: max(14px, env(safe-area-inset-right)); bottom: calc(9vh + 10px); min-height: 44px; padding: 0 18px; font-size: 14px; }
+html.rf-mobile #rfPostfight .pf-skip kbd { display: none; }
+html.rf-mobile .rfs-mainwrap .rfs-col { width: 100%; }
+html.rf-mobile body.fs-open #rfRotate { display: none !important; }
+
+/* ---------- fight HUD on a phone ---------- */
+html.rf-mobile #top {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px;
+  padding: max(8px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left));
+}
+html.rf-mobile .fighter-hud { min-width: 0; gap: 4px; }
+html.rf-mobile .fighter-hud .name { font-size: 11px; letter-spacing: .1em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.rf-mobile .bar { height: 12px; }
+html.rf-mobile .parts { flex-wrap: wrap; gap: 3px; }
+@media (orientation: portrait) {
+  html.rf-mobile .parts i { transform: scale(.8); }
+  html.rf-mobile .parts i.sub { display: none; }
+}

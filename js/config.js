@@ -158,6 +158,8 @@ export const COMBAT = {
 export const GFX_PRESETS = {
   low: { pixelCap: 1, shadows: false, shadowSize: 512, exposure: 1.4 },
   high: { pixelCap: 2, shadows: true, shadowSize: 2048, exposure: 1.55 },
+  // phones/tablets (js/mobile.js): applied on top of low/high: pixel ratio and shadow caps.
+  mobile: { pixelCap: 1.5, shadowSize: 1024 }, // Low on a phone uses 1.25
 };
 
 // Per-part wrecking. Names in `bind` are normalized (lowercase, no "mixamorig",

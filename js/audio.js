@@ -239,6 +239,25 @@ export function unlockAudio() {
   ensureHum();
 }
 
+// iOS Safari only starts WebAudio inside a real user gesture (touchend / click, not
+// pointerdown), and the first sound must be played from that same handler. Keep listening
+// until the context is actually running, and kick it with a one-sample silent buffer.
+function gestureUnlock() {
+  try {
+    unlockAudio();
+    if (!ctx) return;
+    const b = ctx.createBuffer(1, 1, 22050);
+    const s = ctx.createBufferSource();
+    s.buffer = b; s.connect(ctx.destination); s.start(0);
+    if (ctx.state === 'running') for (const ev of ['touchend', 'click', 'keydown']) window.removeEventListener(ev, gestureUnlock, true);
+  } catch (_) { /* ignore */ }
+}
+if (typeof window !== 'undefined') {
+  for (const ev of ['touchend', 'click', 'keydown']) window.addEventListener(ev, gestureUnlock, true);
+  // iOS suspends/"interrupts" the context when the tab is backgrounded; pick it back up.
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && ctx && ctx.state !== 'running') ctx.resume().catch(() => {}); });
+}
+
 export function setVolumes(masterV, sfxV, crowdV, voiceV) {
   masterLevel = clamp(masterV);
   sfxLevel = clamp(sfxV);

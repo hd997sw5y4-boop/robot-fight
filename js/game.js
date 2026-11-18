@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { HDRLoader as RGBELoader } from 'three/addons/loaders/HDRLoader.js';
+import { IS_MOBILE } from './mobile.js';
 import { SIZE, MODEL, ARENA, COMBAT, DAMAGE, GFX_PRESETS, LOOP_CLIPS, getFighterStats } from './config.js';
 import { CLIP_SPEEDS } from './clip-speeds.js';
 import { applyChrome, setChromeLow } from './chrome.js';
@@ -81,12 +82,26 @@ shellCall('onReady', {
   get p2() { return p2; },
 });
 
+// Phones start on Low (no shadows, no floor mirror, light crowd, pixel ratio <= 1.5); the
+// Settings switch still works there, with the mobile caps kept.
 let gfxKey = getSettings().gfx === 'low' ? 'low' : 'high';
 setChromeLow(gfxKey === "low");
 setWiresLow(gfxKey === "low");
 setDebrisLow(gfxKey === "low");
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+// WebGL context loss (iOS drops it under memory pressure or when the tab is backgrounded):
+// keep the page alive, tell the viewer, and reload cleanly once the GPU is back or on tap.
+canvas.addEventListener('webglcontextlost', (e) => {
+  e.preventDefault();
+  if (document.getElementById('rfGlLost')) return;
+  const d = document.createElement('div');
+  d.id = 'rfGlLost';
+  d.innerHTML = '<div><b>Graphics paused</b><span>The browser reset the 3D view. Tap to reload.</span></div>';
+  d.addEventListener('click', () => location.reload());
+  document.body.appendChild(d);
+}, false);
+canvas.addEventListener('webglcontextrestored', () => location.reload(), false);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.shadowMap.enabled = true;
@@ -161,7 +176,7 @@ scene.environmentIntensity = 0.38;
 let hdriEnv = null;
 let hdriBg = null;
 let hdriLoading = null;
-let hdriEnabled = !!getSettings().hdri;
+let hdriEnabled = !IS_MOBILE && !!getSettings().hdri; // 6.7 MB HDR + PMREM: too heavy for phones
 
 // HDRI on/off. The wanted state is remembered and the environment is (re)applied by
 // syncEnvironment() whenever something it depends on appears: the HDR file finishing
@@ -222,7 +237,7 @@ function loadHdri() {
 
 // Start fetching straight away (on by default); applied as soon as it's ready.
 // [stadium-arena hook] skip the 6.7 MB HDRI download until Industrial is picked.
-if (!stadiumOwnsEnv()) loadHdri().then(() => syncEnvironment());
+if (!stadiumOwnsEnv() && hdriEnabled) loadHdri().then(() => syncEnvironment());
 
 let lightMul = Math.max(0.5, Math.min(2, getSettings().light || 1));
 const litLights = [];
@@ -235,8 +250,8 @@ function applyGfx(key) {
   setWiresLow(gfxKey === 'low');
   setDebrisLow(gfxKey === 'low');
   stadiumSetGfx(gfxKey); // [stadium-arena hook]
-  const p = GFX_PRESETS[gfxKey];
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, p.pixelCap));
+  const p = IS_MOBILE ? { ...GFX_PRESETS[gfxKey], pixelCap: gfxKey === 'low' ? 1.25 : GFX_PRESETS.mobile.pixelCap, shadowSize: Math.min(GFX_PRESETS[gfxKey].shadowSize, GFX_PRESETS.mobile.shadowSize) } : GFX_PRESETS[gfxKey];
+  renderer.setPixelRatio(Math.max(1, Math.min(window.devicePixelRatio || 1, p.pixelCap)));
   renderer.toneMappingExposure = p.exposure * lightMul;
   renderer.shadowMap.enabled = p.shadows;
   scene.traverse((o) => {

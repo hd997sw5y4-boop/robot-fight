@@ -3,6 +3,7 @@ import { announce } from './announcer.js';
 import { spawnDebris, clearPhysicsDebris, PART_MASS, stepPhysics } from './physics.js';
 import * as THREE from 'three';
 import { DAMAGE, ARENA, SIZE } from './config.js';
+import { IS_MOBILE } from './mobile.js';
 import { addWires, clearWires, stepWires } from './wires.js';
 
 const _v = new THREE.Vector3();
@@ -1042,7 +1043,7 @@ function pickChipGeo() {
 const _sv = new THREE.Vector3();
 const _sn = new THREE.Vector3();
 const _sc = new THREE.Vector3();
-const SKIN_MAX = 40;
+const SKIN_MAX = IS_MOBILE ? 14 : 40;
 let skinRing = [];
 function skinnedWorld(mesh, i, out, cache) {
   let v = cache.get(i);
@@ -1156,7 +1157,7 @@ function keepSkinPiece(scene, mesh) {
   }
 }
 
-const CHIP_MAX = 360;
+const CHIP_MAX = IS_MOBILE ? 140 : 360;
 const chipBatches = new Map(); // `${geo}|${mat}` -> InstancedMesh
 let chipRing = []; // resting chips in order: { key, slot }
 const chipsLive = [];
@@ -1180,11 +1181,12 @@ export function shedChips(f, partId, point, dir, force, scene, opts = {}) {
   if (opts.blocked) n = Math.random() < 0.3 ? 1 : 0;
   const part = f && f.parts && f.parts[partId];
   if (part && part.max) n += Math.round((1 - part.hp / part.max) * 1.5 * Math.random()); // battered parts shed more
+  if (IS_MOBILE) n = Math.min(n, 2); // phones: fewer pieces per hit
   const d = dir ? dir.clone().setY(0).normalize() : new THREE.Vector3(0, 0, 1);
   let skins = 0;
   if (n > 0 && f && !opts.blocked && force >= 2.2) {
     // A torn patch of the robot's own skin from right where it was hit (one, two on heavy hits).
-    const want = heavy ? 2 : 1;
+    const want = heavy && !IS_MOBILE ? 2 : 1;
     for (let k = 0; k < want; k++) {
       const c = k ? point.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.1 * SIZE, (Math.random() - 0.5) * 0.1 * SIZE, (Math.random() - 0.5) * 0.1 * SIZE)) : point;
       let m = null;

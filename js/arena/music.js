@@ -52,7 +52,8 @@ function ensureGraph() {
     g.gain.value = 0;
     src.connect(g);
     g.connect(bus);
-    chans[k] = { el, g, playing: false };
+    chans[k] = { el, g, playing: false, live: false };
+    el.addEventListener('playing', () => { chans[k].live = true; });
   }
   return true;
 }
@@ -123,17 +124,20 @@ function injectSlider() {
 export function initMusic(c) {
   ctx = c;
   injectSlider();
+  // iOS Safari only lets media start inside touchend/click (pointerdown is not a user
+  // activation there), so keep retrying on gestures until a track is really playing.
+  const EVS = ['pointerdown', 'keydown', 'touchend', 'click'];
   const gesture = () => {
     // The game's own listener creates the AudioContext on the same gesture; retry next tick.
     start();
     if (!started) setTimeout(start, 0);
     if (started) {
-      window.removeEventListener('pointerdown', gesture, true);
-      window.removeEventListener('keydown', gesture, true);
+      for (const ch of Object.values(chans)) if (ch.playing && ch.el.paused) { ch.playing = false; }
+      apply(true);
+      if (Object.values(chans).some((ch) => ch.live)) for (const ev of EVS) window.removeEventListener(ev, gesture, true);
     }
   };
-  window.addEventListener('pointerdown', gesture, true);
-  window.addEventListener('keydown', gesture, true);
+  for (const ev of EVS) window.addEventListener(ev, gesture, true);
   window.__rfMusic = () => ({ started, mode, level, menu: chans.menu && +chans.menu.g.gain.value.toFixed(3), fight: chans.fight && +chans.fight.g.gain.value.toFixed(3) });
 }
 

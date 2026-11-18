@@ -4,6 +4,7 @@
    Volume rows follow WW3D addons/master-volume.js (squared taper lives in audio.js). */
 
 import { unlockAudio, setVolumes, playSfx, startCrowd } from './audio.js';
+import { IS_MOBILE } from './mobile.js';
 
 const KEYS = {
   gfx: 'rf_gfx',
@@ -27,7 +28,7 @@ const KEYS = {
 export const CAM_MODES = ['arena', 'fighting', 'third', 'first', 'broadcast'];
 
 const defaults = {
-  gfx: 'high',
+  gfx: IS_MOBILE ? 'low' : 'high', // phones start on Low (js/mobile.js)
   master: 1,
   sfx: 1,
   crowd: 0.7,
