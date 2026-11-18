@@ -87,7 +87,7 @@ export function createApiBrain(fallback, id) {
   const st = { action: null, at: 0, used: false, inflight: false, lastReq: 0, backoff: 0, errors: 0, ok: 0 };
   const INTERVAL = 700;   // ms between requests
   const FRESH = 1400;     // ms an answer steers the robot
-  const TIMEOUT = 2500;   // ms before a request counts as failed
+  const TIMEOUT = 6000;   // ms before a request counts as failed
 
   async function ask(snap) {
     const c = aiConfig();
@@ -101,7 +101,7 @@ export function createApiBrain(fallback, id) {
         signal: ctl.signal,
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + c.key },
         body: JSON.stringify({
-          model: c.model, temperature: 0.4, max_tokens: 24,
+          model: c.model, temperature: 0.4, max_tokens: 400,
           messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: JSON.stringify(compact(snap)) }],
         }),
       });
