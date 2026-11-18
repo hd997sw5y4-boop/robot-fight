@@ -8,7 +8,7 @@ export const MODEL = {
   footOffset: 0,
   animations: {
     idle: 'FightingIdle',
-    idleVariants: ['FightingIdle', 'Idle'],
+    idleVariants: ['FightingIdle'], // guard stance only: no relaxed / breathing idle (robots don't tire)
     idleInjured: 'InjuredStumbleIdle',
     walkForward: 'Walking',
     walkBack: 'WalkingBackwards',
@@ -66,9 +66,9 @@ export const ARENA = {
   cage: false,
   // Two-bone stance IK is off: the solver was twisting legs and lifting feet off the mat.
   stanceIK: false,
-  // HDRI environment + backdrop. Swap the file here when a final space/sky pick lands.
+  // HDRI environment + backdrop (on by default via settings.js; the player's toggle is saved).
+  // Swap the file here when a final space/sky pick lands.
   // Poly Haven Industrial Pipe and Valve 01 2K (CC0), Ezequiel's pick.
-  hdri: true,
   hdriUrl: './hdris/industrial_pipe_and_valve_01_2k.hdr',
 };
 
@@ -82,8 +82,8 @@ export const COMBAT = {
   // reach: root-to-root distance where the strike visibly lands (the AI fights from here).
   // range: outer gate; the hit itself needs the fist/foot to touch the body (see strikeContact).
   // recover: idle time after the attack ends (x whiffMul when it missed).
-  punch: { damage: 10, reach: 1.2, range: 1.75, cooldown: 0.5, recover: 0.2, activeFrac: [0.2, 0.78] },
-  kick: { damage: 15, reach: 1.55, range: 2.05, cooldown: 0.85, recover: 0.36, activeFrac: [0.26, 0.8] },
+  punch: { damage: 5, reach: 1.36, range: 1.9, recover: 0.2, activeFrac: [0.2, 0.78] },
+  kick: { damage: 8, reach: 1.68, range: 2.2, recover: 0.36, activeFrac: [0.26, 0.8] },
   // Extra idle after a clip by strike class (60 fps targets: jab 16-20f, hook/elbow 22-28f,
   // knee/kick 28-36f, spinning 36-44f); the clip's own follow-through covers part of it.
   recoverByClip: {
@@ -91,11 +91,21 @@ export const COMBAT = {
     Kicking: 0.36, MmaKick: 0.36, SideKick: 0.36, KneeKickLead: 0.32, LegSweep: 0.38, RoundhouseKick: 0.42,
     MeiaLuaDeFrente: 0.44, FlipKick: 0.5, ChapaGiratoria: 0.5, SpinFlipKick: 0.55, MeiaLuaDeCompasso: 0.55,
   },
-  whiffMul: 2.0,
+  whiffMul: 1.6,
+  punchSpeed: 1.3,       // punch clip playback (damage slows it again)
+  kickSpeed: 1.15,
+  playerRecoverMul: 0.55, // the player's post-attack pause vs the table above
+  cpuRecoverMul: 0.85,    // CPU stays readable, a little snappier than the table
+  inputBuffer: 0.3,      // seconds an early attack press is remembered
+  contactHold: 0.1,      // after a fist/foot connects it is pulled back this soon
+  knockdownForce: 4.6,   // a heavy blow at least this hard knocks down (heavy counters always do)
+  kickKnockChance: 0.25,  // other heavy kicks knock down this often
   punchLunge: 0.12, // metres a strike steps in when slightly out of reach (small enough to hide)
   kickLunge: 0.1,
-  strikeGap: 1.2,   // no lunge inside this gap; it would drive the body into the opponent
+  strikeGap: 1.3,   // no lunge inside this gap; it would drive the body into the opponent
   bodyRadius: 0.36, // defender body capsule used for fist/foot contact
+  fistShell: 0.16,  // fist surface beyond the hand bone (contact tolerance)
+  kickShell: 0.15,
   blockReduction: 0.82,
   hitStun: 0.3,        // light hitstun (18f)
   hitStunHeavy: 0.53,  // hooks, body shots, most kicks (32f)
@@ -105,15 +115,27 @@ export const COMBAT = {
   hitStopHeavy: 0.08,
   hitStopCounter: 0.12,
   koSlowMo: 0.3,       // seconds of mild slow motion on a KO
-  hitInvuln: 0.22,
+  hitInvuln: 0.08,     // only stops one blow registering twice; combos can land
   hitRock: 0.26,       // metres a light hit knocks a robot back (walked out with the back-step)
   stumbleForce: 3.8,   // impact force that turns a hit into a stepped stumble-back
   stumbleDist: 0.75,   // metres travelled over the StumbleBackwards steps
-  separate: 1.05,      // soft spacing: closer than this, the robot steps back (with its walk)
-  separateHard: 0.8,   // emergency push-apart only (physics capsules normally keep this)
-  downRest: [0.85, 1.5], // seconds lying still before getting up: first knockdown, later ones
-  downMax: 3.4,        // safety: get up even if the ragdoll never fully settles
+  separate: 1.1,       // soft spacing: closer than this, the CPU steps back (with its walk)
+  separateDown: 0.6,   // how close a robot may walk to one lying on the mat (ground attacks)
+  separateHard: 0.92,  // emergency push-apart only (physics capsules normally keep 0.95)
+  downRest: 0.85,      // seconds lying still before getting up (same every time: robots don't tire)
+  downMax: 4.2,        // safety: get up by this long after the knockdown started
   getupTime: 1.25,     // the GettingUp clip is played over about this long
+  // Stomp / ground punch on a downed robot (key I, pad Y).
+  ground: {
+    reach: 1.05,        // nearest lying body segment must be this close (root XZ)
+    stompReach: 0.8,    // closer than this it's a stomp, else a ground punch
+    stompDamage: 8,
+    poundDamage: 6,
+    perKnockdown: 2,    // per attacker, per knockdown
+    recover: 0.55,
+    poundBow: 1.15,     // radians of forward bow spread over the spine (procedural)
+    stompBow: 0.3,
+  },
 };
 
 export const GFX_PRESETS = {
@@ -126,12 +148,12 @@ export const GFX_PRESETS = {
 // Torso can be crushed but stays attached.
 export const DAMAGE = {
   parts: {
-    head: { hp: 32, label: 'Head', detach: true },
+    head: { hp: 40, label: 'Head', detach: true },
     torso: { hp: 55, label: 'Torso', detach: false },
-    armL: { hp: 28, label: 'Left arm', detach: true },
-    armR: { hp: 28, label: 'Right arm', detach: true },
-    legL: { hp: 28, label: 'Left leg', detach: true },
-    legR: { hp: 28, label: 'Right leg', detach: true },
+    armL: { hp: 34, label: 'Left arm', detach: true },
+    armR: { hp: 34, label: 'Right arm', detach: true },
+    legL: { hp: 44, label: 'Left leg', detach: true },
+    legR: { hp: 44, label: 'Right leg', detach: true },
   },
   order: ['head', 'torso', 'armL', 'armR', 'legL', 'legR'],
   bind: {

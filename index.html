@@ -71,6 +71,8 @@
         · <kbd>J</kbd> punch
         · <kbd>K</kbd> kick
         · <kbd>L</kbd> block
+        · <kbd>I</kbd> ground attack
+        · <kbd>V</kbd> camera view
         · gamepad OK
         · <kbd>Esc</kbd> settings
       </div>
@@ -100,6 +102,13 @@
             <option value="low">Low</option>
           </select>
         </label>
+        <label>Camera view
+          <select id="setCam">
+            <option value="arena">Arena (default)</option>
+            <option value="third">3rd person (behind P1)</option>
+            <option value="first">1st person (P1 visor)</option>
+          </select>
+        </label>
         <label>Field of view <b id="setFovV">50°</b>
           <input type="range" id="setFov" min="45" max="90" step="1">
         </label>
@@ -121,6 +130,9 @@
         </label>
         <label>Crowd / ambience <b id="setCrowdV">70%</b>
           <input type="range" id="setCrowd" min="0" max="1" step="0.01">
+        </label>
+        <label>Announcer <b id="setAnnV">90%</b>
+          <input type="range" id="setAnn" min="0" max="1" step="0.01" aria-label="Announcer volume (0 turns it off)">
         </label>
         <p class="hint">Double-click a slider to reset to 100%.</p>
       </section>
@@ -152,6 +164,8 @@
               <li><kbd>A</kbd> / <kbd>D</kbd> or arrows — sidestep</li>
               <li><kbd>W</kbd> / <kbd>S</kbd> or arrows — in / out</li>
               <li><kbd>J</kbd> punch · <kbd>K</kbd> kick · <kbd>L</kbd> block</li>
+              <li><kbd>I</kbd> stomp / ground punch on a downed robot</li>
+              <li><kbd>V</kbd> cycle camera view: arena, 3rd person, 1st person</li>
               <li><kbd>Esc</kbd> open or close this panel</li>
             </ul>
           </div>
@@ -161,6 +175,7 @@
               <li>Left stick or D-pad — move</li>
               <li><kbd>A</kbd> / × punch · <kbd>B</kbd> / ○ kick</li>
               <li><kbd>X</kbd> / □ or a shoulder button — block</li>
+              <li><kbd>Y</kbd> / △ ground attack (opponent down)</li>
             </ul>
           </div>
         </div>

@@ -10,6 +10,7 @@ const KEYS = {
   master: 'rf_vol_master',
   sfx: 'rf_vol_sfx',
   crowd: 'rf_vol_crowd',
+  ann: 'rf_vol_ann',
   shake: 'rf_shake',
   cpu: 'rf_cpu',
   round: 'rf_round',
@@ -18,13 +19,18 @@ const KEYS = {
   fov: 'rf_fov',
   light: 'rf_light',
   hdri: 'rf_hdri',
+  cam: 'rf_cam',
 };
+
+// Camera views, in the order the V key cycles them. 'arena' is the original orbit camera.
+export const CAM_MODES = ['arena', 'third', 'first'];
 
 const defaults = {
   gfx: 'high',
   master: 1,
   sfx: 1,
   crowd: 0.7,
+  ann: 0.9,
   shake: true,
   cpu: 'normal',
   round: 0,
@@ -33,6 +39,7 @@ const defaults = {
   fov: 50,
   light: 1,
   hdri: true,
+  cam: 'arena',
 };
 
 function read() {
@@ -44,6 +51,8 @@ function read() {
     if (m != null && isFinite(+m)) s.master = Math.max(0, Math.min(1, +m));
     const x = localStorage.getItem(KEYS.sfx);
     if (x != null && isFinite(+x)) s.sfx = Math.max(0, Math.min(1, +x));
+    const an = localStorage.getItem(KEYS.ann);
+    if (an != null && isFinite(+an)) s.ann = Math.max(0, Math.min(1, +an));
     const cr = localStorage.getItem(KEYS.crowd);
     if (cr != null && isFinite(+cr)) s.crowd = Math.max(0, Math.min(1, +cr));
     const sh = localStorage.getItem(KEYS.shake);
@@ -62,6 +71,8 @@ function read() {
     if (light != null && isFinite(+light)) s.light = Math.max(0.5, Math.min(2, +light));
     const hdri = localStorage.getItem(KEYS.hdri);
     if (hdri != null) s.hdri = hdri === '1';
+    const cam = localStorage.getItem(KEYS.cam);
+    if (CAM_MODES.includes(cam)) s.cam = cam;
   } catch (_) {}
   return s;
 }
@@ -72,6 +83,7 @@ function write(s) {
     localStorage.setItem(KEYS.master, String(s.master));
     localStorage.setItem(KEYS.sfx, String(s.sfx));
     localStorage.setItem(KEYS.crowd, String(s.crowd));
+    localStorage.setItem(KEYS.ann, String(s.ann));
     localStorage.setItem(KEYS.shake, s.shake ? '1' : '0');
     localStorage.setItem(KEYS.cpu, s.cpu);
     localStorage.setItem(KEYS.round, String(s.round));
@@ -80,6 +92,7 @@ function write(s) {
     localStorage.setItem(KEYS.fov, String(s.fov));
     localStorage.setItem(KEYS.light, String(s.light));
     localStorage.setItem(KEYS.hdri, s.hdri ? '1' : '0');
+    localStorage.setItem(KEYS.cam, s.cam);
   } catch (_) {}
 }
 
@@ -115,6 +128,10 @@ function paint() {
   const crowdV = $('setCrowdV');
   if (crowd && document.activeElement !== crowd) crowd.value = String(settings.crowd);
   if (crowdV) crowdV.textContent = Math.round(settings.crowd * 100) + '%';
+  const ann = $('setAnn');
+  const annV = $('setAnnV');
+  if (ann && document.activeElement !== ann) ann.value = String(settings.ann);
+  if (annV) annV.textContent = settings.ann > 0 ? Math.round(settings.ann * 100) + '%' : 'Off';
   const cpu = $('setCpu');
   if (cpu) cpu.value = settings.cpu;
   const round = $('setRound');
@@ -131,6 +148,8 @@ function paint() {
   if (lightV) lightV.textContent = Math.round(settings.light * 100) + '%';
   const hdriEl = $('setHdri');
   if (hdriEl) hdriEl.checked = !!settings.hdri;
+  const camEl = $('setCam');
+  if (camEl) camEl.value = settings.cam;
   applyChrome();
 }
 
@@ -142,8 +161,21 @@ function applyChrome() {
     fpsEl.classList.toggle('hidden', !settings.fps);
     fpsEl.setAttribute('aria-hidden', settings.fps ? 'false' : 'true');
   }
-  setVolumes(settings.master, settings.sfx, settings.crowd);
+  setVolumes(settings.master, settings.sfx, settings.crowd, settings.ann);
   startCrowd();
+}
+
+// Camera view: from the Settings select or the V key (cycles); saved like every setting.
+export function setCameraMode(mode) {
+  settings.cam = CAM_MODES.includes(mode) ? mode : 'arena';
+  persist();
+  paint();
+  return settings.cam;
+}
+
+export function cycleCameraMode() {
+  const i = CAM_MODES.indexOf(settings.cam);
+  return setCameraMode(CAM_MODES[(i + 1) % CAM_MODES.length]);
 }
 
 function persist() {
@@ -253,12 +285,16 @@ export function initSettings(nextHooks) {
   bindSlider('setMaster', 'master');
   bindSlider('setSfx', 'sfx');
   bindSlider('setCrowd', 'crowd');
+  bindSlider('setAnn', 'ann');
   bindFov();
   bindLight();
   document.getElementById('setHdri')?.addEventListener('change', (e) => {
     settings.hdri = e.target.checked;
     persist();
     if (hooks.applyHdri) hooks.applyHdri(settings.hdri);
+  });
+  document.getElementById('setCam')?.addEventListener('change', (e) => {
+    setCameraMode(e.target.value);
   });
 }
 

@@ -97,9 +97,9 @@
   };
 
   /* ---------- input: versus + training dummy ---------- */
-  const P1K = { l: ['KeyA'], r: ['KeyD'], u: ['KeyW'], d: ['KeyS'], punch: ['KeyF'], kick: ['KeyG'], block: ['KeyH'], run: ['ShiftLeft'] };
+  const P1K = { l: ['KeyA'], r: ['KeyD'], u: ['KeyW'], d: ['KeyS'], punch: ['KeyF'], kick: ['KeyG'], block: ['KeyH'], ground: ['KeyT'], run: ['ShiftLeft'] };
   const P2K = { l: ['ArrowLeft'], r: ['ArrowRight'], u: ['ArrowUp'], d: ['ArrowDown'],
-    punch: ['Period', 'Numpad1'], kick: ['Slash', 'Numpad2'], block: ['ShiftRight', 'Quote', 'Numpad3'], run: ['ControlRight', 'Numpad0'] };
+    punch: ['Period', 'Numpad1'], kick: ['Slash', 'Numpad2'], block: ['ShiftRight', 'Quote', 'Numpad3'], ground: ['Comma', 'Numpad4'], run: ['ControlRight', 'Numpad0'] };
   S.KEYMAP = { p1: P1K, p2: P2K };
   const anyDown = (codes) => codes.some(S.keyDown);
   function readSide(map, pad) {
@@ -111,6 +111,7 @@
     inp.punch = inp.punch || anyDown(map.punch);
     inp.kick = inp.kick || anyDown(map.kick);
     inp.block = inp.block || anyDown(map.block);
+    inp.ground = inp.ground || anyDown(map.ground || []);
     inp.run = inp.run || anyDown(map.run || []);
     inp.sidestep = Math.max(-1, Math.min(1, inp.sidestep));
     inp.inout = Math.max(-1, Math.min(1, inp.inout));
@@ -122,7 +123,7 @@
     if (S.state.padSwap) i = 1 - i;
     return pads[i] || null;
   };
-  const p2Held = { punch: false, kick: false };
+  const p2Held = { punch: false, kick: false, ground: false };
   const idle = () => ({ sidestep: 0, inout: 0, punch: false, kick: false, block: false });
   S.inputFor = (side) => {
     const m = S.match && S.match.cfg;
@@ -132,9 +133,10 @@
       const map = side === 'p1' ? P1K : P2K;
       const inp = readSide(map, S.padFor(side));
       if (side === 'p1') return inp; // the game edge-detects P1 attacks itself
-      const out = { ...inp, punch: inp.punch && !p2Held.punch, kick: inp.kick && !p2Held.kick };
+      const out = { ...inp, punch: inp.punch && !p2Held.punch, kick: inp.kick && !p2Held.kick, ground: inp.ground && !p2Held.ground };
       p2Held.punch = inp.punch;
       p2Held.kick = inp.kick;
+      p2Held.ground = inp.ground;
       return out;
     }
     if (m.mode === 'watch') return null; // both robots run on the CPU brain

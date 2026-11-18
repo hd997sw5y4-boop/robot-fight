@@ -5,22 +5,18 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { HDRLoader as RGBELoader } from 'three/addons/loaders/HDRLoader.js';
 import { MODEL, ARENA, COMBAT, DAMAGE, GFX_PRESETS, LOOP_CLIPS } from './config.js';
 import { CLIP_SPEEDS } from './clip-speeds.js';
-import { getSettings, isSettingsOpen, initSettings, updateFps } from './settings.js';
-import { unlockAudio, playSfx, playHit, setBuzz, startCrowd } from './audio.js';
+import { getSettings, isSettingsOpen, initSettings, updateFps, cycleCameraMode } from './settings.js';
+import { announce, unlockAudio, playSfx, playHit, setBuzz, startCrowd } from './audio.js';
 import { buildArena as buildArenaVisual, addArenaLights, addFloorReflection } from './arena.js';
 import {
   initArenaPhysics,
   attachFighter,
   setFighterMove,
   stepPhysics,
-  enableRagdoll,
-  disableRagdoll,
-  isRagdoll,
   impactVelocity,
   resetFighterPhysics,
   clearPhysicsDebris,
   onPhysicsBounce,
-  isRagdollSettled,
 } from './physics.js';
 import {
   registerFightRuntime,
@@ -54,7 +50,7 @@ import {
 
 const canvas = document.getElementById('c');
 const keys = new Set();
-const held = { punch: false, kick: false };
+const held = { punch: false, kick: false, ground: false, buf: null, bufT: 0 };
 
 // [game-shell hook] Optional menus / rounds / ladder layer (js/shell/*.js). No-op when absent.
 function shellCall(name, ...args) {
@@ -147,31 +143,37 @@ scene.environmentIntensity = 0.38;
 let hdriEnv = null;
 let hdriBg = null;
 let hdriLoading = null;
-let hdriEnabled = false;
+let hdriEnabled = !!getSettings().hdri;
 
+// HDRI on/off. The wanted state is remembered and the environment is (re)applied by
+// syncEnvironment() whenever something it depends on appears: the HDR file finishing
+// loading, the arena (with its dark void wall) being built after the robot GLB loads, a
+// settings change, or a new round. Before, the HDR could finish first, hide a void wall
+// that didn't exist yet, and the wall then covered the backdrop in black on every load.
 function applyHdri(on) {
   hdriEnabled = !!on;
-  if (hdriEnabled) {
-    if (!hdriEnv) {
-      loadHdri().then((ok) => { if (ok && hdriEnabled) applyHdri(true); });
-      return;
-    }
+  if (hdriEnabled && !hdriEnv) loadHdri().then(() => syncEnvironment());
+  syncEnvironment();
+}
+
+function syncEnvironment() {
+  const on = hdriEnabled && !!hdriEnv;
+  if (on) {
     scene.environment = hdriEnv;
     scene.environmentIntensity = 1.05;
     scene.background = hdriBg || hdriEnv;
     scene.backgroundBlurriness = 0.04;
     scene.backgroundIntensity = 0.7;
     scene.fog = null;
-    scene.traverse((o) => { if (o.userData && o.userData.voidWall) o.visible = false; });
   } else {
     scene.environment = roomEnv;
     scene.environmentIntensity = 0.38;
     scene.background = darkBg;
     scene.backgroundBlurriness = 0;
     scene.backgroundIntensity = 1;
-    scene.fog = new THREE.Fog(0x080a10, 18, 42);
-    scene.traverse((o) => { if (o.userData && o.userData.voidWall) o.visible = true; });
+    if (!scene.fog) scene.fog = new THREE.Fog(0x080a10, 18, 42);
   }
+  scene.traverse((o) => { if (o.userData && o.userData.voidWall) o.visible = !on; });
 }
 
 function loadHdri() {
@@ -198,9 +200,8 @@ function loadHdri() {
   return hdriLoading;
 }
 
-loadHdri().then((ok) => {
-  if (ok && (getSettings().hdri || ARENA.hdri)) applyHdri(true);
-});
+// Start fetching straight away (on by default); applied as soon as it's ready.
+loadHdri().then(() => syncEnvironment());
 
 let lightMul = Math.max(0.5, Math.min(2, getSettings().light || 1));
 const litLights = [];
@@ -489,8 +490,11 @@ function makeFighter(gltf, color, side) {
   let hips = null;
   let spine = null;
   model.traverse((o) => {
-    if (o.name === 'mixamorig:Hips') hips = o;
-    if (o.name === 'mixamorig:Spine' || o.name === 'mixamorig:Spine1') spine = spine || o;
+    // GLTFLoader strips the ':' from 'mixamorig:Hips', so match on the bare bone name.
+    if (!(o.isBone || o.type === 'Bone')) return;
+    const k = boneKey(o.name);
+    if (k === 'Hips' && !hips) hips = o;
+    if ((k === 'Spine' || k === 'Spine1') && !spine) spine = o;
   });
 
   const f = {
@@ -519,7 +523,7 @@ function makeFighter(gltf, color, side) {
   f.config.color = color;
 
   mixer.addEventListener('finished', () => {
-    if (f.state === 'ko' || f.state === 'down' || isRagdoll(f)) return;
+    if (f.state === 'ko' || f.state === 'down' || f.state === 'getup') return;
     if (match.over) return;
     if (f.health > 0 && (f.state === 'punch' || f.state === 'kick')) endAttack(f, 0.15);
     else if (f.health > 0 && f.state === 'hit') {
@@ -531,7 +535,76 @@ function makeFighter(gltf, color, side) {
   prepareFighterDamage(f);
   cacheFeet(f);
   cacheBody(f);
+  if (!STRIKE_T) STRIKE_T = measureStrikes(f);
   return f;
+}
+
+// Strike timing per attack clip, measured once from the clip itself: when the fist/foot is
+// furthest forward (the hit), the window around it, and when the strike has retracted.
+// Attacks skip the slow lead-in, hit on the measured frames and hand control back as soon as
+// the strike is pulled back, instead of locking the robot for the whole (long) Mixamo clip.
+let STRIKE_T = null;
+function measureStrikes(f) {
+  const A = MODEL.animations;
+  const kicks = new Set([...(A.kickVariants || []), ...(A.kickSpecial || []), ...(A.flipSpecial || []), A.kick]);
+  const names = new Set([...(A.punchVariants || []), ...(A.punchRight || []), ...(A.punchLeft || []), A.punch, ...kicks]);
+  const out = {};
+  const v = new THREE.Vector3();
+  const save = f.current;
+  f.mixer.stopAllAction();
+  for (const name of names) {
+    const act = name && f.actions[name];
+    if (!act) continue;
+    const kind = kicks.has(name) ? 'kick' : 'punch';
+    const bones = f.strikeBones[kind];
+    if (!bones || !bones.length) continue;
+    const dur = act.getClip().duration;
+    act.reset();
+    act.setEffectiveWeight(1);
+    act.timeScale = 1;
+    act.play();
+    const N = 60;
+    const s = [];
+    for (let i = 0; i <= N; i++) {
+      act.time = (dur * i) / N;
+      f.mixer.update(0);
+      f.root.updateMatrixWorld(true);
+      let reach = -Infinity;
+      let low = Infinity;
+      for (const b of bones) {
+        b.getWorldPosition(v);
+        f.root.worldToLocal(v);
+        reach = Math.max(reach, v.z);
+        low = Math.min(low, v.y);
+      }
+      s.push({ t: act.time, reach, low });
+    }
+    act.stop();
+    let pk = 0;
+    for (let i = 1; i < s.length; i++) if (s[i].reach > s[pk].reach) pk = i;
+    const rest = s[0].reach;
+    const lift = Math.max(1e-3, s[pk].reach - rest);
+    let i0 = pk;
+    while (i0 > 0 && s[i0 - 1].reach > rest + lift * 0.55) i0--;
+    let i1 = pk;
+    while (i1 < N && s[i1 + 1].reach > rest + lift * 0.55) i1++;
+    const a0 = Math.max(0, s[i0].t - 0.04);
+    const a1 = Math.min(dur, s[i1].t + 0.04);
+    let end = Math.min(dur, a1 + 0.12);
+    if (kind === 'kick') {
+      // A kick hands control back once the kicking foot is back near the mat.
+      const floor = s[0].low + 0.08;
+      let i2 = i1;
+      while (i2 < N && s[i2].low > floor) i2++;
+      end = Math.min(dur, Math.max(a1 + 0.1, s[i2].t));
+    }
+    const lead = kind === 'kick' ? 0.3 : 0.2; // clip seconds kept before the active window
+    out[name] = { kind, dur, start: Math.max(0, a0 - lead), a0, a1, end, peak: s[pk].t, reach: +(s[pk].reach * 1).toFixed(3) };
+  }
+  f.mixer.stopAllAction();
+  f.current = null;
+  setAnim(f, save || idleClipFor(f), 0.08);
+  return out;
 }
 
 function boneKey(name) {
@@ -717,7 +790,9 @@ function lowestFootY(f) {
         // updateWorldMatrix() skips SkinnedMesh's bind refresh; without it the root offset is
         // counted twice and the robots ratchet upward.
         if (mesh.bindMode === 'attached') mesh.bindMatrixInverse.copy(mesh.matrixWorld).invert();
+        const hidden = mesh.userData.hiddenVerts;
         for (const i of idx) {
+          if (hidden && hidden[i]) continue; // torn-off foot / toes: not on the robot any more
           mesh.getVertexPosition(i, _footY);
           _footY.applyMatrix4(mesh.matrixWorld);
           if (_footY.y < minY) minY = _footY.y;
@@ -729,7 +804,7 @@ function lowestFootY(f) {
 }
 
 // Whole-body skinned vertex sample (a few hundred points): used to keep a lying robot's mesh
-// on the mat during knockdowns, get-ups and the KO ragdoll.
+// on the mat during knockdowns, get-ups and KO falls.
 function cacheBody(f) {
   f.bodyVerts = [];
   f.model.traverse((m) => {
@@ -745,80 +820,16 @@ function cacheBody(f) {
     LeftHand: 'punch', RightHand: 'punch', LeftForeArm: 'punch', RightForeArm: 'punch',
     LeftFoot: 'kick', RightFoot: 'kick', LeftToeBase: 'kick', RightToeBase: 'kick', LeftLeg: 'kick', RightLeg: 'kick',
   };
-  fitRagdoll(f);
   f.strikeBones = { punch: [], kick: [] };
   f.flinchBones = {};
+  f.groundBones = [];
   f.model.traverse((o) => {
     if (!o.isBone && o.type !== 'Bone') return;
     const k = boneKey(o.name);
     if (want[k]) f.strikeBones[want[k]].push(o);
     if (['Spine', 'Spine1', 'Spine2', 'Neck', 'Head'].includes(k)) f.flinchBones[k] = o;
+    if (GROUND_BONES[k] && !f.groundBones.some((g) => g.key === k)) f.groundBones.push({ key: k, bone: o, part: GROUND_BONES[k] });
   });
-}
-
-// Fit ragdoll collider thickness to the real mesh: for each segment, the 75th-percentile
-// distance of its vertices from the bone axis (hands/feet get an end sphere). Thin default
-// colliders let the armoured mesh sink into the mat, or hover once corrected.
-const RAG_SEG = {
-  Hips: 'hips', Spine: 'spine', Spine1: 'spine', Spine2: 'spine', Neck: 'head', Head: 'head',
-  LeftArm: 'armL', LeftForeArm: 'foreL', LeftHand: 'foreL:end', RightArm: 'armR', RightForeArm: 'foreR', RightHand: 'foreR:end',
-  LeftUpLeg: 'upLegL', LeftLeg: 'legL', LeftFoot: 'legL:end', LeftToeBase: 'legL:end',
-  RightUpLeg: 'upLegR', RightLeg: 'legR', RightFoot: 'legR:end', RightToeBase: 'legR:end',
-};
-function fitRagdoll(f) {
-  f.model.updateWorldMatrix(true, true);
-  const segBone = {};
-  f.model.traverse((o) => {
-    if (!o.isBone && o.type !== 'Bone') return;
-    const k = boneKey(o.name);
-    const seg = RAG_SEG[k];
-    if (seg && !seg.includes(':') && !segBone[seg]) segBone[seg] = o;
-  });
-  const axis = {};
-  for (const [seg, bone] of Object.entries(segBone)) {
-    const a = bone.getWorldPosition(new THREE.Vector3());
-    let child = null;
-    for (const ch of bone.children) if ((ch.isBone || ch.type === 'Bone') && (!child || ch.position.lengthSq() > child.position.lengthSq())) child = ch;
-    const b = child ? child.getWorldPosition(new THREE.Vector3()) : a.clone().add(new THREE.Vector3(0, 0.2, 0));
-    axis[seg] = { a, b };
-  }
-  const dists = {};
-  const v = new THREE.Vector3();
-  const line = new THREE.Line3();
-  const cp = new THREE.Vector3();
-  f.model.traverse((m) => {
-    if (!m.isSkinnedMesh || !m.skeleton || !m.geometry.attributes.skinIndex) return;
-    if (m.bindMode === 'attached') m.bindMatrixInverse.copy(m.matrixWorld).invert();
-    const si = m.geometry.attributes.skinIndex;
-    const sw = m.geometry.attributes.skinWeight;
-    const segOf = m.skeleton.bones.map((bn) => RAG_SEG[boneKey(bn.name)] || null);
-    const stride = Math.max(1, Math.ceil(si.count / 2500));
-    for (let i = 0; i < si.count; i += stride) {
-      let best = -1; let bw = 0;
-      for (let c = 0; c < 4; c++) { const w = sw.getComponent(i, c); if (w > bw) { bw = w; best = si.getComponent(i, c); } }
-      const seg = best >= 0 ? segOf[best] : null;
-      if (!seg) continue;
-      const [id, end] = seg.split(':');
-      const ax = axis[id];
-      if (!ax) continue;
-      m.getVertexPosition(i, v);
-      v.applyMatrix4(m.matrixWorld);
-      const key = end ? id + ':end' : id;
-      let d;
-      if (end) d = v.distanceTo(ax.b);
-      else { line.set(ax.a, ax.b); line.closestPointToPoint(v, true, cp); d = v.distanceTo(cp); }
-      (dists[key] || (dists[key] = [])).push(d);
-    }
-  });
-  const pct = (arr, q) => { arr.sort((x, y) => x - y); return arr[Math.min(arr.length - 1, Math.floor(arr.length * q))]; };
-  f.ragFit = {};
-  for (const [key, arr] of Object.entries(dists)) {
-    if (arr.length < 6) continue;
-    const [id, end] = key.split(':');
-    const rec = f.ragFit[id] || (f.ragFit[id] = {});
-    if (end) rec.endR = pct(arr, 0.6);
-    else rec.r = pct(arr, 0.75);
-  }
 }
 
 function partCodeDetached(f, code) {
@@ -845,30 +856,43 @@ function lowestBodyY(f) {
   return Number.isFinite(minY) ? minY : null;
 }
 
-// Ragdoll mesh-to-mat contact: the physics shapes only approximate the robot, so measure the
-// real skinned mesh and shift the ragdoll's visual pose until its lowest point rests on the mat
-// (no hovering, no sinking).
-function groundRagdoll(f, dt) {
-  const rd = f.phys && f.phys.ragdoll;
-  if (!rd || !rd.active) return;
-  const minY = lowestBodyY(f);
-  if (minY == null) return;
-  const err = matTopY() - minY;
-  const k = 1 - Math.pow(0.0001, Math.max(dt || 0.016, 1 / 120));
-  rd.visualY = Math.max(-0.15, Math.min(0.13, (rd.visualY || 0) + err * k));
+// Debug (headless checks): standing frames whose foot bones are off the mat.
+const _flt = new THREE.Vector3();
+function logFloat(f) {
+  let m = Infinity;
+  for (const b of f.footBones || []) { b.getWorldPosition(_flt); m = Math.min(m, _flt.y); }
+  const err = m - matTopY();
+  if (!(err > 0.03)) return;
+  const log = window.__rfFloatLog || (window.__rfFloatLog = []);
+  if (log.length < 400) log.push({ id: f.id, st: f.state, t: +f.stateT.toFixed(2), clip: f.current, err: +err.toFixed(3), gy: +(f.groundY || 0).toFixed(3), fy: +(lowestFootY(f) - matTopY()).toFixed(3), prev: f._prevState });
+}
+
+function logSlide(f, dt) {
+  const p = f.root.position;
+  const last = f._diagLast;
+  f._diagLast = { x: p.x, z: p.z, st: f.state };
+  if (!last || dt <= 0) return;
+  const st = f.state;
+  if (!(st === 'idle' || st === 'block' || st === 'punch' || st === 'kick')) return;
+  const v = Math.hypot(p.x - last.x, p.z - last.z) / dt;
+  if (v < (st === 'punch' || st === 'kick' ? 1 : 0.3)) return;
+  const log = window.__rfSlideLog || (window.__rfSlideLog = []);
+  const o = f === p1 ? p2 : p1;
+  if (log.length < 400) log.push({ id: f.id, st, prev: last.st, clip: f.current, v: +v.toFixed(2), gp: !!f.guardPush, dist: +p.distanceTo(o.root.position).toFixed(2), ost: o.state, t: +f.stateT.toFixed(2) });
 }
 
 function groundFeet(f, dt) {
-  if (!f || isRagdoll(f) || f.state === 'ko' || f.state === 'down') return;
-  if (f.parts && f.parts.legL && f.parts.legL.detached && f.parts.legR && f.parts.legR.detached) return;
-  const skipIK = f.state === 'getup' && (f.getupBlend || 0) > 0.2;
+  if (!f) return;
+  // Falling, lying, getting up or KO'd: the clip's lowest body point (back, hips, hands,
+  // knees) rests on the mat; feet IK is off.
+  const onBody = DOWN_STATES.has(f.state);
+  const skipIK = onBody;
   const top = matTopY();
   // Measure the animated pose with the root at zero, so last frame's lift never feeds back
   // into this frame (that feedback ratcheted the robots up into the air).
   f.root.position.y = 0;
   let minY = lowestFootY(f);
-  // Getting up from the mat: the back, hips or hands are the lowest point, not the feet.
-  if (f.state === 'getup') {
+  if (onBody) {
     const body = lowestBodyY(f);
     if (body != null && (minY == null || body < minY)) minY = body;
   }
@@ -877,9 +901,12 @@ function groundFeet(f, dt) {
   f.groundY = f.groundY || 0;
   if (target > f.groundY) f.groundY = target; // lift instantly: feet never sink
   else {
-    // Settle down quickly but smoothly (faster while getting up off the mat, so it never hovers).
-    const k = 1 - Math.pow(f.state === 'getup' ? 0.00001 : 0.0005, Math.max(dt || 0.016, 1 / 120));
-    f.groundY += (target - f.groundY) * k;
+    // Drop back onto the mat at falling speed (at least 3 m/s) so a clip change never leaves
+    // the robot hovering.
+    const step = Math.max(dt || 0.016, 1 / 120);
+    const k = 1 - Math.pow(0.00001, step);
+    const gap = f.groundY - target;
+    f.groundY -= Math.min(gap, Math.max(gap * k, 3 * step));
   }
   f.root.position.y = f.groundY;
   f.model.updateWorldMatrix(true, true);
@@ -888,7 +915,7 @@ function groundFeet(f, dt) {
   if (!skipIK && ARENA.stanceIK) plantStanceIK(f, top);
 
   // Per-frame clamp after IK; not stored, so it can't accumulate.
-  minY = f.state === 'getup' ? Math.min(lowestFootY(f) ?? Infinity, lowestBodyY(f) ?? Infinity) : lowestFootY(f);
+  minY = onBody ? Math.min(lowestFootY(f) ?? Infinity, lowestBodyY(f) ?? Infinity) : lowestFootY(f);
   if (!Number.isFinite(minY)) minY = null;
   if (minY != null && minY < top - 0.0004) {
     f.root.position.y += (top - minY);
@@ -1024,7 +1051,7 @@ function setAnim(f, name, fade = 0.2) {
     || (MODEL.animations.blockVariants || []).includes(clipName)
     || (MODEL.animations.victoryVariants || []).includes(clipName)
     || clipName === MODEL.animations.victory
-    || clipName === 'KnockedOut' || clipName === 'GettingUp';
+    || ['KnockedOut', 'GettingUp', 'KnockedDown', 'StandingReactDeathBackward', 'StumbleBackwards', 'LivershotKnockdown'].includes(clipName);
   const fadeT = Math.max(0.15, Math.min(0.3, fade));
   if (f.current === clipName) {
     // Don't hard-reset a playing clip — that pops mid-pose. Let it finish or keep looping.
@@ -1159,14 +1186,14 @@ function hitClipFor(partId) {
 function idleClipFor(f) {
   const injured = MODEL.animations.idleInjured;
   if (injured && f.actions[injured]) {
-    const lowHp = f.health <= COMBAT.maxHealth * 0.4;
+    // Robots don't tire: the hobbling idle is only for mechanically wrecked legs.
     const l = f.parts && f.parts.legL;
     const r = f.parts && f.parts.legR;
     const legsBad = !!(l && r && (
       l.detached || r.detached
       || ((1 - l.hp / l.max) + (1 - r.hp / r.max)) / 2 >= 0.5
     ));
-    if (lowHp || legsBad) return injured;
+    if (legsBad) return injured;
   }
   const idles = availableClips(f, MODEL.animations.idleVariants || [MODEL.animations.idle || 'FightingIdle']);
   return pickClip(idles, MODEL.animations.idle || 'FightingIdle', f.lastIdle, f);
@@ -1188,6 +1215,10 @@ window.addEventListener('keydown', (e) => {
     if (!e.repeat) resetMatch();
     return;
   }
+  if ((e.key === 'v' || e.key === 'V') && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    cycleCameraMode(); // saved; shown in the controls overlay
+    return;
+  }
   keys.add(e.key.toLowerCase());
   if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(e.key.toLowerCase())) e.preventDefault();
 });
@@ -1204,6 +1235,7 @@ function rawInput() {
   inp.punch = keys.has('j');
   inp.kick = keys.has('k');
   inp.block = keys.has('l');
+  inp.ground = keys.has('i');
   inp.run = keys.has('shift');
 
   const gp = navigator.getGamepads?.()[0];
@@ -1218,6 +1250,7 @@ function rawInput() {
     if (gp.buttons[10]?.pressed || gp.buttons[6]?.pressed) inp.run = true;
     if (gp.buttons[0]?.pressed) inp.punch = true;
     if (gp.buttons[1]?.pressed) inp.kick = true;
+    if (gp.buttons[3]?.pressed) inp.ground = true;
     if (gp.buttons[2]?.pressed || gp.buttons[4]?.pressed || gp.buttons[5]?.pressed || gp.buttons[7]?.pressed) {
       inp.block = true;
     }
@@ -1227,12 +1260,27 @@ function rawInput() {
   return inp;
 }
 
-function consumeAttacks(inp) {
+// Player attacks are edge-triggered and buffered for a moment: a press made while the robot
+// is still finishing a strike or recovering fires as soon as it can, instead of being lost.
+function consumeAttacks(inp, dt = 0) {
   const punch = inp.punch && !held.punch;
   const kick = inp.kick && !held.kick;
+  const ground = !!inp.ground && !held.ground;
   held.punch = inp.punch;
   held.kick = inp.kick;
-  return { sidestep: inp.sidestep, inout: inp.inout, punch, kick, block: inp.block, run: !!inp.run };
+  held.ground = !!inp.ground;
+  if (ground) { held.buf = 'ground'; held.bufT = COMBAT.inputBuffer || 0.3; }
+  else if (punch) { held.buf = 'punch'; held.bufT = COMBAT.inputBuffer || 0.3; }
+  else if (kick) { held.buf = 'kick'; held.bufT = COMBAT.inputBuffer || 0.3; }
+  else if (held.buf) {
+    held.bufT -= dt;
+    if (held.bufT <= 0) held.buf = null;
+  }
+  const b = held.buf;
+  return {
+    sidestep: inp.sidestep, inout: inp.inout, block: inp.block, run: !!inp.run,
+    punch: b === 'punch', kick: b === 'kick', ground: b === 'ground',
+  };
 }
 
 function toward(me, other) {
@@ -1299,7 +1347,7 @@ function separate(a, b) {
 // get-ups and made planted feet skate). A robot getting up keeps the clip's facing until it
 // is nearly upright.
 function faceToward(f, other, dt, snap) {
-  if (f.state === 'ko' || f.state === 'down' || isRagdoll(f)) return;
+  if (f.state === 'ko' || f.state === 'down' || f.state === 'ground') return;
   let rate = 9;
   if (f.state === 'getup') {
     const act = f.actions.GettingUp;
@@ -1321,37 +1369,86 @@ function faceEachOther(a, b, dt = 0, snap = false) {
 }
 
 function tryAttack(f, kind, clipName) {
-  if (f.state === 'ko' || f.state === 'hit' || f.state === 'punch' || f.state === 'kick') return;
-  if (f.cooldown > 0) return;
-  if (kind === 'punch' && !canPunch(f)) return;
-  if (kind === 'kick' && !canKick(f)) return;
-  const spec = COMBAT[kind];
+  if (f.state === 'ko' || f.state === 'hit' || f.state === 'punch' || f.state === 'kick' || f.state === 'ground') return false;
+  if (f.cooldown > 0) return false;
+  if (kind === 'punch' && !canPunch(f)) return false;
+  if (kind === 'kick' && !canKick(f)) return false;
   const mods = attackMods(f, kind);
-  if (kind === 'punch' && !punchClipsFor(f).length) return;
-  const clip = clipName
+  if (kind === 'punch' && !punchClipsFor(f).length) return false;
+  const other = f === p1 ? p2 : p1;
+  const clip = fitStrikeClip(f, kind, clipName
     || (kind === 'punch' ? pickPunch(f) : pickKick(f, true))
-    || MODEL.animations[kind];
+    || MODEL.animations[kind], other);
   f.state = kind;
   f.stateT = 0;
   f.hitThisAttack = false;
+  f.atkContact = false;
+  f.contactT = -1;
+  f._strikePrev = null;
+  f._diag = null;
   f.atkMods = mods;
   f.attackClip = clip;
   f.blocking = false;
   f.shield.visible = false;
   setAnim(f, clip, 0.1);
+  setFighterMove(f, 0, 0); // no walking velocity carried into the strike
   playSfx('whoosh');
   const action = f.actions[clip] || f.actions[kind];
   if (action) {
-    action.timeScale = mods.timeScale;
-    const dur = action.getClip().duration / Math.max(0.2, mods.timeScale);
-    f.cooldown = Math.max(spec.cooldown, dur * 0.55) * mods.cooldownMul;
-  } else {
-    f.cooldown = spec.cooldown * mods.cooldownMul;
+    // Faster strikes: punches ~1.3x, kicks ~1.15x (damage slows them again), starting just
+    // before the measured wind-up instead of from the clip's idle lead-in.
+    const speed = (kind === 'punch' ? COMBAT.punchSpeed : COMBAT.kickSpeed) || 1;
+    action.timeScale = speed * mods.timeScale;
+    const st = STRIKE_T && STRIKE_T[action.getClip().name];
+    if (st) action.time = st.start;
   }
+  return true;
+}
+
+// Choose a strike whose measured reach fits the gap: the fist/foot should just reach the
+// body surface (short elbows and uppercuts up close, jabs and long kicks from further out),
+// so strikes neither whiff short nor bury themselves in the other robot's chest.
+function strikeTip(name) {
+  const st = STRIKE_T && STRIKE_T[name];
+  if (!st) return null;
+  return Math.min(1.65, st.reach) + (COMBAT.bodyRadius || 0.36);
+}
+function fitStrikeClip(f, kind, clip, other) {
+  if (!STRIKE_T || !other) return clip;
+  const gap = f.root.position.distanceTo(other.root.position);
+  const lunge = gap > (COMBAT.strikeGap || 1.2) ? ((kind === 'kick' ? COMBAT.kickLunge : COMBAT.punchLunge) || 0) : 0;
+  const fits = (n) => {
+    const tip = strikeTip(n);
+    return tip != null && tip + lunge >= gap - 0.02 && tip <= gap + 0.3;
+  };
+  if (clip && fits(clip)) return clip;
+  const pool = kind === 'punch' ? punchClipsFor(f) : availableClips(f, MODEL.animations.kickVariants);
+  const good = pool.filter(fits);
+  if (good.length) return good[Math.floor(Math.random() * good.length)];
+  let best = clip;
+  let bd = Infinity;
+  for (const n of pool) {
+    const tip = strikeTip(n);
+    if (tip == null) continue;
+    const d = Math.abs(tip - gap - 0.05);
+    if (d < bd) { bd = d; best = n; }
+  }
+  return best || clip;
+}
+
+// Strike timing (clip seconds) for the attack being played.
+function strikeTiming(f, action) {
+  const spec = COMBAT[f.state] || COMBAT.punch;
+  const dur = action ? action.getClip().duration : 0.7;
+  const st = action && STRIKE_T && STRIKE_T[action.getClip().name];
+  if (st) return st;
+  const a0 = spec.activeFrac[0] * dur;
+  const a1 = spec.activeFrac[1] * dur;
+  return { dur, start: 0, a0, a1, end: Math.min(dur, a1 + 0.15) };
 }
 
 function tryBlock(f, heldBlock) {
-  if (f.state === 'ko' || f.state === 'hit' || f.state === 'punch' || f.state === 'kick') {
+  if (f.state === 'ko' || f.state === 'hit' || f.state === 'punch' || f.state === 'kick' || f.state === 'ground') {
     f.blocking = false;
     f.shield.visible = false;
     return;
@@ -1369,11 +1466,32 @@ function tryBlock(f, heldBlock) {
   } else if (f.state === 'block') f.state = 'idle';
 }
 
-// End an attack and start its recovery: short after a clean connect, long after a whiff.
-function endAttack(f, fade = 0.28) {
+// End an attack and start its recovery: short after a clean connect, longer after a whiff.
+// The player's recovery is shorter than the CPU's (COMBAT.playerRecoverMul).
+function diagMargin(f, other, kind, gap) {
+  const bones = f.strikeBones[kind] || [];
+  const base = other.root.position;
+  const reach = (COMBAT.bodyRadius || 0.36) + (kind === 'kick' ? COMBAT.kickShell : COMBAT.fistShell);
+  let m = Infinity;
+  for (const b of bones) {
+    b.getWorldPosition(_bp);
+    _seg.set(base.x, Math.max(base.y + 0.3, Math.min(base.y + 2.15, _bp.y)), base.z);
+    m = Math.min(m, _bp.distanceTo(_seg) - reach);
+  }
+  const d = f._diag || (f._diag = {});
+  if (!(d.m <= m)) { d.m = +m.toFixed(2); d.gap = +gap.toFixed(2); d.ost = other.state; d.blk = !!other.blocking; d.inv = other.invuln > 0; }
+}
+
+function endAttack(f, fade = 0.2) {
+  if (window.__rfDiag && (f.state === 'punch' || f.state === 'kick')) {
+    const log = window.__rfWhiffLog || (window.__rfWhiffLog = []);
+    if (log.length < 300) log.push({ id: f.id, hit: !!f.hitThisAttack, clip: f.attackClip, ...(f._diag || { m: null }) });
+    f._diag = null;
+  }
   const spec = COMBAT[f.state] || COMBAT.punch;
   const base = (COMBAT.recoverByClip && COMBAT.recoverByClip[f.attackClip]) || spec.recover || 0.25;
-  const rec = base * (f.hitThisAttack ? 1 : (COMBAT.whiffMul || 2)) * ((f.atkMods && f.atkMods.cooldownMul) || 1);
+  const who = f.isCpu ? (COMBAT.cpuRecoverMul || 1) : (COMBAT.playerRecoverMul || 1);
+  const rec = base * who * (f.hitThisAttack ? 1 : (COMBAT.whiffMul || 2)) * ((f.atkMods && f.atkMods.cooldownMul) || 1);
   f.cooldown = Math.max(f.cooldown, rec);
   f.state = 'idle';
   f.atkContact = false;
@@ -1391,15 +1509,28 @@ function strikeContact(atk, def, kind) {
   const base = def.root.position;
   const y0 = base.y + 0.3;
   const y1 = base.y + 2.15;
-  const reach = (COMBAT.bodyRadius || 0.36) + (kind === 'kick' ? 0.1 : 0.12);
+  // Bone centres sit inside the fist / foot shell: allow for its thickness.
+  const reach = (COMBAT.bodyRadius || 0.36) + (kind === 'kick' ? COMBAT.kickShell : COMBAT.fistShell);
   atk.model.updateWorldMatrix(true, true);
+  // Swept test from the bone's previous position, so a fast strike can't step past the body
+  // between two frames.
+  const prev = atk._strikePrev || (atk._strikePrev = new Map());
+  let hit = null;
   for (const b of bones) {
     b.getWorldPosition(_bp);
-    _seg.set(base.x, Math.max(y0, Math.min(y1, _bp.y)), base.z);
-    if (_bp.distanceTo(_seg) <= reach) return b;
+    const last = prev.get(b);
+    const n = last ? 4 : 1;
+    for (let i = 1; i <= n && !hit; i++) {
+      const p = last ? _sw.copy(last).lerp(_bp, i / n) : _bp;
+      _seg.set(base.x, Math.max(y0, Math.min(y1, p.y)), base.z);
+      if (p.distanceTo(_seg) <= reach) hit = b;
+    }
+    if (last) last.copy(_bp); else prev.set(b, _bp.clone());
+    if (hit) break;
   }
-  return null;
+  return hit;
 }
+const _sw = new THREE.Vector3();
 
 // Procedural flinch: a damped spring that snaps the spine/neck/head away from the blow and
 // back, layered on top of whatever clip is playing, so every connect visibly lands.
@@ -1461,13 +1592,15 @@ function applyHit(atk, def, spec, kind, strikeBone) {
   const force = (closing + swing) * (blocked ? 0.45 : 1);
   const dmg = Math.max(1, Math.round(spec.damage * mul * blockMul * loc * (0.5 + 0.55 * (force / 5))));
   def.health = Math.max(0, def.health - dmg);
-  applyPartHit(def, hit.partId, dmg, hit.point, hit.dir, scene, { blocked, force });
+  applyPartHit(def, hit.partId, dmg, hit.point, hit.dir, scene, { blocked, force, final: def.health <= 0 });
   applyStrikeWear(atk, kind || 'punch', strikeBone, blocked, force, scene, hit.dir);
   hitLight.color.setHex(blocked ? 0x88ccff : 0xffc060);
   hitLight.intensity = 12 + Math.min(8, force);
   hitLight.position.copy(hit.point);
-  playHit({ blocked, heavy: dmg >= 12 || force >= 5, kick: kind === 'kick' });
-  const heavy = force >= 5.1 || dmg >= 12;
+  playHit({ blocked, heavy: !blocked && (dmg >= 7 || force >= 4.2), kick: kind === 'kick' });
+  // Heavy: a hard-hitting blow, a stepped-in strike, or a full kick (measured: a planted kick
+  // lands at force ~3.1-3.4, a planted punch ~2.4; stepping in adds ~1).
+  const heavy = !blocked && (dmg >= 7 || force >= 4.2 || (kind === 'kick' && force >= 3.3));
   // Counter hit: caught mid-swing. Longer hitstun and a sharper freeze.
   const counter = !blocked && (def.state === 'punch' || def.state === 'kick');
   const solidHit = !blocked && force >= COMBAT.stumbleForce;
@@ -1482,13 +1615,13 @@ function applyHit(atk, def, spec, kind, strikeBone) {
   // No free sliding: a blocked hit is absorbed by the guard, a light hit only rocks the robot
   // a few centimetres (hidden inside its in-place hit clip), and a solid hit becomes a real
   // stumble-back whose travel is spread over the clip's own steps (see stepFighter 'hit').
-  const solid = !blocked && force >= COMBAT.stumbleForce;
+  const solid = !blocked && (force >= COMBAT.stumbleForce || heavy);
   const stumbleClip = solid && def.actions.StumbleBackwards ? 'StumbleBackwards' : null;
-  if (blocked && !isRagdoll(def)) {
+  if (blocked) {
     // Guard pushback: ~55% of a light hit's, stepped out with the backward walk.
     def.guardPush = { x: fwd.x, z: fwd.z, dist: COMBAT.hitRock * 0.55 * Math.min(1.4, 0.8 + force * 0.1), t0: 0, t1: 0.22, legs: true, t: 0 };
   }
-  if (!(def.phys && def.phys.body && !isRagdoll(def))) {
+  if (!(def.phys && def.phys.body)) {
     const kb = blocked ? 0 : COMBAT.hitRock * (0.8 + force * 0.08);
     def.root.position.x += fwd.x * kb;
     def.root.position.z += fwd.z * kb;
@@ -1505,11 +1638,18 @@ function applyHit(atk, def, spec, kind, strikeBone) {
     def.hitThisAttack = true;
     def.atkContact = false;
     def.invuln = COMBAT.hitInvuln;
-    if (heavy) {
-      def.state = 'down';
-      def.stateT = 0;
-      def.kdCount = (def.kdCount || 0) + 1;
-      enableRagdoll(def, { x: fwd.x * (4 + force), y: 2.2 + force * 0.15, z: fwd.z * (4 + force) }, { kind: 'down' });
+    // Knockdowns are for big shots: a heavy counter, a heavy blow with real force, a second
+    // heavy blow inside 2 s, some heavy kicks, or any heavy blow on a structurally wrecked torso.
+    // Other heavy hits are a stumble-back, so fights keep moving.
+    const now = performance.now() / 1000;
+    const stacked = heavy && def._lastHeavy != null && now - def._lastHeavy < 2;
+    if (heavy) def._lastHeavy = now;
+    const knock = heavy && (counter || force >= COMBAT.knockdownForce || stacked || torsoWrecked(def)
+      || (kind === 'kick' && Math.random() < (COMBAT.kickKnockChance || 0)));
+    if (window.__rfDiag) { const l = window.__rfHitLog || (window.__rfHitLog = []); if (l.length < 300) l.push({ kind, part: hit.partId, force: +force.toFixed(2), dmg, heavy, counter, stacked, knock }); }
+    if (knock) {
+      def._lastHeavy = null;
+      knockDown(def, fwd, force, hit.partId);
     } else {
       def.state = 'hit';
       def.stateT = 0;
@@ -1518,7 +1658,7 @@ function applyHit(atk, def, spec, kind, strikeBone) {
       const act = def.actions[clip];
       const clipDur = act ? act.getClip().duration / Math.max(0.2, act.timeScale || 1) : COMBAT.hitStun;
       const stun = (stumbleClip ? COMBAT.hitStunHeavy : COMBAT.hitStun) + (counter ? COMBAT.counterExtra : 0);
-      def.hitDur = stumbleClip ? Math.max(stun, Math.min(clipDur * 0.9, 0.9)) : stun;
+      def.hitDur = stumbleClip ? Math.max(stun, Math.min(clipDur * 0.9, 0.65)) : stun; // short, clear stun windows
       // Knockback travel is walked out: the backward walk plays under the hit clip (see 'hit').
       def.hitPush = stumbleClip
         ? { x: fwd.x, z: fwd.z, dist: COMBAT.stumbleDist * Math.min(1.25, 0.8 + force * 0.05), t0: 0.06, t1: def.hitDur * 0.85, legs: false }
@@ -1527,10 +1667,212 @@ function applyHit(atk, def, spec, kind, strikeBone) {
   }
 }
 
+// ---- Ground attacks: stomp / ground punch on a robot that is down (not KO'd) ----
+// Clips: KneeKickLead (stomp) and Punching (ground punch) with a procedural forward bow of
+// the spine layered on top so the strike reaches the mat. Each lands only on real contact
+// with a body part of the lying robot (bone positions of the knockdown clip's lying pose),
+// dents that part, and can't keep a robot pinned: at most COMBAT.ground.perKnockdown per
+// knockdown, and hits don't delay the get-up.
+const GROUND_BONES = {
+  Hips: 'torso', Spine2: 'torso', Head: 'head', LeftArm: 'armL', LeftForeArm: 'armL', RightArm: 'armR', RightForeArm: 'armR',
+  LeftUpLeg: 'legL', LeftLeg: 'legL', RightUpLeg: 'legR', RightLeg: 'legR',
+};
+const _gp = new THREE.Vector3();
+const _gq = new THREE.Vector3();
+const _gc = new THREE.Vector3();
+
+// Lying segments: midpoint of each bone and its child joint, in world space.
+function groundTargets(def) {
+  if (!isLyingDown(def) || !def.groundBones) return [];
+  def.model.updateWorldMatrix(true, true);
+  const out = [];
+  for (const { bone, part } of def.groundBones) {
+    if (def.parts && def.parts[part] && def.parts[part].detached) continue;
+    bone.getWorldPosition(_gc);
+    const ch = bone.children.find((c) => c.isBone || c.type === 'Bone');
+    if (ch && part !== 'head') { ch.getWorldPosition(_gq); _gc.lerp(_gq, 0.5); }
+    out.push({ part, x: _gc.x, y: _gc.y, z: _gc.z });
+  }
+  return out;
+}
+
+// On the mat after a knockdown fall (not during the fall, not during the get-up, not KO).
+function isLyingDown(f) {
+  return !!f && f.state === 'down' && !!f.downLying;
+}
+
+function nearestGroundTarget(f, def) {
+  let best = null;
+  let bd = Infinity;
+  for (const t of groundTargets(def)) {
+    const d = Math.hypot(t.x - f.root.position.x, t.z - f.root.position.z);
+    if (d < bd) { bd = d; best = t; }
+  }
+  return best ? { ...best, dist: bd } : null;
+}
+
+function canGroundAttack(f, def) {
+  const g = COMBAT.ground;
+  if (!g || match.over || f.cooldown > 0) return false;
+  if (!isLyingDown(def) || def.health <= 0) return false;
+  if ((f.gKd === def.kdCount ? f.gN : 0) >= g.perKnockdown) return false;
+  const t = nearestGroundTarget(f, def);
+  return !!t && t.dist <= g.reach;
+}
+
+function tryGroundAttack(f, def) {
+  if (f.state === 'ko' || f.state === 'hit' || f.state === 'punch' || f.state === 'kick' || f.state === 'ground') return false;
+  if (!canGroundAttack(f, def)) return false;
+  const t = nearestGroundTarget(f, def);
+  const stomp = t.dist <= COMBAT.ground.stompReach && canKick(f) && f.actions.KneeKickLead;
+  const clip = stomp ? 'KneeKickLead' : (f.actions.Punching ? 'Punching' : pickPunch(f));
+  if (!clip || (!stomp && !canPunch(f))) return false;
+  if (f.gKd !== def.kdCount) { f.gKd = def.kdCount; f.gN = 0; }
+  f.gN += 1;
+  f.state = 'ground';
+  f.stateT = 0;
+  f.groundKind = stomp ? 'stomp' : 'pound';
+  f.groundHit = false;
+  f.attackClip = clip;
+  f.blocking = false;
+  f.shield.visible = false;
+  f.groundAim = { x: t.x, z: t.z };
+  setFighterMove(f, 0, 0);
+  setAnim(f, clip, 0.1);
+  const act = f.actions[clip];
+  const st = act && STRIKE_T && STRIKE_T[clip];
+  if (act) {
+    act.timeScale = stomp ? 1.15 : 1.1;
+    if (st) act.time = st.start;
+  }
+  playSfx('whoosh');
+  return true;
+}
+
+// A robot on an ankle stump (foot torn off) or a badly bent leg (past ~65% leg damage) trips
+// while walking every few seconds: a short leg-buckle (HitOnLegs), ~0.45 s, then it carries
+// on limping. Mechanical, not tiredness.
+function footStumble(f, dt) {
+  const lostL = f.subs && f.subs.footL && f.subs.footL.detached;
+  const lostR = f.subs && f.subs.footR && f.subs.footR.detached;
+  const bent = f.parts ? Math.max(legDamage(f, 'L'), legDamage(f, 'R')) : 0;
+  const bad = bent > 0.65;
+  if (!lostL && !lostR && !bad) return false;
+  if (f.state !== 'walk') return false;
+  f.tripT = (f.tripT == null ? 1.5 + Math.random() * 1.5 : f.tripT) - dt;
+  if (f.tripT > 0) return false;
+  f.tripT = lostL || lostR ? (lostL && lostR ? 1.4 : 2.4) + Math.random() * 1.8 : 3.2 + (1 - bent) * 6 + Math.random() * 2;
+  const clip = (f.actions.HitOnLegs && 'HitOnLegs') || pickHitClip(f, lostL || legDamage(f, 'L') > legDamage(f, 'R') ? 'legL' : 'legR');
+  f.state = 'hit';
+  f.stateT = 0;
+  f.hitDur = 0.45;
+  f.hitPush = null;
+  setFighterMove(f, 0, 0);
+  setAnim(f, clip, 0.12);
+  playSfx('servo', { vol: 0.4, rate: 0.78 });
+  return true;
+}
+
+function stepGroundAttack(f, def, dt) {
+  setFighterMove(f, 0, 0);
+  const act = f.actions[f.attackClip];
+  const st = act && STRIKE_T && STRIKE_T[f.attackClip];
+  const dur = act ? act.getClip().duration : 1;
+  const ct = act ? act.time : f.stateT;
+  const a0 = st ? st.a0 : dur * 0.3;
+  const peak = st ? st.peak : dur * 0.45;
+  const end = st ? Math.max(st.end, peak + 0.35) : dur * 0.85;
+  // Bow envelope for the procedural layer (0..1), peaking at the strike.
+  const start = st ? st.start : 0;
+  const u = Math.max(0, Math.min(1, (ct - start) / Math.max(0.05, peak - start)));
+  const back = Math.max(0, Math.min(1, (ct - peak) / Math.max(0.05, end - peak)));
+  f.groundBow = ct <= peak ? u * u * (3 - 2 * u) : 1 - back * back * (3 - 2 * back);
+  // Face the downed body.
+  if (f.groundAim) {
+    const want = Math.atan2(f.groundAim.x - f.root.position.x, f.groundAim.z - f.root.position.z);
+    let diff = Math.atan2(Math.sin(want - f.root.rotation.y), Math.cos(want - f.root.rotation.y));
+    f.root.rotation.y += diff * Math.min(1, dt * 10);
+  }
+  // Contact: the stomping foot coming down (after the knee peak) or the fist at the bottom.
+  if (!f.groundHit && isLyingDown(def) && ct >= (f.groundKind === 'stomp' ? peak : a0) && ct <= end) {
+    const bones = f.strikeBones[f.groundKind === 'stomp' ? 'kick' : 'punch'] || [];
+    f.model.updateWorldMatrix(true, true);
+    const R = f.groundKind === 'stomp' ? 0.34 : 0.4;
+    for (const b of bones) {
+      b.getWorldPosition(_gp);
+      for (const t of groundTargets(def)) {
+        if (Math.hypot(_gp.x - t.x, _gp.z - t.z) > R || _gp.y > t.y + 0.42) continue;
+        f.groundHit = true;
+        landGroundHit(f, def, t, _gp);
+        break;
+      }
+      if (f.groundHit) break;
+    }
+  }
+  if (ct >= end - 0.01 || (act && !act.isRunning()) || f.stateT > 2.2) {
+    f.groundBow = 0;
+    f.state = 'idle';
+    f.cooldown = Math.max(f.cooldown, (COMBAT.ground.recover || 0.5) * (f.groundHit ? 1 : 1.4) * (f.isCpu ? 1 : 0.8));
+    setAnim(f, idleClipFor(f), 0.2);
+  }
+}
+
+function landGroundHit(f, def, t, at) {
+  const g = COMBAT.ground;
+  const stomp = f.groundKind === 'stomp';
+  const dmg = Math.round((stomp ? g.stompDamage : g.poundDamage) * ((f.atkMods && f.atkMods.damageMul) || 1) * (LOC_MUL[t.part] || 1));
+  const dir = _gq.set(t.x - f.root.position.x, 0, t.z - f.root.position.z);
+  if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
+  dir.normalize().add(new THREE.Vector3(0, -1.2, 0)).normalize();
+  const point = new THREE.Vector3(t.x, Math.max(t.y, at.y), t.z);
+  def.health = Math.max(0, def.health - dmg);
+  applyPartHit(def, t.part, dmg, point, dir.clone(), scene, { blocked: false, force: stomp ? 6 : 4.5, final: def.health <= 0 });
+  // Heavy metal on metal: the lying body jolts into the mat (a rigid spine/neck snap), it doesn't fly off.
+  startFlinch(def, new THREE.Vector3(dir.x, 0, dir.z).normalize(), stomp ? 0.32 : 0.24, hitZone(t.part));
+  hitLight.color.setHex(0xffc060);
+  hitLight.intensity = 16;
+  hitLight.position.copy(point);
+  playHit({ heavy: true, kick: stomp });
+  playSfx('clank', { vol: 0.9, rate: stomp ? 0.7 : 0.85 });
+  addShake(stomp ? 0.16 : 0.12);
+  triggerHitStop(COMBAT.hitStopHeavy);
+  startFlinch(f, new THREE.Vector3(-dir.x, 0, -dir.z), 0.06, 'torso');
+  if (def.health <= 0) ko(def, f, { dir: new THREE.Vector3(dir.x, 0, dir.z).normalize(), force: 3 });
+}
+
+// Forward bow for the ground punch (and a small one for the stomp), applied after the mixer.
+const _bowAxis = new THREE.Vector3();
+const _bowPQ = new THREE.Quaternion();
+const _bowQ = new THREE.Quaternion();
+const _bowFwd = new THREE.Vector3();
+function applyGroundBow(f) {
+  const w = f.state === 'ground' ? (f.groundBow || 0) : 0;
+  if (w <= 0.001) return;
+  const amt = f.groundKind === 'stomp' ? COMBAT.ground.stompBow : COMBAT.ground.poundBow;
+  _bowFwd.set(Math.sin(f.root.rotation.y), 0, Math.cos(f.root.rotation.y));
+  _bowAxis.copy(_UP).cross(_bowFwd).normalize();
+  const share = { Spine: 0.4, Spine1: 0.33, Spine2: 0.27 };
+  for (const [name, k] of Object.entries(share)) {
+    const bone = f.flinchBones && f.flinchBones[name];
+    if (!bone || !bone.parent) continue;
+    bone.parent.getWorldQuaternion(_bowPQ);
+    const local = _bp.copy(_bowAxis).applyQuaternion(_bowPQ.invert()).normalize();
+    _bowQ.setFromAxisAngle(local, amt * k * w);
+    bone.quaternion.premultiply(_bowQ);
+  }
+}
+
+// Structural damage (not tiredness): a torso past 70% damage folds on any heavy blow.
+function torsoWrecked(f) {
+  const t = f.parts && f.parts.torso;
+  return !!(t && 1 - t.hp / t.max >= 0.7);
+}
+
 function isCatastrophic(f) {
   if (!f || !f.parts) return false;
   if (f.parts.head && f.parts.head.detached) return true;
-  if (f.parts.legL && f.parts.legL.detached && f.parts.legR && f.parts.legR.detached) return true;
+  // A robot can't stand on one leg: losing a whole leg drops it for the count.
+  if ((f.parts.legL && f.parts.legL.detached) || (f.parts.legR && f.parts.legR.detached)) return true;
   return false;
 }
 
@@ -1546,6 +1888,96 @@ function playVictory(f) {
   }
 }
 
+// ---- Knockdowns and KO falls: Mixamo clips only (no ragdoll, no procedural fall) ----
+// Robots always take blows from the front (they face each other), so the clip is chosen by
+// where the blow landed: a torso/body shot folds the robot to its knees (LivershotKnockdown,
+// which also contains its own recovery); anything else knocks it over backwards
+// (StumbleBackwards played from its stagger into the fall), it lies there for
+// COMBAT.downRest, then GettingUp (whose first frame is StumbleBackwards' last frame).
+const FALL = {
+  backward: { clip: 'StumbleBackwards', from: 0.35, speed: 1.25, lieAt: 0.55 },
+  body: { clip: 'LivershotKnockdown', from: 0.1, speed: 1.2, lieAt: null },
+};
+
+function knockDown(def, fwd, force, partId) {
+  const body = partId === 'torso' && def.actions[FALL.body.clip] && Math.random() < 0.6;
+  const spec = body ? FALL.body : FALL.backward;
+  if (!def.actions[spec.clip]) return;
+  def.state = 'down';
+  def.stateT = 0;
+  def.kdCount = (def.kdCount || 0) + 1;
+  def.blocking = false;
+  def.shield.visible = false;
+  def.downClip = spec.clip;
+  def.downSpec = spec;
+  def.downLying = false;
+  def.downLieT = 0;
+  def.landed = false;
+  def.groundY = def.groundY || 0;
+  // The stagger back before the fall is walked out by the clip's own steps; the root follows
+  // with a short sine push (no velocity is left over afterwards).
+  def.hitPush = { x: fwd.x, z: fwd.z, dist: Math.min(0.75, (body ? 0.15 : 0.4) + force * 0.03), t0: 0.03, t1: body ? 0.35 : 0.7, legs: false };
+  setFighterMove(def, 0, 0);
+  const act = setAnim(def, spec.clip, 0.1);
+  if (act) {
+    act.time = spec.from;
+    act.timeScale = spec.speed;
+  }  announce('knockdown', { delay: 0.35 });
+}
+
+function stepDown(f, dt) {
+  const spec = f.downSpec || FALL.backward;
+  const hp = f.hitPush;
+  if (hp && f.stateT >= hp.t0 && f.stateT <= hp.t1) {
+    const v = pushSpeed(hp, f.stateT);
+    setFighterMove(f, hp.x * v, hp.z * v);
+  } else setFighterMove(f, 0, 0);
+  const act = f.actions[f.downClip];
+  if (!act) { beginGetUp(f); return; }
+  const dur = act.getClip().duration;
+  const frac = act.time / dur;
+  if (spec.lieAt == null) {
+    // Kneel-and-rise clip: the robot is back on its feet when the clip ends.
+    if (!f.landed && frac > 0.22) { f.landed = true; playSfx('clank', { vol: 0.7, rate: 0.62 }); addShake(0.08); }
+    if (frac >= 0.97 || !act.isRunning() || f.stateT > dur / spec.speed + 0.4) {
+      f.state = 'idle';
+      f.hitPush = null;
+      f.cooldown = Math.max(f.cooldown, 0.2);
+      setAnim(f, idleClipFor(f), 0.25);
+    }
+    return;
+  }
+  if (!f.downLying && frac >= spec.lieAt) {
+    f.downLying = true;
+    if (!f.landed) { f.landed = true; playSfx('clank', { vol: 1, rate: 0.55 }); addShake(0.14); }
+  }
+  if (!f.downLying) return;
+  // Lie still a beat (same every time: robots don't tire), then get up. The clock runs
+  // through ground hits, so a robot can't be kept down.
+  f.downLieT += dt;
+  const settled = frac >= 0.78 || !act.isRunning();
+  if ((settled && f.downLieT >= COMBAT.downRest) || f.stateT > COMBAT.downMax) beginGetUp(f);
+}
+
+// KO: a clip fall that stays down (the action clamps on its last frame).
+const KO_FALLS = ['KnockedOut', 'StandingReactDeathBackward', 'KnockedDown'];
+function koFall(f, dir, force) {
+  const opts = KO_FALLS.filter((c) => f.actions[c]);
+  // A leg torn off: the robot drops on the spot (KnockedDown folds forward onto the mat).
+  const legGone = f.parts && ((f.parts.legL && f.parts.legL.detached) || (f.parts.legR && f.parts.legR.detached));
+  const clip = legGone && f.actions.KnockedDown ? 'KnockedDown' : opts[Math.floor(Math.random() * opts.length)];
+  f.hitPush = null;
+  f.guardPush = null;
+  f.downLying = false;
+  f.flinch = null;
+  setFighterMove(f, 0, 0);
+  if (!clip) return;
+  const act = setAnim(f, clip, 0.12);
+  if (act) act.timeScale = clip === 'KnockedOut' ? 1.15 : 1.25;
+  f.koClip = clip;
+  f.landed = false;
+}
+
 function ko(loser, winner, info) {
   loser.health = 0;
   loser.state = 'ko';
@@ -1553,8 +1985,12 @@ function ko(loser, winner, info) {
   loser.shield.visible = false;
   const dir = (info && info.dir) || new THREE.Vector3(winner.root.position.x - loser.root.position.x, 0, winner.root.position.z - loser.root.position.z).normalize();
   const force = (info && info.force) || 6;
-  enableRagdoll(loser, { x: dir.x * (5 + force), y: 3.1, z: dir.z * (5 + force) }, { kind: 'ko', until: Infinity });
-  if (winner && winner.state !== 'ko' && winner.state !== 'down' && !isRagdoll(winner)) {
+  koFall(loser, dir, force);
+  if (winner && winner.state !== 'ko' && winner.state !== 'down') {
+    winner.state = 'idle';
+    winner.blocking = false;
+    winner.shield.visible = false;
+    setFighterMove(winner, 0, 0);
     playVictory(winner);
   }
   match.over = true;
@@ -1567,7 +2003,7 @@ function ko(loser, winner, info) {
   if (title) title.textContent = winner && winner.id === 'p1' ? 'Blue wins' : 'Red wins';
   if (sub) {
     if (info && info.reason === 'head') sub.textContent = winner && winner.id === 'p1' ? "You took the opponent's head." : 'Your head was torn off.';
-    else if (info && info.reason === 'legs') sub.textContent = 'Both legs gone. The fighter collapsed.';
+    else if (info && info.reason === 'legs') sub.textContent = 'A leg is gone. The fighter collapsed.';
     else sub.textContent = winner && winner.id === 'p1' ? 'You won the fight.' : 'CPU won the fight.';
   }
   playSfx('ko');
@@ -1609,8 +2045,13 @@ function partHealth(f) {
 
 const DOWN_STATES = new Set(['down', 'getup', 'ko']);
 // Compact, engine-free view of the fight for a brain (see js/brain.js for the contract).
+function ringEdge(f) {
+  return Math.min(1, Math.hypot(f.root.position.x, f.root.position.z) / ((ARENA.apothem || 6.1) - 0.55));
+}
+
 function brainSnapshot(f, opp, dt) {
-  const busy = f.state === 'ko' || f.state === 'down' || f.state === 'getup' || f.state === 'hit' || isRagdoll(f);
+  const busy = f.state === 'ko' || f.state === 'down' || f.state === 'getup' || f.state === 'hit';
+  const gt = isLyingDown(opp) ? nearestGroundTarget(f, opp) : null;
   return {
     t: performance.now() / 1000,
     dt,
@@ -1621,11 +2062,12 @@ function brainSnapshot(f, opp, dt) {
       state: f.state,
       stateT: f.stateT,
       cooldown: f.cooldown,
-      canAct: !busy && f.state !== 'punch' && f.state !== 'kick',
+      canAct: !busy && f.state !== 'punch' && f.state !== 'kick' && f.state !== 'ground',
       canPunch: canPunch(f) && punchClipsFor(f).length > 0,
       canKick: canKick(f),
       canBlock: canBlock(f),
       blocking: !!f.blocking,
+      edge: +ringEdge(f).toFixed(2),
       parts: partHealth(f),
     },
     opp: {
@@ -1634,7 +2076,10 @@ function brainSnapshot(f, opp, dt) {
       stateT: opp.stateT,
       attacking: opp.state === 'punch' || opp.state === 'kick',
       blocking: !!opp.blocking,
-      down: DOWN_STATES.has(opp.state) || isRagdoll(opp),
+      down: DOWN_STATES.has(opp.state),
+      groundable: canGroundAttack(f, opp),
+      groundDist: gt ? +gt.dist.toFixed(2) : null,
+      edge: +ringEdge(opp).toFixed(2),
       parts: partHealth(opp),
     },
   };
@@ -1651,7 +2096,8 @@ function intentToInput(f, opp, intent) {
     inp.block = true;
     inp.blockClip = f._aiBlockClip || (f._aiBlockClip = pickBlock(f, opp));
   } else f._aiBlockClip = null;
-  if (intent.attack === 'punch' && punchClipsFor(f).length) {
+  if (intent.attack === 'ground') inp.ground = true;
+  else if (intent.attack === 'punch' && punchClipsFor(f).length) {
     inp.punch = true;
     inp.punchClip = pickPunch(f);
   } else if (intent.attack === 'kick' && canKick(f)) {
@@ -1666,8 +2112,10 @@ function intentToInput(f, opp, intent) {
 function updateAI(cpu, player, dt) {
   if (cpu === p2) {
     const shellAi = shellCall('input', 'p2'); // [game-shell hook] versus P2 / training dummy / menu idle
+    cpu.isCpu = !shellAi;
     if (shellAi) return shellAi;
   }
+  cpu.isCpu = true;
   if (!cpu.brain) cpu.brain = createPacedBrain(() => aiProfile(cpu));
   cpu._ai = cpu.brain.state || cpu._ai; // per-fighter think state (Bot vs Bot runs two)
   const intent = cpu.brain.think(brainSnapshot(cpu, player, dt));
@@ -1675,10 +2123,12 @@ function updateAI(cpu, player, dt) {
 }
 
 function stepFighter(f, other, inp, dt) {
+  if (f._lastSt !== f.state) { f._prevState = f._lastSt; f._lastSt = f.state; }
   f.cooldown = Math.max(0, f.cooldown - dt);
   f.invuln = Math.max(0, f.invuln - dt);
   f.stateT += dt;
-  if (f.state === 'ko' || f.state === 'down' || isRagdoll(f)) return;
+  if (f.state === 'ko') { setFighterMove(f, 0, 0); return; }
+  if (f.state === 'down') { stepDown(f, dt); return; }
   if (f.state === 'getup') {
     setFighterMove(f, 0, 0);
     // Play the whole GettingUp clip (by its own playhead), then settle into the guard.
@@ -1687,8 +2137,6 @@ function stepFighter(f, other, inp, dt) {
     const done = action ? (action.time >= clipDur - 0.1 || !action.isRunning()) : f.stateT > (COMBAT.getupTime || 1.25);
     if ((done && f.stateT > 0.4) || f.stateT > (COMBAT.getupTime || 1.25) + 0.6) {
       f.state = 'idle';
-      f.getupSnap = null;
-      f.getupBlend = 0;
       f.cooldown = Math.max(f.cooldown, 0.25);
       setAnim(f, idleClipFor(f), 0.3);
     }
@@ -1698,8 +2146,6 @@ function stepFighter(f, other, inp, dt) {
     setFighterMove(f, 0, 0);
     return;
   }
-
-  if (maybeKneeDrop(f, dt)) return;
 
   if (f.state === 'hit') {
     // Hit travel follows the reaction: a smooth sine-shaped push inside [t0, t1], zero outside,
@@ -1725,27 +2171,44 @@ function stepFighter(f, other, inp, dt) {
   if (f.state === 'punch' || f.state === 'kick') {
     const spec = COMBAT[f.state];
     const action = f.actions[f.attackClip] || f.actions[f.state] || f.actions[resolveClip(f, f.state)];
-    const dur = action ? action.getClip().duration : 0.7;
-    const a0 = (spec.activeFrac ? spec.activeFrac[0] * dur : spec.active[0]);
-    const a1 = (spec.activeFrac ? spec.activeFrac[1] * dur : spec.active[1]);
+    const tm = strikeTiming(f, action);
+    const ct = action ? action.time : f.stateT; // clip playhead: windows stay right at any speed
     // A small step into the strike when just out of reach; it stops on contact and never
     // drives inside striking distance (that pushed fists through torsos).
     const gap = f.root.position.distanceTo(other.root.position);
-    if (!f.atkContact && f.stateT < a0 && gap > (COMBAT.strikeGap || 1.2)) {
+    if (!f.atkContact && ct < tm.a0 && gap > (COMBAT.strikeGap || 1.2)) {
       const lunge = (f.state === 'kick' ? COMBAT.kickLunge : COMBAT.punchLunge) || 0;
       const fwd = toward(f, other);
-      const v = lunge / Math.max(0.1, a0) * ((f.atkMods && f.atkMods.timeScale) || 1);
+      const v = lunge / Math.max(0.1, (tm.a0 - tm.start) / Math.max(0.2, action ? action.timeScale : 1));
       setFighterMove(f, fwd.x * v, fwd.z * v);
     } else setFighterMove(f, 0, 0);
-    const contact = !f.hitThisAttack && f.stateT >= a0 && f.stateT <= a1 && gap <= spec.range ? strikeContact(f, other, f.state) : null;
+    const contact = !f.hitThisAttack && ct >= tm.a0 && ct <= tm.a1 && gap <= spec.range ? strikeContact(f, other, f.state) : null;
+    if (window.__rfDiag && ct >= tm.a0 && ct <= tm.a1) diagMargin(f, other, f.state, gap);
     if (contact) {
       f.hitThisAttack = true;
+      f.contactT = f.stateT;
       applyHit(f, other, spec, f.state, contact.isBone || contact.type === 'Bone' ? contact : null);
     }
-    if (f.stateT > dur + 0.05 && f.state !== 'ko') endAttack(f);
+    // The fist stops at the surface: after contact the strike is pulled back (blend to guard)
+    // instead of playing on through the body.
+    const pulled = f.contactT >= 0 && f.stateT - f.contactT > (COMBAT.contactHold || 0.1);
+    const done = pulled || ct >= tm.end - 0.01 || (action && !action.isRunning());
+    // The player can cancel the retraction into movement, guard or the next strike.
+    const wantsOut = !f.isCpu && ct > tm.a1 && (inp.block || inp.punch || inp.kick
+      || Math.abs(inp.sidestep) + Math.abs(inp.inout) > 0.3);
+    if ((done || wantsOut) && (f.state === 'punch' || f.state === 'kick')) {
+      endAttack(f, pulled ? 0.16 : 0.2);
+      if (!wantsOut) return;
+      if (inp.punch || inp.kick) f.cooldown = Math.min(f.cooldown, 0.06);
+    } else return;
+  }
+
+  if (f.state === 'ground') {
+    stepGroundAttack(f, other, dt);
     return;
   }
 
+  if (footStumble(f, dt)) return;
   f.blockClip = inp.blockClip || null;
   tryBlock(f, inp.block);
   if (f.guardPush) {
@@ -1758,9 +2221,10 @@ function stepFighter(f, other, inp, dt) {
     if (gp.t > gp.t1 + COMBAT.blockStunTail) { f.guardPush = null; stepLegs(f, 0, 1); }
     return;
   }
+  if (inp.ground && tryGroundAttack(f, other)) return;
   if (inp.punch) tryAttack(f, 'punch', inp.punchClip);
   else if (inp.kick) tryAttack(f, 'kick', inp.kickClip);
-  if (f.state === 'punch' || f.state === 'kick' || f.state === 'hit' || f.state === 'ko') return;
+  if (f.state === 'punch' || f.state === 'kick' || f.state === 'ground' || f.state === 'hit' || f.state === 'ko') return;
 
   const speeds = locoMoveSpeeds(f, f.blocking);
   if (inp.run && !f.blocking) { // Shift / L3 / LT: faster forward and back
@@ -1769,12 +2233,21 @@ function stepFighter(f, other, inp, dt) {
   }
   // Spacing through footwork, never by shoving the root: don't walk into the other robot, and
   // when inside the soft spacing, step back with the backward walk (matched to the speed).
+  // The player is never pushed back against their input; they just can't walk into the body.
   let inout = inp.inout;
+  let sidestep = inp.sidestep;
   const gap = f.root.position.distanceTo(other.root.position);
-  const sep = COMBAT.separate || 1.05;
+  const otherDown = DOWN_STATES.has(other.state);
+  const sep = otherDown ? (COMBAT.separateDown || 0.75) : (COMBAT.separate || 1.05);
   if (gap < sep + 0.05 && inout > 0) inout = 0;
-  if (gap < sep && !DOWN_STATES.has(other.state)) inout = Math.min(inout, -Math.min(1, 0.35 + (sep - gap) / 0.15));
-  inp = { ...inp, inout };
+  if (f.isCpu && gap < sep && !otherDown) inout = Math.min(inout, -Math.min(1, 0.35 + (sep - gap) / 0.15));
+  // Guarding: no sideways skating in the full-body block clip; stepping back is walked out
+  // with the backward-walk layer.
+  if (f.blocking) {
+    sidestep = 0;
+    inout = Math.min(0, inout);
+  }
+  inp = { ...inp, inout, sidestep };
   const moving = Math.abs(inp.sidestep) + Math.abs(inp.inout) > 0.12;
   if (moving) {
     const actual = moveFighter(f, other, inp.sidestep, inp.inout, dt, speeds);
@@ -1786,9 +2259,10 @@ function stepFighter(f, other, inp, dt) {
     if (!f.blocking) {
       f.state = 'walk';
       updateLoco(f, inp.sidestep, inp.inout, dt, actual, speeds);
-    }
+    } else stepLegs(f, actual, dt);
   } else {
     setFighterMove(f, 0, 0);
+    if (f.blocking) stepLegs(f, 0, dt);
     if (!f.blocking) {
       f.state = 'idle';
       updateLoco(f, 0, 0, dt, 0, null);
@@ -1934,7 +2408,7 @@ function updateLoco(f, sidestep, inout, dt, actualSpeed, moveSpeeds) {
 }
 
 function stepFootSounds(f, dt) {
-  if (!f || isRagdoll(f) || f.state === 'ko' || f.state === 'down' || f.state === 'getup') return;
+  if (!f || f.state === 'ko' || f.state === 'down' || f.state === 'getup') return;
   if (f.state !== 'walk') return;
   const top = matTopY();
   f._footSfx = f._footSfx || { L: { y: top, t: 0 }, R: { y: top, t: 0 } };
@@ -1954,29 +2428,6 @@ function stepFootSounds(f, dt) {
     }
     rec.y = y;
   }
-}
-
-function maybeKneeDrop(f, dt) {
-  const l = f.parts && f.parts.legL;
-  const r = f.parts && f.parts.legR;
-  const one = !!(l && r && ((l.detached && !r.detached) || (!l.detached && r.detached)));
-  if (!one) return false;
-  if (f.state === 'punch' || f.state === 'kick' || f.state === 'hit' || f.state === 'ko' || f.state === 'down') return false;
-  f.kneeAcc = (f.kneeAcc || 0) + dt;
-  if (f.kneeAcc < 0.9 + (f.kneeNext || 0)) return false;
-  f.kneeAcc = 0;
-  f.kneeNext = 0.45 + Math.random() * 1.15;
-  f.state = 'hit';
-  f.stateT = 0;
-  f.blocking = false;
-  f.shield.visible = false;
-  setFighterMove(f, 0, 0);
-  const clip = (f.actions.HitOnLegs && 'HitOnLegs')
-    || (f.actions.InjuredStumbleIdle && 'InjuredStumbleIdle')
-    || 'hit';
-  setAnim(f, clip, 0.14);
-  playSfx('servo', { vol: 0.38, rate: 0.82 });
-  return true;
 }
 
 function syncHud() {
@@ -2000,7 +2451,106 @@ function triggerHitStop(sec) {
   hitStopLeft = Math.max(hitStopLeft, sec);
 }
 
+// ---- Camera views (Settings > Camera view, or V to cycle) ----
+// arena: the original orbit camera (default). third: behind and over P1's right shoulder,
+// following it and framing the opponent. first: from P1's visor (its own fists come into
+// view when it strikes), P1's head meshes hidden from the camera, mechanical shake on hits and
+// a head-damage wobble. With P1's head gone, first person falls back to third person.
+const _cvA = new THREE.Vector3();
+const _cvB = new THREE.Vector3();
+const _cvF = new THREE.Vector3();
+const _cvR = new THREE.Vector3();
+let camModeLive = null;
+
+function cameraMode() {
+  let m = getSettings().cam || 'arena';
+  if (m === 'first' && p1.parts && p1.parts.head && p1.parts.head.detached) m = 'third';
+  return m;
+}
+
+function headOnlyMeshes(f) {
+  if (f._headOnly) return f._headOnly;
+  const out = [];
+  const head = f.parts && f.parts.head;
+  if (head) for (const m of head.meshes) out.push(m);
+  for (const m of f.skinMeshes || []) {
+    const used = m.userData.vertPartsUsed;
+    if (used && used.size === 1 && used.has('head')) out.push(m);
+  }
+  f._headOnly = out;
+  return out;
+}
+
+// P1's head meshes are hidden only while the 1st-person view renders.
+function setFirstPersonHide(on) {
+  if (!p1) return;
+  for (const m of headOnlyMeshes(p1)) {
+    if (on) { if (m.userData.fpWasVisible == null) { m.userData.fpWasVisible = m.visible; m.visible = false; } }
+    else if (m.userData.fpWasVisible != null) { m.visible = m.userData.fpWasVisible; m.userData.fpWasVisible = null; }
+  }
+}
+
+function updateFollowCamera(dt, mode) {
+  const a = p1.root.position;
+  const b = p2.root.position;
+  _cvF.set(b.x - a.x, 0, b.z - a.z);
+  const dist = Math.max(0.3, _cvF.length());
+  _cvF.divideScalar(dist);
+  _cvR.set(-_cvF.z, 0, _cvF.x); // P1's right when facing the opponent (+Z facing -> -X)
+  const k = dt <= 0 ? 1 : 1 - Math.pow(mode === 'first' ? 1e-7 : 0.0008, dt);
+  if (mode === 'third') {
+    const back = 2.25 + dist * 0.28;
+    camT.set(a.x - _cvF.x * back + _cvR.x * 0.62, 1.95 + dist * 0.05, a.z - _cvF.z * back + _cvR.z * 0.62);
+    placeInOctagon(camT, -1.5, false);
+    lookT.set(a.x + _cvF.x * dist * 0.62, 1.12, a.z + _cvF.z * dist * 0.62);
+    camera.position.lerp(camT, k);
+    camera.lookAt(lookT);
+  } else {
+    // Eye just in front of the visor (so no head geometry sits between it and the scene),
+    // riding the head bone so the view moves with the body; aimed at the opponent's chest.
+    const head = p1.flinchBones && p1.flinchBones.Head;
+    p1.model.updateWorldMatrix(true, true);
+    if (head) head.getWorldPosition(_cvA); else _cvA.set(a.x, 1.65, a.z);
+    _cvA.addScaledVector(_cvF, 0.2);
+    _cvA.y += 0.05;
+    camera.position.lerp(_cvA, k);
+    _cvB.set(b.x, (p2.state === 'down' || p2.state === 'ko') ? 0.35 : 1.2, b.z);
+    lookT.lerp(_cvB, dt <= 0 ? 1 : 1 - Math.pow(0.002, dt));
+    camera.lookAt(lookT);
+  }
+  // Head damage (cracked optics) wobbles the view, much more from inside the head.
+  const hp = p1.parts && p1.parts.head;
+  const hd = hp && !hp.detached ? 1 - hp.hp / hp.max : 0;
+  const t = performance.now() / 1000;
+  if (hd > 0.3) {
+    const w = (hd - 0.3) * (mode === 'first' ? 0.1 : 0.05);
+    camera.rotateZ(Math.sin(t * 1.3) * w + (Math.random() - 0.5) * w * 0.3);
+    camera.rotateX(Math.sin(t * 2.1 + 1) * w * 0.4);
+  }
+  if (shakeAmp > 0) {
+    // Mechanical shake: a hard rotational jolt (1st person) or a positional one (3rd).
+    if (mode === 'first') {
+      camera.rotateX((Math.random() - 0.5) * shakeAmp * 0.9);
+      camera.rotateY((Math.random() - 0.5) * shakeAmp * 0.6);
+      camera.rotateZ((Math.random() - 0.5) * shakeAmp * 0.7);
+    } else {
+      camera.position.x += (Math.random() - 0.5) * shakeAmp * 0.8;
+      camera.position.y += (Math.random() - 0.5) * shakeAmp * 0.4;
+    }
+    if (dt > 0) shakeAmp = Math.max(0, shakeAmp - dt * 3.2);
+  }
+}
+
 function updateCamera(dt) {
+  const mode = match.over ? 'arena' : cameraMode();
+  if (mode !== camModeLive) {
+    camModeLive = mode;
+    camera.near = mode === 'first' ? 0.04 : 0.1;
+    camera.updateProjectionMatrix();
+    dt = 0; // snap to the new view
+  }
+  setFirstPersonHide(mode === 'first');
+  if (mode !== 'arena') { updateFollowCamera(dt, mode); return; }
   const a = p1.root.position;
   const b = p2.root.position;
   const midY = match.over ? 0.85 : 1.15;
@@ -2104,103 +2654,28 @@ function stepRound(dt) {
   paintRound();
 }
 
-const _guA = new THREE.Vector3();
-const _guB = new THREE.Vector3();
 const _guM = new THREE.Matrix4();
-const _guQ = new THREE.Quaternion();
 
-// Direction from hips to head in root space on the GettingUp clip's first frame (it starts
-// lying on its back), so the clip can be lined up with however the ragdoll landed.
-function getupHeadDir(f) {
-  if (f._getupHeadDir !== undefined) return f._getupHeadDir;
-  f._getupHeadDir = null;
-  const act = f.actions.GettingUp;
-  if (!act || !f.hips) return null;
-  const tr = act.getClip().tracks.find((t) => /Hips\.quaternion$/.test(t.name));
-  if (!tr) return null;
-  const q = new THREE.Quaternion().fromArray(tr.values, 0);
-  const dir = new THREE.Vector3(0, 1, 0).applyQuaternion(q); // hips +Y points up the spine
-  // hips-parent space -> root space
-  f.root.updateWorldMatrix(true, true);
-  const parentQ = f.hips.parent.getWorldQuaternion(new THREE.Quaternion());
-  const rootQ = f.root.getWorldQuaternion(new THREE.Quaternion());
-  dir.applyQuaternion(parentQ).applyQuaternion(rootQ.invert());
-  dir.y = 0;
-  if (dir.lengthSq() < 1e-6) return null;
-  f._getupHeadDir = dir.normalize();
-  return f._getupHeadDir;
-}
-
+// Get-up: the knockdown fall (StumbleBackwards) ends lying on the back in exactly the pose
+// GettingUp starts from (measured with __rfClipPose), so a short cross-fade is seamless and
+// no bone is ever posed by physics.
 function beginGetUp(f) {
   if (!f || f.state === 'getup') return;
-  f.model.updateWorldMatrix(true, true);
-  // Line the clip's lying pose up with the ragdoll: turn the root so the clip's head
-  // direction matches where the ragdoll's head ended up.
-  const head = f.flinchBones && f.flinchBones.Head;
-  let yaw = f.root.rotation.y;
-  const clipDir = getupHeadDir(f);
-  if (head && f.hips && clipDir) {
-    f.hips.getWorldPosition(_guA);
-    head.getWorldPosition(_guB);
-    const dx = _guB.x - _guA.x;
-    const dz = _guB.z - _guA.z;
-    if (dx * dx + dz * dz > 0.04) yaw = Math.atan2(dx, dz) - Math.atan2(clipDir.x, clipDir.z);
-  }
-  // Keep the hips exactly where the ragdoll left them while the root turns and moves.
-  const hipsWorld = f.hips ? f.hips.matrixWorld.clone() : null;
-  const x = f.root.position.x;
-  const z = f.root.position.z;
-  disableRagdoll(f);
-  f.root.position.set(x, 0, z);
-  f.root.rotation.set(0, yaw, 0);
-  f.root.updateWorldMatrix(true, true);
-  if (hipsWorld) {
-    _guM.copy(f.hips.parent.matrixWorld).invert().multiply(hipsWorld);
-    _guM.decompose(f.hips.position, f.hips.quaternion, _guA);
-  }
-  const snap = [];
-  f.model.traverse((o) => {
-    if (!o.isBone && o.type !== 'Bone') return;
-    snap.push({ bone: o, pos: o.position.clone(), quat: o.quaternion.clone() });
-  });
-  if (f.phys && f.phys.body) {
-    f.phys.body.position.set(x, 0, z);
-    f.phys.body.velocity.setZero();
-  }
+  if (f.phys && f.phys.body) f.phys.body.velocity.setZero();
   f.state = 'getup';
   f.stateT = 0;
-  f.getupBlend = 1;
-  f.getupSnap = snap;
+  f.downLying = false;
   f.flinch = null;
-  f.groundY = 0;
   if (f.mixer) f.mixer.timeScale = 1;
   const clip = f.actions.GettingUp ? 'GettingUp' : (MODEL.animations.getUp || 'GettingUp');
-  const act = setAnim(f, clip, 0.18);
+  const act = setAnim(f, clip, 0.25);
   // The whole clip, paced to COMBAT.getupTime.
   if (act) act.timeScale = act.getClip().duration / Math.max(0.6, COMBAT.getupTime || 1.25);
-}
-
-// Ease from the ragdoll's final pose into the GettingUp clip (smoothstep over 0.45 s).
-function applyGetupBlend(f, dt) {
-  if (!f.getupSnap) return;
-  f.getupBlend = Math.max(0, (f.getupBlend || 0) - dt / 0.45);
-  const w = f.getupBlend;
-  if (w <= 0) {
-    f.getupSnap = null;
-    return;
-  }
-  const u = 1 - w;
-  const tAnim = u * u * (3 - 2 * u);
-  for (const s of f.getupSnap) {
-    s.bone.position.lerpVectors(s.pos, s.bone.position, tAnim);
-    s.bone.quaternion.slerpQuaternions(s.quat, s.bone.quaternion, tAnim);
-  }
 }
 
 const _hpA = new THREE.Vector3();
 const _hpB = new THREE.Vector3();
 function poseAfterMixer(f, dt = 1 / 60) {
-  if (isRagdoll(f)) return;
   // Keep the game's movement in charge: pin hips X/Z, leave Y for clip bounce. During punches
   // and kicks the pin eases off so the clip's lunge, hip turn and weight shift come through,
   // and eases back once the strike connects (the body doesn't keep driving through).
@@ -2229,13 +2704,86 @@ function poseAfterMixer(f, dt = 1 / 60) {
     }
   }
   f.model.position.y = f.baseY;
+  applyStumpLeg(f, dt);
   applyFlinch(f, dt);
+  applyGroundBow(f);
+}
+
+// Leg damage fraction (0 intact .. 1 empty); legs bend instead of breaking off.
+function legDamage(f, side) {
+  const leg = f.parts && f.parts['leg' + side];
+  if (!leg || leg.detached) return 0;
+  return Math.max(0, Math.min(1, 1 - leg.hp / leg.max));
+}
+
+// Damaged leg: dents come from the hits; on top of that the leg is posed bent and warped
+// (rigid bone rotations, no stretching): a knee that won't straighten and a thigh knocked out
+// of line, both growing with damage. The limp (sway, slower stride, trips) is in
+// applyMalfunctions / moveSpeedMul / footStumble.
+//
+// Lost foot: the Walking clip alone looks like a healthy walk, so the stump leg is posed on
+// top of it (procedural, rigid bone rotations only): walking, the stump is carried with the
+// hip and knee flexed and the robot hops along on its good leg (the clip's stride on that
+// side; feet grounding keeps the good sole on the mat); standing, the stump only touches
+// down lightly with the weight on the good leg. Both feet gone: a bent-knee shuffle.
+const _stAxis = new THREE.Vector3();
+const _stPQ = new THREE.Quaternion();
+const _stQ = new THREE.Quaternion();
+const _stFwd = new THREE.Vector3();
+function rotateBoneWorldAxis(bone, axis, angle) {
+  if (!bone || !bone.parent || Math.abs(angle) < 1e-4) return;
+  bone.parent.getWorldQuaternion(_stPQ);
+  _stQ.setFromAxisAngle(_bp.copy(axis).applyQuaternion(_stPQ.invert()).normalize(), angle);
+  bone.quaternion.premultiply(_stQ);
+  bone.updateMatrixWorld(true);
+}
+function applyStumpLeg(f, dt) {
+  const lost = {
+    L: !!(f.subs && f.subs.footL && f.subs.footL.detached && !(f.parts.legL && f.parts.legL.detached)),
+    R: !!(f.subs && f.subs.footR && f.subs.footR.detached && !(f.parts.legR && f.parts.legR.detached)),
+  };
+  const standing = !DOWN_STATES.has(f.state) && f.state !== 'ground';
+  const both = lost.L && lost.R;
+  const walking = f.state === 'walk';
+  f.stumpW = f.stumpW || { L: 0, R: 0 };
+  const k = Math.min(1, dt * 8);
+  _stAxis.set(Math.cos(f.root.rotation.y), 0, -Math.sin(f.root.rotation.y)); // root right (up x fwd)
+  for (const side of ['L', 'R']) {
+    const want = lost[side] && standing ? 1 : 0;
+    f.stumpW[side] += (want - f.stumpW[side]) * k;
+    const w = f.stumpW[side];
+    const leg = f.ikLegs && f.ikLegs[side];
+    if (!leg || !leg.thigh || !leg.shin) continue;
+    const bend = standing && !lost[side] ? legDamage(f, side) : 0;
+    if (bend > 0.12) {
+      f.model.updateWorldMatrix(true, true);
+      const b = (bend - 0.12) / 0.88;
+      _stFwd.set(Math.sin(f.root.rotation.y), 0, Math.cos(f.root.rotation.y));
+      rotateBoneWorldAxis(leg.thigh, _stFwd, (side === 'L' ? -1 : 1) * 0.1 * b); // knocked out of line
+      rotateBoneWorldAxis(leg.thigh, _stAxis, -0.1 * b);
+      rotateBoneWorldAxis(leg.shin, _stAxis, 0.32 * b);                     // knee stays bent
+      if (leg.foot) rotateBoneWorldAxis(leg.foot, _stFwd, (side === 'L' ? 1 : -1) * 0.12 * b); // ankle rolled
+    }
+    if (w < 0.01) continue;
+    f.model.updateWorldMatrix(true, true);
+    let hip; let knee;
+    if (both) { hip = 0.12; knee = 0.32; }
+    else if (walking) {
+      // Carried stump with a small pump in time with the hop.
+      const pump = Math.sin((f.limpT || 0) * 6.4) * 0.08;
+      hip = 0.5 + pump; knee = 0.85 + pump;
+    } else { hip = 0.16; knee = 0.3; }
+    rotateBoneWorldAxis(leg.thigh, _stAxis, -hip * w); // knee comes forward
+    rotateBoneWorldAxis(leg.shin, _stAxis, knee * w);  // stump folds back
+  }
 }
 
 function resetMatch() {
+  syncEnvironment();
   for (const f of [p1, p2]) {
-    disableRagdoll(f);
     if (f.mixer) f.mixer.timeScale = 1;
+    f.downLying = false;
+    f.downClip = null;
     f.health = COMBAT.maxHealth;
     f.state = 'idle';
     f.stateT = 0;
@@ -2247,17 +2795,22 @@ function resetMatch() {
     f.root.position.set(f.startX, 0, 0);
     f.root.scale.set(1, 1, 1);
     f.groundY = 0;
-    f.getupSnap = null;
-    f.getupBlend = 0;
     f.kdCount = 0;
     f.guardPush = null;
     f.hitPush = null;
     f.flinch = null;
+    f.groundBow = 0;
+    f.gN = 0;
+    f.gKd = -1;
+    f.contactT = -1;
+    f.atkContact = false;
+    // Fresh brain each round: nothing carries over from the last KO.
+    if (f.brain && f.brain.kind === 'paced') f.brain = null;
     resetFighterPhysics(f, f.startX, 0);
     f.atkMods = null;
     resetFighterDamage(f, scene);
     // Hard-start the round clip at full weight and pose it now, so the first rendered frame
-    // never shows the bind (A/T) pose from a cross-fade out of a stopped KO/ragdoll action.
+    // never shows the bind (A/T) pose from a cross-fade out of a stopped KO fall action.
     if (f.mixer) f.mixer.stopAllAction();
     f.current = null;
     setAnim(f, MODEL.animations.getUp || 'idle', 0.08);
@@ -2280,6 +2833,7 @@ function resetMatch() {
   match.overlayAt = 0;
   hitStopLeft = 0;
   match.slowLeft = 0;
+  held.buf = null;
   paintRound();
   const banner = document.getElementById('banner');
   banner.style.opacity = '';
@@ -2328,41 +2882,31 @@ function tick() {
   if (match.phase === 'fight' && !match.over) stepRound(dt);
   const canAct = match.phase === 'fight' && !match.over && !isSettingsOpen();
   const watch = !!shellCall('cpuControls', 'p1'); // Bot vs Bot: P1 is a CPU too
-  const pin = canAct ? (watch ? updateAI(p1, p2, dt) : consumeAttacks(rawInput())) : consumeAttacks({ sidestep: 0, inout: 0, punch: false, kick: false, block: false });
+  p1.isCpu = watch;
+  const pin = canAct ? (watch ? updateAI(p1, p2, dt) : consumeAttacks(rawInput(), dt)) : consumeAttacks({ sidestep: 0, inout: 0, punch: false, kick: false, block: false }, 1);
   const ain = canAct ? updateAI(p2, p1, dt) : { sidestep: 0, inout: 0, punch: false, kick: false, block: false };
 
-  for (const f of [p1, p2]) {
-    if (!f || f.state !== 'down' || !isRagdoll(f)) continue;
-    const stayDown = f.health <= 0 || isCatastrophic(f);
-    if (stayDown) continue;
-    // Stay down until the body is nearly still, then lie there a beat (longer on later
-    // knockdowns in the round) before the get-up.
-    f._stillT = isRagdollSettled(f) ? (f._stillT || 0) + dt : 0;
-    const rest = (f.kdCount || 1) > 1 ? COMBAT.downRest[1] : COMBAT.downRest[0];
-    if (f._stillT >= rest || f.stateT > COMBAT.downMax) {
-      f._stillT = 0;
-      beginGetUp(f);
-    }
-  }
+  const p1Was = p1.state;
   stepFighter(p1, p2, pin, dt);
   stepFighter(p2, p1, ain, dt);
+  // A buffered press is used up once the attack it asked for has started.
+  if (held.buf && p1.state !== p1Was && (p1.state === 'punch' || p1.state === 'kick' || p1.state === 'ground')) held.buf = null;
   stepPhysics(dt);
-  if (!isRagdoll(p1) && !isRagdoll(p2)) separate(p1, p2);
+  // A robot that is falling, lying or getting up has no standing capsule to push against:
+  // the other can step over it to stomp, and nothing shoves the lying body around.
+  for (const f of [p1, p2]) if (f.phys && f.phys.body) f.phys.body.collisionResponse = !DOWN_STATES.has(f.state);
+  if (!DOWN_STATES.has(p1.state) && !DOWN_STATES.has(p2.state)) separate(p1, p2);
   faceEachOther(p1, p2, dt);
-  if (isRagdoll(p1)) groundRagdoll(p1, dt);
-  if (isRagdoll(p2)) groundRagdoll(p2, dt);
   for (const f of [p1, p2]) {
-    if (isRagdoll(f)) continue;
     f.mixer.update(dt);
-    applyGetupBlend(f, dt);
     f.root.position.y = 0;
     poseAfterMixer(f, dt);
     applyMalfunctions(f, dt);
     groundFeet(f, dt);
+    if (window.__rfDiag && (f.state === 'idle' || f.state === 'block')) logFloat(f);
+    if (window.__rfDiag) logSlide(f, dt);
     stepFootSounds(f, dt);
   }
-  if (isRagdoll(p1)) applyMalfunctions(p1, dt);
-  if (isRagdoll(p2)) applyMalfunctions(p2, dt);
   updateContactShadows(p1);
   updateContactShadows(p2);
   stepDamage(scene, dt);
@@ -2432,6 +2976,7 @@ function getFightState() {
 function onLoad(gltf) {
   const built = buildArenaVisual(scene, { tiled, metalColor, metalRough, metalMetal });
   const lightRig = addArenaLights(scene, built.fixturePos);
+  syncEnvironment(); // the void wall exists now: hide it if the HDRI backdrop is on
   addFloorReflection(scene).then((m) => { floorMirror = m; m.visible = gfxKey !== 'low'; }).catch(() => {});
   if (lightRig) {
     trackLight(lightRig.hemi);
@@ -2452,11 +2997,13 @@ function onLoad(gltf) {
   attachFighter(p1);
   attachFighter(p2);
   onPhysicsBounce((kind, impact, rec) => {
-    const vol = Math.min(1, 0.25 + impact / 6.5);
-    const rate = 0.88 + Math.min(0.3, impact / 18);
+    const mass = rec && rec.mass != null ? rec.mass : 4;
+    // Heavier parts hit harder and lower: loudness grows with impact speed and mass.
+    const vol = Math.min(1, 0.22 + impact / 7 + Math.min(0.25, mass / 40));
+    const rate = 0.92 + Math.min(0.15, impact / 30);
     const id = rec && rec.body ? rec.body.id : undefined;
     if (kind === 'cage' || kind === 'post') playSfx('cage', { vol, rate, id });
-    else playSfx('bounce', { vol, rate, id });
+    else playSfx('bounce', { vol, rate, id, mass });
   });
   registerFightRuntime({
     startFight: startFightFromShell,
@@ -2559,9 +3106,13 @@ function onLoad(gltf) {
     cd: +f.cooldown.toFixed(2),
     brain: f.brain && f.brain.state ? f.brain.state.mode : null,
     dist: +p1.root.position.distanceTo(p2.root.position).toFixed(2),
-    rag: isRagdoll(f) ? +(f.phys.ragdoll.visualY || 0).toFixed(3) : null,
+    lying: !!f.downLying,
     low: (() => { const y = lowestBodyY(f); return y == null ? null : +y.toFixed(3); })(),
     feet: (() => { const y = lowestFootY(f); return y == null ? null : +y.toFixed(3); })(),
+    clip: f.current,
+    gy: +(f.groundY || 0).toFixed(3),
+    det: f.parts ? Object.values(f.parts).filter((p) => p.detached).map((p) => p.id).concat(f.subs ? Object.values(f.subs).filter((s) => s.detached).map((s) => s.id) : []) : [],
+    parts: f.parts ? Object.fromEntries(Object.values(f.parts).map((p) => [p.id, Math.round(p.hp)])) : null,
   }));
   window.__rfFocus = (id) => {
     const f = id === 'p1' ? p1 : p2;
@@ -2571,14 +3122,47 @@ function onLoad(gltf) {
     camera.lookAt(c.x, 0.5, c.z);
   };
   window.__rfBreak = (id, sub) => debugBreakSub(id === 'p1' ? p1 : p2, sub, scene);
+  window.__rfLegMesh = () => {
+    const out = []; const v = new THREE.Vector3();
+    p2.model.traverse((m) => {
+      if (!m.isSkinnedMesh) return;
+      const si = m.geometry.attributes.skinIndex; const sw = m.geometry.attributes.skinWeight;
+      let n = 0; const box = new THREE.Box3();
+      for (let i = 0; i < si.count; i++) {
+        let best = -1; let bw = 0;
+        for (let c = 0; c < 4; c++) { const w = sw.getComponent(i, c); if (w > bw) { bw = w; best = si.getComponent(i, c); } }
+        const bn = m.skeleton.bones[best];
+        if (!bn || !/LeftLeg|LeftFoot|LeftUpLeg/.test(bn.name)) continue;
+        m.getVertexPosition(i, v); v.applyMatrix4(m.matrixWorld); box.expandByPoint(v); n++;
+      }
+      if (n) out.push([m.name, n, m.visible, +box.min.y.toFixed(2), +box.max.y.toFixed(2), m.skeleton.bones.includes(p2.parts.legL.bones[1]), m.bindMode]);
+    });
+    return out;
+  };
+  window.__rfLegProbe = () => { const v = new THREE.Vector3(); return p2.parts.legL.bones.map((b) => [b.name.replace('mixamorig:', ''), +b.getWorldScale(v).x.toFixed(4), +b.scale.x.toFixed(4)]); };
   window.__rfDamageProbe = () => ({ oil: oilStats(), p1: Object.values(p1.subs || {}).filter((x) => x.detached).map((x) => x.id), p2: Object.values(p2.subs || {}).filter((x) => x.detached).map((x) => x.id), hud: document.getElementById('parts2').innerHTML.length });
+  window.__rfStrikeT = () => STRIKE_T;
+  window.__rfClipPose = (name, frac) => {
+    const f = p1; const act = f.actions[name]; if (!act) return null;
+    f.mixer.stopAllAction(); act.reset(); act.setEffectiveWeight(1); act.play();
+    const out = [];
+    for (const fr of frac) {
+      act.time = act.getClip().duration * fr; f.mixer.update(0); f.root.updateMatrixWorld(true);
+      const hq = f.hips.getWorldQuaternion(new THREE.Quaternion());
+      const rq = f.root.getWorldQuaternion(new THREE.Quaternion()).invert();
+      const up = new THREE.Vector3(0, 1, 0).applyQuaternion(hq).applyQuaternion(rq);
+      const fw = new THREE.Vector3(0, 0, 1).applyQuaternion(hq).applyQuaternion(rq);
+      const hp = f.root.worldToLocal(f.hips.getWorldPosition(new THREE.Vector3()));
+      out.push({ fr, up: up.toArray().map((v) => +v.toFixed(2)), chest: fw.toArray().map((v) => +v.toFixed(2)), hips: hp.toArray().map((v) => +v.toFixed(2)) });
+    }
+    return { dur: act.getClip().duration, out };
+  };
+  window.__rfGround = (id) => { const f = id === 'p1' ? p1 : p2; return { state: f.state, kind: f.groundKind, hit: f.groundHit, bow: f.groundBow, gN: f.gN }; };
+  window.__rfForceKO = (id) => { const f = id === 'p1' ? p1 : p2; ko(f, f === p1 ? p2 : p1); };
   window.__rfForceKnockdown = (id) => {
     const f = id === 'p1' ? p1 : p2;
     const o = f === p1 ? p2 : p1;
-    const dir = toward(o, f);
-    f.state = 'down';
-    f.stateT = 0;
-    enableRagdoll(f, { x: dir.x * 9, y: 3, z: dir.z * 9 }, { kind: 'down' });
+    knockDown(f, toward(o, f), 6, 'head');
   };
   window.__rfPrepFeetShot = () => {
     startFightFromShell({ skipIntro: true });

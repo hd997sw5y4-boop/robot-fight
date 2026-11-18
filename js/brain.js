@@ -5,17 +5,24 @@
  *   snapshot = {
  *     t, dt, dist,                       // seconds, frame dt, root-to-root distance (m)
  *     strikeRange: { punch, kick },      // distances where this robot's strikes connect
- *     self: { health, state, stateT, cooldown, canAct, canPunch, canKick, canBlock, blocking, parts },
- *     opp:  { health, state, stateT, attacking, blocking, down, parts },
+ *     self: { health, state, stateT, cooldown, canAct, canPunch, canKick, canBlock, blocking,
+ *             edge, parts },
+ *     opp:  { health, state, stateT, attacking, blocking, down, groundable, groundDist,
+ *             edge, parts },
  *   }
  *   parts = { head: 0..1 health or 0 if detached, torso, armL, armR, legL, legR }
+ *   edge  = 0 at the ring centre .. 1 against the cage
+ *   groundable = the opponent is down and a stomp / ground punch could land from here
  *
- *   intent = { move: -1..1 (toward/away), strafe: -1..1, attack: null | 'punch' | 'kick',
- *              block: bool, run: bool }
+ *   intent = { move: -1..1 (toward/away), strafe: -1..1,
+ *              attack: null | 'punch' | 'kick' | 'ground', block: bool, run: bool }
  *
  * The built-in paced brain below is every CPU's default. An outside brain (for example one
  * backed by an AI API) only has to implement think(snapshot) -> intent and be assigned to
  * fighter.brain; the game handles clip choice, physics and animation.
+ *
+ * Robots don't tire: nothing here rests or slows down over time. Pauses are short spacing
+ * resets between combos; the only slowdowns come from the game (damage, stun).
  */
 
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -23,18 +30,21 @@ const rand = (a, b) => a + Math.random() * (b - a);
 // profile: AI_PERSONALITIES entry ({ think, react, punch, kick, block, aggression }).
 export function createPacedBrain(getProfile) {
   const s = {
-    mode: 'approach', // approach | strike | backoff | circle | guard | feint | wait
+    mode: 'read',     // read | approach | strike | reset | circle | guard | feint | ground | wait
     modeT: 0,
-    modeLen: 1,
+    modeLen: 0.8,
+    plan: 'punch',    // strike the approach is aiming for (sets the range it walks to)
     combo: 0,
     circleDir: Math.random() < 0.5 ? -1 : 1,
     seenAttackT: -1,  // time we noticed the opponent's current attack (reaction delay)
     guardDecided: false,
     guardUntil: 0,
-    feintIn: true,
     lastSelfState: 'idle',
     upAt: -1,
-    hitsLanded: 0,
+    burst: false,
+    readNext: false,
+    downSeen: false,
+    groundGo: false,
     t: 0,
   };
 
@@ -42,6 +52,13 @@ export function createPacedBrain(getProfile) {
     s.mode = mode;
     s.modeT = 0;
     s.modeLen = len;
+  }
+
+  function planStrike(prof, self) {
+    const wP = (prof.punch || 0.5) * (self.canPunch ? 1 : 0);
+    const wK = (prof.kick || 0.25) * (self.canKick ? 1 : 0);
+    if (wP + wK <= 0) return null;
+    return Math.random() * (wP + wK) < wP ? 'punch' : 'kick';
   }
 
   function think(snap) {
@@ -60,20 +77,14 @@ export function createPacedBrain(getProfile) {
     s.modeT += snap.dt;
     const intent = { move: 0, strafe: 0, attack: null, block: false, run: false };
 
-    // Count an attack that just finished into the combo, and choose what comes after.
-    const wasAttacking = s.lastSelfState === 'punch' || s.lastSelfState === 'kick';
-    const nowAttacking = self.state === 'punch' || self.state === 'kick';
+    // An attack that just finished counts toward the combo; then a short spacing reset.
+    const atk = (st) => st === 'punch' || st === 'kick' || st === 'ground';
+    const wasAttacking = atk(s.lastSelfState);
+    const nowAttacking = atk(self.state);
     s.lastSelfState = self.state;
     if (wasAttacking && !nowAttacking && s.mode === 'strike') {
       s.combo -= 1;
-      if (s.combo <= 0 || self.state === 'hit') {
-        // Combo done: back off or circle, sometimes hold the guard. Calmer robots wait longer.
-        const r = Math.random();
-        if (r < (prof.block || 0.15) * 1.4) setMode('guard', rand(0.35, 0.7));
-        else if (r < 0.62) setMode('backoff', rand(0.45, 0.9) / Math.sqrt(aggr));
-        else setMode('circle', rand(0.6, 1.2) / Math.sqrt(aggr));
-        s.circleDir = Math.random() < 0.5 ? -1 : 1;
-      }
+      if (s.combo <= 0 || self.state === 'hit') endCombo(prof, aggr, self);
     }
 
     if (!self.canAct) return intent;
@@ -81,33 +92,44 @@ export function createPacedBrain(getProfile) {
     const punchR = snap.strikeRange.punch;
     const kickR = snap.strikeRange.kick;
 
-    // Opponent on the mat or getting up: no hitting a robot that is down. Step back and wait.
+    // Opponent on the mat: sometimes go in for a stomp / ground punch (decided once per
+    // knockdown), otherwise step off and wait for it to stand.
     if (opp.down) {
+      if (!s.downSeen) {
+        s.downSeen = true;
+        s.groundGo = opp.state === 'down' && Math.random() < Math.min(0.85, (prof.ground != null ? prof.ground : 0.5) * aggr);
+        setMode(s.groundGo ? 'ground' : 'wait', 0);
+      }
+      if (s.mode === 'ground' && opp.state === 'down') {
+        if (opp.groundable && self.cooldown <= 0) intent.attack = 'ground';
+        else if (opp.groundDist != null) intent.move = opp.groundDist > 0.62 ? 1 : 0;
+        if (s.modeT > 3) setMode('wait', 0);
+        return intent;
+      }
       if (s.mode !== 'wait') setMode('wait', 0);
       s.upAt = -1;
-      intent.move = dist < 2.3 ? -0.8 : (dist > 3.0 ? 0.35 : 0);
-      intent.strafe = 0.35 * s.circleDir;
+      intent.move = dist < 2.0 ? -0.8 : (dist > 2.9 ? 0.4 : 0);
       return intent;
     }
-    if (s.mode === 'wait') {
-      // Give a robot that just got up 0.4-0.6 s before pressing again.
+    s.downSeen = false;
+    if (s.mode === 'wait' || s.mode === 'ground') {
+      // Give a robot that just got up 0.4-0.6 s before pressing again (fair play).
       if (s.upAt < 0) s.upAt = s.t + rand(0.4, 0.6);
-      if (s.t < s.upAt) { intent.strafe = 0.35 * s.circleDir; return intent; }
-      setMode('circle', rand(0.4, 0.8));
+      if (s.t < s.upAt) return intent; // stand and watch it get up
+      startRead(aggr);
     }
 
     // Defence: notice the attack after the reaction delay, then decide once per attack.
-    if (opp.attacking && dist < kickR + 0.7) {
+    if (opp.attacking && dist < kickR + 0.6) {
       if (s.seenAttackT < 0) { s.seenAttackT = s.t; s.guardDecided = false; }
       if (!s.guardDecided && s.t - s.seenAttackT >= reactDelay + reactLag) {
         s.guardDecided = true;
         const r = Math.random();
-        if (r < react && self.canBlock) s.guardUntil = s.t + 0.6;
-        else if (r < react + (1 - react) * 0.35) { setMode('backoff', 0.45); }
+        if (r < react && self.canBlock) s.guardUntil = s.t + 0.45;
+        else if (r < react + (1 - react) * 0.3) setMode('reset', 0.35);
       }
       if (s.t < s.guardUntil) {
         intent.block = true;
-        intent.move = dist < punchR ? -0.25 : 0;
         return intent;
       }
     } else {
@@ -115,73 +137,113 @@ export function createPacedBrain(getProfile) {
       if (s.t >= s.guardUntil) s.guardUntil = 0;
     }
 
+    // Pinned against the cage: slide out along it rather than backing further in.
+    const cornered = self.edge > 0.8;
+
     switch (s.mode) {
+      case 'read': {
+        // Tactical pause: planted in the fighting stance, guard up, watching just outside
+        // range. Then a sudden burst in (run) with a fast combo.
+        if (dist < punchR + 0.05) intent.move = -0.7; // too close to just stand there
+        else if (dist > kickR + 1.0) intent.move = 0.6;
+        if (s.modeT > s.modeLen) { startApproach(prof, self); s.burst = true; }
+        break;
+      }
       case 'approach': {
-        const want = punchR; // close to punch range; kicks are chosen at strike time
-        intent.move = dist > want + 0.05 ? 1 : (dist < want - 0.25 ? -0.6 : 0);
-        intent.strafe = 0.18 * s.circleDir * Math.sin(s.t * 1.7);
-        intent.run = dist > 3.8 && aggr >= 1;
-        if (dist <= kickR + 0.02 && self.cooldown <= 0) {
-          if (Math.random() < 0.15) { // feint 10-20% of entries
-            setMode('feint', rand(0.35, 0.5));
-            s.feintIn = true;
+        const want = s.plan === 'kick' ? kickR - 0.05 : punchR - 0.05;
+        intent.move = dist > want + 0.04 ? 1 : (dist < want - 0.3 ? -0.5 : 0);
+        intent.run = dist > 2.6 || (s.burst && dist > want + 0.2);
+        // Cut the angle a little while closing, unless the target is on the ropes: then
+        // walk straight in and keep it there.
+        intent.strafe = opp.edge > 0.7 || s.burst ? 0 : 0.25 * s.circleDir * Math.sin(s.t * 1.9);
+        if (dist <= want + 0.06 && self.cooldown <= 0) {
+          if (Math.random() < 0.12) { // feint on ~12% of entries
+            setMode('feint', rand(0.3, 0.42));
           } else {
-            // 1-3 hit combo; aggressive profiles chain more.
             const r = Math.random();
-            s.combo = r < 0.45 / aggr ? 1 : (r < 0.85 ? 2 : 3);
-            setMode('strike', 3);
+            s.combo = r < 0.3 / aggr ? 1 : (r < 0.75 ? 2 : 3);
+            setMode('strike', 2.5);
+            s.burst = false;
           }
         }
+        if (s.modeT > 4) startApproach(prof, self); // re-plan if it can't get there
         break;
       }
       case 'strike': {
         if (self.cooldown <= 0 && !nowAttacking) {
-          const wP = (prof.punch || 0.5) * (self.canPunch ? 1 : 0);
-          const wK = (prof.kick || 0.25) * (self.canKick ? 1 : 0);
-          if (wP + wK <= 0) { setMode('backoff', 0.6); break; }
-          const kickOk = self.canKick && dist <= kickR + 0.05;
-          const punchOk = self.canPunch && dist <= punchR + 0.1;
+          const kickOk = self.canKick && dist <= kickR + 0.05 && dist > punchR - 0.15;
+          const punchOk = self.canPunch && dist <= punchR + 0.08;
           let kind = null;
-          if (punchOk && kickOk) kind = Math.random() * (wP + wK) < wP ? 'punch' : 'kick';
-          else if (kickOk) kind = 'kick';
+          if (s.plan === 'kick' && kickOk) kind = 'kick';
           else if (punchOk) kind = 'punch';
-          if (kind) intent.attack = kind;
-          else intent.move = 1; // drifted out of range mid-combo: close in
+          else if (kickOk) kind = 'kick';
+          if (kind) {
+            intent.attack = kind;
+            s.plan = planStrike(prof, self) || 'punch'; // next one in the chain
+          } else intent.move = dist > punchR ? 1 : -0.6;
         }
-        if (s.modeT > s.modeLen) setMode('backoff', 0.5);
+        if (s.modeT > s.modeLen) endCombo(prof, aggr, self);
         break;
       }
-      case 'backoff': {
-        intent.move = dist < 2.1 ? -1 : 0;
-        intent.strafe = 0.45 * s.circleDir;
-        if (s.modeT > s.modeLen) setMode(Math.random() < 0.5 ? 'circle' : 'approach', rand(0.5, 1.1));
+      case 'reset': {
+        // Short step out of range after a combo (spacing, not resting).
+        intent.move = dist < 1.9 && !cornered ? -1 : 0;
+        intent.strafe = cornered ? 0.9 * s.circleDir : 0;
+        if (s.modeT > s.modeLen) {
+          if (s.readNext) startRead(aggr);
+          else startApproach(prof, self);
+        }
         break;
       }
       case 'circle': {
-        const ring = 2.4; // circle at 2.0-2.8 m
-        intent.move = dist > ring + 0.3 ? 0.5 : (dist < ring - 0.3 ? -0.5 : 0);
-        intent.strafe = 0.75 * s.circleDir;
-        if (s.modeT > s.modeLen) setMode('approach', 0);
+        const ring = 2.0;
+        intent.move = dist > ring + 0.3 ? 0.6 : (dist < ring - 0.3 ? -0.6 : 0);
+        intent.strafe = 0.85 * s.circleDir;
+        if (s.modeT > s.modeLen) {
+          if (s.readNext) startRead(aggr);
+          else startApproach(prof, self);
+        }
         break;
       }
       case 'guard': {
         intent.block = true;
-        if (s.modeT > s.modeLen) setMode('circle', rand(0.4, 0.8));
+        if (s.modeT > s.modeLen) startApproach(prof, self);
         break;
       }
       case 'feint': {
         // Quick step in, then out, with no strike: baits a block.
         intent.move = s.modeT < s.modeLen * 0.5 ? 1 : -1;
-        intent.run = s.modeT < s.modeLen * 0.5;
-        if (s.modeT > s.modeLen) setMode('circle', rand(0.4, 0.8));
+        if (s.modeT > s.modeLen) startRead(aggr);
         break;
       }
       default:
-        setMode('approach', 0);
+        startApproach(prof, self);
     }
     // Never walk into the other robot.
     if (dist < punchR - 0.3 && intent.move > 0) intent.move = 0;
     return intent;
+  }
+
+  function startApproach(prof, self) {
+    s.plan = planStrike(prof, self) || 'punch';
+    setMode('approach', 0);
+  }
+
+  // After an exchange: step out, then mostly a planted read; sometimes circle or go straight
+  // back in. Stillness between exchanges, bursts of strikes (robots don't tire: these are
+  // tactical pauses, never rests).
+  function endCombo(prof, aggr, self) {
+    const r = Math.random();
+    s.circleDir = Math.random() < 0.5 ? -1 : 1;
+    if (r < (prof.block || 0.15)) setMode('guard', rand(0.3, 0.55));
+    else if (r < 0.7) setMode('reset', rand(0.2, 0.4));
+    else if (r < 0.85) setMode('circle', rand(0.35, 0.7) / Math.sqrt(aggr));
+    else startApproach(prof, self); // straight back in
+    s.readNext = r >= (prof.block || 0.15) && r < 0.85;
+  }
+
+  function startRead(aggr) {
+    setMode('read', rand(0.7, 1.6) / Math.sqrt(aggr));
   }
 
   return { kind: 'paced', think, state: s };

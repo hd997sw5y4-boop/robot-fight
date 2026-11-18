@@ -71,6 +71,12 @@ function ensureDeformable(mesh) {
     m.needsUpdate = true;
   }
   mesh.userData.restPos = new Float32Array(pos.array);
+  const si = mesh.geometry.attributes.skinIndex;
+  const sw = mesh.geometry.attributes.skinWeight;
+  if (si && sw) {
+    mesh.userData.restSkinIndex = si.array.slice();
+    mesh.userData.restSkinWeight = sw.array.slice();
+  }
   mesh.userData.restColor = new Float32Array(mesh.geometry.attributes.color.array);
   mesh.userData.home = {
     parent: mesh.parent,
@@ -163,13 +169,15 @@ export function prepareFighterDamage(f) {
     if (!o.isSkinnedMesh) return;
     tagSkinnedVertices(o, boneToPart);
     const used = o.userData.vertPartsUsed;
-    if (!used || used.size <= 1) return;
+    if (!used || !used.size) return;
     for (const id of used) {
       if (parts[id] && !parts[id].skinned.includes(o)) parts[id].skinned.push(o);
     }
   });
 
   f.parts = parts;
+  f.skinMeshes = [];
+  model.traverse((o) => { if (o.isSkinnedMesh) f.skinMeshes.push(o); });
   f.limpT = 0;
   f.headFlick = 0;
   prepareSubParts(f);
@@ -201,7 +209,7 @@ function prepareSubParts(f) {
       if ((o.isBone || o.type === 'Bone') && spec.root.includes(normName(o.name))) sub.rootBones.push(o);
     });
     // Parents come first in subOrder, so deeper sub-parts overwrite their bones.
-    for (const rb of sub.rootBones) rb.traverse((o) => { if (o.isBone || o.type === 'Bone') boneSub.set(o, id); });
+    for (const rb of sub.rootBones) rb.traverse((o) => { if (o.isBone || o.type === 'Bone') boneSub.set(normName(o.name), id); });
     subs[id] = sub;
   }
   f.subs = subs;
@@ -211,7 +219,8 @@ function prepareSubParts(f) {
     const si = m.geometry.attributes.skinIndex;
     const sw = m.geometry.attributes.skinWeight;
     if (!si || !sw) return;
-    const codeOf = m.skeleton.bones.map((b) => { const id = boneSub.get(b); return id ? DAMAGE.subOrder.indexOf(id) + 1 : 0; });
+    // By bone name, so a mesh bound to a duplicate of the bone is tagged too.
+    const codeOf = m.skeleton.bones.map((b) => { const id = boneSub.get(normName(b.name)); return id ? DAMAGE.subOrder.indexOf(id) + 1 : 0; });
     if (!codeOf.some(Boolean)) return;
     const arr = new Uint8Array(si.count);
     for (let i = 0; i < si.count; i++) arr[i] = codeOf[dominantBoneIndex(si, sw, i)] || 0;
@@ -237,25 +246,21 @@ function detachSub(f, sub, dir, scene) {
   if (!limb || limb.detached) return;
   f.model.updateWorldMatrix(true, true);
   const pieces = [];
-  for (const mesh of limb.skinned) {
+  const codes = new Set();
+  for (const id of DAMAGE.subOrder) if (subIsWithin(id, sub.id)) codes.add(DAMAGE.subOrder.indexOf(id) + 1);
+  for (const mesh of f.skinMeshes || limb.skinned) {
     const vs = mesh.userData.vertSub;
     if (!vs || mesh.userData.hiddenPart) continue;
-    const doneBefore = mesh.userData.subGone || (mesh.userData.subGone = new Set());
-    const keep = (i) => {
-      const c = vs[i];
-      if (!c) return false;
-      const id = DAMAGE.subOrder[c - 1];
-      return subIsWithin(id, sub.id) && !doneBefore.has(c);
-    };
-    let any = false; let all = true;
-    for (let i = 0; i < vs.length; i++) { if (keep(i)) any = true; else all = false; }
+    const hidden = mesh.userData.hiddenVerts;
+    const lost = (i) => codes.has(vs[i]) && !(hidden && hidden[i]);
+    let any = false;
+    for (let i = 0; i < vs.length && !any; i++) if (lost(i)) any = true;
     if (!any) continue;
-    const baked = bakeSkinnedWorld(mesh, keep);
+    const baked = bakeSkinnedWorld(mesh, lost);
     if (baked) pieces.push(baked);
-    if (all) { mesh.visible = false; mesh.userData.hiddenPart = true; }
-    for (const id of DAMAGE.subOrder) if (subIsWithin(id, sub.id)) doneBefore.add(DAMAGE.subOrder.indexOf(id) + 1);
+    hideVertices(mesh, lost);
   }
-  // Collapse what's left on the robot by shrinking the sub-part's root bones (like limb tears).
+  // Fold the sub-part's bones away too (the welded vertices no longer follow them anyway).
   for (const b of sub.rootBones) b.scale.set(0.001, 0.001, 0.001);
   sub.stump = sub.rootBones[0] || null;
   const at = subWorldPos(sub, new THREE.Vector3());
@@ -278,7 +283,9 @@ function detachSub(f, sub, dir, scene) {
 
 // Dev/test hook: break a sub-part off directly.
 export function debugBreakSub(f, id, scene) {
-  if (f.subs && f.subs[id]) detachSub(f, f.subs[id], new THREE.Vector3(0.3, 0, 1), scene);
+  const dir = new THREE.Vector3(0.3, 0, 1);
+  if (f.subs && f.subs[id]) detachSub(f, f.subs[id], dir, scene);
+  else if (f.parts && f.parts[id]) detachPart(f, Object.assign(f.parts[id], { hp: 0 }), dir, scene);
 }
 
 export function oilStats() {
@@ -286,16 +293,20 @@ export function oilStats() {
 }
 
 // Damage a hand/foot; part of it carries into one of its finger groups / toes.
+// Hands and fingers break off when emptied. Feet and toes never break off from damage: they
+// only dent and bend (a worn foot slows the robot, see footMul); a foot is torn off only by
+// the final leg hit (applyPartHit, opts.final).
 function damageSub(f, sub, dmg, dir, scene) {
   if (!sub || sub.detached || dmg <= 0) return;
+  const breaks = sub.limb && sub.limb.startsWith('arm');
   sub.hp = Math.max(0, sub.hp - dmg);
   const kids = DAMAGE.subOrder.filter((id) => DAMAGE.sub[id].parent === sub.id && !f.subs[id].detached);
   if (kids.length) {
     const kid = f.subs[kids[Math.floor(Math.random() * kids.length)]];
     kid.hp = Math.max(0, kid.hp - dmg * 0.9);
-    if (kid.hp <= 0) detachSub(f, kid, dir, scene);
+    if (breaks && kid.hp <= 0) detachSub(f, kid, dir, scene);
   }
-  if (sub.hp <= 0) detachSub(f, sub, dir, scene);
+  if (breaks && sub.hp <= 0) detachSub(f, sub, dir, scene);
 }
 
 function sideOfBone(name) {
@@ -397,8 +408,10 @@ export function moveSpeedMul(f) {
 function footMul(f, side) {
   const foot = f.subs && f.subs['foot' + side];
   if (!foot) return 1;
-  if (foot.detached) return 0.72; // stumping along on the ankle
-  return f.subs['toes' + side].detached ? 0.92 : 1;
+  if (foot.detached) return 0.45; // hobbling on the ankle stump
+  // A crushed foot/toes (they bend, they don't come off) drags the step.
+  const toes = f.subs['toes' + side];
+  return (0.8 + 0.2 * foot.hp / foot.max) * (toes ? 0.9 + 0.1 * toes.hp / toes.max : 1);
 }
 
 export function blockReductionMul(f) {
@@ -496,7 +509,9 @@ function dentMesh(mesh, worldPoint, worldDir, amount, partCode) {
   const radius = DAMAGE.dent.radius / scale;
   const depth = (DAMAGE.dent.depth * amount) / scale;
   const maxDepth = DAMAGE.dent.maxDepth / scale;
+  const hidden = mesh.userData.hiddenVerts;
   for (let i = 0; i < pos.count; i++) {
+    if (hidden && hidden[i]) continue;
     if (vertPart && partCode && vertPart[i] && vertPart[i] !== partCode) continue;
     const vx = pos.getX(i);
     const vy = pos.getY(i);
@@ -593,24 +608,43 @@ function bakeSkinnedWorld(mesh, keepVertex) {
   return bakedMesh;
 }
 
-function collapseSkinnedVertices(mesh, keepVertex) {
+// Remove torn-off vertices from the robot for good: each one is welded onto a kept vertex of
+// the same mesh, position AND skin weights, so the leftover triangles are degenerate at a
+// point that is still on the robot. Nothing of the lost piece can be posed by any bone any
+// more (the old "squash toward the mesh axis" left a thin copy that kept walking with the
+// skeleton). A mesh with nothing left is hidden.
+function hideVertices(mesh, removeVertex) {
   const pos = mesh.geometry.attributes.position;
-  const rest = mesh.userData.restPos;
   if (!pos) return;
+  const si = mesh.geometry.attributes.skinIndex;
+  const sw = mesh.geometry.attributes.skinWeight;
+  const hidden = mesh.userData.hiddenVerts || (mesh.userData.hiddenVerts = new Uint8Array(pos.count));
+  let anchor = -1;
   for (let i = 0; i < pos.count; i++) {
-    if (keepVertex && !keepVertex(i)) continue;
-    const i3 = i * 3;
-    // Collapse toward the vertex's original neighbor average is hard; pinch to origin of the part in bind space.
-    // Using the rest-position centroid of collapsed verts would be nicer; pinch toward (0, restY, 0) is unstable.
-    // Leave a crushed stub by lerping strongly toward rest-space hit? Just shrink to the average of remaining verts later.
-    // For now, copy a nearby kept vertex if possible — actually set to rest and scale toward mesh local 0.
-    const rx = rest ? rest[i3] : pos.getX(i);
-    const ry = rest ? rest[i3 + 1] : pos.getY(i);
-    const rz = rest ? rest[i3 + 2] : pos.getZ(i);
-    pos.setXYZ(i, rx * 0.05, ry, rz * 0.05);
+    if (!hidden[i] && !removeVertex(i)) { anchor = i; break; }
+  }
+  if (anchor < 0) {
+    mesh.visible = false;
+    mesh.userData.hiddenPart = true;
+    return;
+  }
+  const ax = pos.getX(anchor);
+  const ay = pos.getY(anchor);
+  const az = pos.getZ(anchor);
+  for (let i = 0; i < pos.count; i++) {
+    if (hidden[i] || !removeVertex(i)) continue;
+    hidden[i] = 1;
+    pos.setXYZ(i, ax, ay, az);
+    if (si && sw) {
+      for (let k = 0; k < 4; k++) {
+        si.setComponent(i, k, si.getComponent(anchor, k));
+        sw.setComponent(i, k, sw.getComponent(anchor, k));
+      }
+    }
   }
   pos.needsUpdate = true;
-  mesh.geometry.computeVertexNormals();
+  if (si) si.needsUpdate = true;
+  if (sw) sw.needsUpdate = true;
 }
 
 function attachPivot(pieces, scene) {
@@ -641,27 +675,22 @@ function detachPart(f, part, dir, scene) {
     pieces.push(mesh);
   }
 
-  const shared = new Set();
-  for (const mesh of part.skinned) {
-    const used = mesh.userData.vertPartsUsed;
-    const exclusive = !used || used.size <= 1;
-    if (exclusive) {
-      const baked = bakeSkinnedWorld(mesh, null);
-      if (baked) pieces.push(baked);
-      mesh.visible = false;
-      mesh.userData.hiddenPart = true;
-    } else {
-      shared.add(mesh);
-    }
-  }
-  for (const mesh of shared) {
-    const keep = (i) => mesh.userData.vertPart && mesh.userData.vertPart[i] === code;
-    const baked = bakeSkinnedWorld(mesh, keep);
+  // Every skinned mesh of the robot, tagged per vertex by bone name: bake the lost piece into
+  // a static debris copy, then weld those vertices away on the robot.
+  for (const mesh of f.skinMeshes || part.skinned) {
+    const vp = mesh.userData.vertPart;
+    if (!vp || mesh.userData.hiddenPart) continue;
+    const hidden = mesh.userData.hiddenVerts;
+    const lost = (i) => vp[i] === code && !(hidden && hidden[i]);
+    let any = false;
+    for (let i = 0; i < vp.length && !any; i++) if (lost(i)) any = true;
+    if (!any) continue;
+    const baked = bakeSkinnedWorld(mesh, lost);
     if (baked) pieces.push(baked);
-    collapseSkinnedVertices(mesh, keep);
+    hideVertices(mesh, lost);
   }
 
-  // Hide leftover exclusive skinned already handled; zero the limb bones as a Mixamo fallback.
+  // Also fold the limb bones away (stops the stump end from swinging a stray joint).
   for (const b of part.bones) {
     const n = normName(b.name);
     if (n.includes('spine') || n.includes('hips') || n.includes('body') || n === 'torso' || n === 'abdomen') continue;
@@ -910,10 +939,20 @@ export function applyPartHit(f, partId, damage, point, dir, scene, opts = {}) {
   emitSparks(point, dir, opts.blocked ? 8 : 18 + Math.min(16, Math.round(force * 3)));
   addSparkScene(scene);
   let wrecked = false;
-  if (part.hp <= 0 && part.canDetach && !part.detached) {
+  const isLeg = partId.startsWith('leg');
+  // Legs bend instead of breaking: a leg (or its foot) is torn off only by the final leg hit,
+  // the one that empties that leg's health or KOs the robot (opts.final). A final hit near
+  // the foot takes the foot; otherwise the whole leg goes.
+  const legFinal = isLeg && !opts.blocked && (part.hp <= 0 || opts.final);
+  if (legFinal && part.canDetach && !part.detached) {
+    const foot = f.subs && f.subs['foot' + partId.slice(-1)];
+    if (part.hp > 0 && foot && !foot.detached && point && subWorldPos(foot, _v2).distanceTo(point) < 0.38) detachSub(f, foot, dir, scene);
+    else detachPart(f, part, dir, scene);
+    wrecked = true;
+  } else if (!isLeg && part.hp <= 0 && part.canDetach && !part.detached) {
     detachPart(f, part, dir, scene);
     wrecked = true;
-  } else if (f.subs && (partId.startsWith('arm') || partId.startsWith('leg'))) {
+  } else if (f.subs && (partId.startsWith('arm') || isLeg)) {
     // Blows that land on (or are blocked with) the hand/foot damage it and its fingers/toes.
     const id = (partId.startsWith('arm') ? 'hand' : 'foot') + partId.slice(-1);
     const sub = f.subs[id];
@@ -985,7 +1024,7 @@ function clampXZ(x, z, pad) {
 
 export function applyMalfunctions(f, dt) {
   if (!f.parts) return;
-  const ragdolled = !!(f.phys && f.phys.ragdoll && f.phys.ragdoll.active) || f.state === 'ko' || f.state === 'down';
+  const lying = f.state === 'ko' || f.state === 'down' || f.state === 'getup';
   f.limpT = (f.limpT || 0) + dt;
   const l = f.parts.legL;
   const r = f.parts.legR;
@@ -993,11 +1032,22 @@ export function applyMalfunctions(f, dt) {
     l.detached ? 1 : 1 - l.hp / l.max,
     r.detached ? 1 : 1 - r.hp / r.max,
   );
-  if (!ragdolled) {
+  if (!lying) {
     // Vertical bounce is handled by per-frame foot grounding so soles stay on the mat.
-    const oneLeg = (l.detached && !r.detached) || (r.detached && !l.detached);
-    const sway = Math.sin(f.limpT * (oneLeg ? 5.2 : 7)) * (oneLeg ? 0.16 : 0.09) * limp;
-    f.model.rotation.z = sway;
+    // A lost foot: the robot leans onto that side (it's standing on the ankle stump) and
+    // rocks hard over it with every step. Leg damage rocks while walking, not while idle.
+    const footL = f.subs && f.subs.footL && f.subs.footL.detached && !l.detached;
+    const footR = f.subs && f.subs.footR && f.subs.footR.detached && !r.detached;
+    const lean = (footL ? -0.075 : 0) + (footR ? 0.075 : 0); // +z tips toward the robot's right
+    const moving = f.state === 'walk';
+    const amp = (footL || footR) ? 0.13 : 0.14 * limp * limp + 0.03 * limp; // worsens with leg damage
+    const worse = footL ? -1 : (footR ? 1 : ((1 - l.hp / l.max) >= (1 - r.hp / r.max) ? -1 : 1));
+    const sway = moving ? Math.abs(Math.sin(f.limpT * 5.2)) * amp * worse : 0;
+    const want = lean + sway;
+    f.model.rotation.z += (want - f.model.rotation.z) * Math.min(1, dt * 12);
+  } else {
+    // Falls are whole clips: no stance lean carried into them.
+    f.model.rotation.z += (0 - f.model.rotation.z) * Math.min(1, dt * 12);
   }
 
   const head = f.parts.head;
@@ -1029,7 +1079,7 @@ export function applyMalfunctions(f, dt) {
   }
 
   // Damaged arms twitch: a constant servo jitter plus random jerks, growing with damage.
-  if (!ragdolled) {
+  if (!lying) {
     for (const side of ['L', 'R']) {
       const arm = f.parts['arm' + side];
       if (arm.detached) continue;
@@ -1138,6 +1188,11 @@ function restoreMesh(mesh) {
     col.array.set(mesh.userData.restColor);
     col.needsUpdate = true;
   }
+  const si = mesh.geometry.attributes.skinIndex;
+  const sw = mesh.geometry.attributes.skinWeight;
+  if (si && mesh.userData.restSkinIndex) { si.array.set(mesh.userData.restSkinIndex); si.needsUpdate = true; }
+  if (sw && mesh.userData.restSkinWeight) { sw.array.set(mesh.userData.restSkinWeight); sw.needsUpdate = true; }
+  if (mesh.userData.hiddenVerts) mesh.userData.hiddenVerts.fill(0);
   if (pos) mesh.geometry.computeVertexNormals();
   for (const m of [].concat(mesh.material)) {
     if (!m || !m.emissive) continue;
@@ -1176,7 +1231,7 @@ export function resetFighterDamage(f, scene) {
     part.smokeAcc = 0;
     part.wear = 0;
     part.stump = null;
-    for (const mesh of part.meshes.concat(part.skinned)) restoreMesh(mesh);
+    for (const mesh of part.meshes) restoreMesh(mesh);
     for (const b of part.bones) {
       if (b.userData.homeScale) b.scale.copy(b.userData.homeScale);
       else b.scale.set(1, 1, 1);
@@ -1202,7 +1257,7 @@ export function resetFighterDamage(f, scene) {
     part.sparkAcc = 0;
     part.lostT = 0;
   }
-  f.model.traverse((m) => { if (m.userData && m.userData.subGone) m.userData.subGone.clear(); });
+  for (const mesh of f.skinMeshes || []) restoreMesh(mesh);
   f.model.rotation.z = 0;
   f.model.position.y = f.baseY;
 }

@@ -139,6 +139,7 @@
     if (training) { S.paintTraining(); return; }
     const last = M.wins[0] === WINS_NEEDED - 1 && M.wins[1] === WINS_NEEDED - 1;
     S.call(last ? 'Final Round' : 'Round ' + n, M.cfg.p1.name + '  vs  ' + M.cfg.p2.name, 'round');
+    if (window.RFAnnounce) window.RFAnnounce('round', { n, final: last, delay: 0.25 });
     S.sfx('confirm');
   }
 
@@ -160,6 +161,7 @@
     const big = { KO: 'K.O.', TKO: 'T.K.O.', Decision: 'Decision', Draw: 'Draw' }[method];
     const ko = method === 'KO' || method === 'TKO';
     S.call(big, who, 'end ' + (ko ? 'ko' : ''));
+    if (window.RFAnnounce) window.RFAnnounce(ko ? 'ko' : 'roundEnd', { delay: ko ? 0.5 : 0.3 });
     const done = M.wins[0] >= WINS_NEEDED || M.wins[1] >= WINS_NEEDED || M.round >= MAX_ROUNDS;
     S.after(ko ? 3 : 2.5, () => {
       if (M.phase !== 'round-end') return;

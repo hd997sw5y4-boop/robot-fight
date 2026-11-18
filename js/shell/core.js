@@ -112,6 +112,7 @@
     if (b(13)) inp.inout -= 1;
     inp.punch = b(0);
     inp.kick = b(1);
+    inp.ground = b(3);
     inp.block = b(2) || b(4) || b(5) || b(7);
     inp.run = b(10) || b(6);
     return inp;

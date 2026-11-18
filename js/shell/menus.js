@@ -31,12 +31,14 @@
   const KEYS_SOLO = `
     <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows <span>move</span></li>
     <li><kbd>J</kbd> <span>punch</span> <kbd>K</kbd> <span>kick</span> <kbd>L</kbd> <span>block</span></li>
+    <li><kbd>I</kbd> <span>stomp / ground punch a downed robot</span></li>
     <li>Hold <kbd>Shift</kbd> <span>run forward / back</span></li>
+    <li><kbd>V</kbd> <span>camera view: arena, 3rd person, 1st person</span></li>
     <li><kbd>Esc</kbd> / <kbd>P</kbd> <span>pause</span></li>
     <li>Mouse drag <span>spin camera</span> · wheel <span>zoom</span> · double-click <span>reset view</span></li>`;
-  const KEYS_P1 = '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>F</kbd> punch · <kbd>G</kbd> kick · <kbd>H</kbd> block · hold <kbd>Left Shift</kbd> run';
-  const KEYS_P2 = '<kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> move · <kbd>.</kbd> punch · <kbd>/</kbd> kick · <kbd>Right Shift</kbd> block · hold <kbd>Right Ctrl</kbd> run';
-  const PAD = '<li><span>Stick / D-pad</span> move · <kbd>A</kbd> punch · <kbd>B</kbd> kick · <kbd>X</kbd>/shoulder block · hold <kbd>LT</kbd>/<kbd>L3</kbd> run · <kbd>Start</kbd> pause</li>';
+  const KEYS_P1 = '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>F</kbd> punch · <kbd>G</kbd> kick · <kbd>H</kbd> block · <kbd>T</kbd> ground attack · hold <kbd>Left Shift</kbd> run';
+  const KEYS_P2 = '<kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> move · <kbd>.</kbd> punch · <kbd>/</kbd> kick · <kbd>Right Shift</kbd> block · <kbd>,</kbd> ground attack · hold <kbd>Right Ctrl</kbd> run';
+  const PAD = '<li><span>Stick / D-pad</span> move · <kbd>A</kbd> punch · <kbd>B</kbd> kick · <kbd>X</kbd>/shoulder block · <kbd>Y</kbd> ground attack · hold <kbd>LT</kbd>/<kbd>L3</kbd> run · <kbd>Start</kbd> pause</li>';
 
   function screen(name, html, cls) {
     const el = document.createElement('section');
@@ -74,7 +76,7 @@
       <aside class="rfs-card rfs-controls" aria-label="Controls">
         <h3>Controls</h3>
         <h4>Solo</h4><ul>${KEYS_SOLO}</ul>
-        <h4>Versus</h4><ul><li><em>P1</em> ${KEYS_P1}</li><li><em>P2</em> ${KEYS_P2}</li><li>Gamepad 1 → P1, gamepad 2 → P2</li></ul>
+        <h4>Versus</h4><ul><li><em>P1</em> ${KEYS_P1}</li><li><em>P2</em> ${KEYS_P2}</li><li><kbd>V</kbd> camera view (arena, 3rd person, 1st person)</li><li>Gamepad 1 → P1, gamepad 2 → P2</li></ul>
         <h4>Gamepad</h4><ul>${PAD}</ul>
         <h4>Menus</h4><ul><li>Arrows / WASD / D-pad · <kbd>Enter</kbd> or <kbd>A</kbd> select · <kbd>Esc</kbd> or <kbd>B</kbd> back</li></ul>
       </aside>
@@ -96,7 +98,7 @@
         <li><b>HDRI environment:</b> Industrial Pipe and Valve 01 2K from Poly Haven, CC0 1.0.</li>
         <li><b>3D engine:</b> three.js r187, MIT license.</li>
         <li><b>Physics:</b> cannon-es, MIT license.</li>
-        <li><b>Sound effects:</b> CC0 and royalty-free recordings (no credit required). Metal impacts, tools, slams, and machine/spring hydraulics from rubberduck and Ogrebane on OpenGameArt; metal interactions from Iwan “qubodup” Gabovitch; metal footsteps on concrete from Thimras; mech stomp from hc / qubodup; additional metal hits from Brian MacIntosh; electrical sparks and buzz from Brian MacIntosh / BMacZero; fight bells and UI from Kenney; crowd ambience and reactions from Mixkit; arena hum looped from yd’s Factory ambiance (OpenGameArt, CC0). Light arena reverb uses an original generated impulse. Full sources are in CREDITS/LICENSES.md.</li>
+        <li><b>Sound effects:</b> CC0 and royalty-free recordings (no credit required). Metal impacts, tools, slams, and machine/spring hydraulics from rubberduck and Ogrebane on OpenGameArt; metal interactions from Iwan “qubodup” Gabovitch; metal footsteps on concrete from Thimras; mech stomp from hc / qubodup; additional metal hits from Brian MacIntosh; electrical sparks and buzz from Brian MacIntosh / BMacZero; fight bells, UI and heavy impact layers (pitched down) from Kenney; crowd ambience and reactions from Mixkit; announcer lines are original, voiced with Kokoro TTS (Apache-2.0); arena hum looped from yd’s Factory ambiance (OpenGameArt, CC0). Arena reverb and the sub-thump layer are synthesized in the game. Full sources are in CREDITS/LICENSES.md.</li>
         <li><b>Settings panel look and volume taper:</b> adapted from Window Workshop Games UI.</li>
       </ul>
       <p class="rfs-note">CPU fighters, names, and paint schemes are original to this game. Full license notes are in README.md, models/CREDITS.md, and CREDITS/LICENSES.md.</p>
