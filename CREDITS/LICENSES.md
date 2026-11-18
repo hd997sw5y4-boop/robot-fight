@@ -8,23 +8,23 @@ No attribution required. Optional credit is appreciated.
 
 - **100 CC0 metal and wood SFX** — rubberduck, https://opengameart.org/content/100-cc0-metal-and-wood-sfx  
   Hammer and metal hits, sheet metal, slams, falling scrap, springs, and tools.  
-  Game files: `metal_l_3`, `metal_m_0`–`metal_m_2`, `metal_h_2`, `bounce_*` (sheets), `tear_*`, `cage_0`, `hydro_3`.
+  Game files: `metal_m_0`–`metal_m_2`, `metal_h_2`, `tear_*`, `cage_0`, `hydro_3`.
 
 - **100 CC0 SFX** — rubberduck, https://opengameart.org/content/100-cc0-sfx  
   Additional metal hits and slams, recorded machine/spring bursts used as servo and hydraulic layers, noise crackles, and a crash/explosion.  
-  Game files: `metal_l_4`, `metal_l_5`, `metal_m_5`, `metal_h_3`, `metal_h_4`, `metal_h_6`, `punch_*`, `servo_0`–`servo_2`, `servo_4`, `hydro_0`–`hydro_2`, `spark_1`, `spark_2`, `crash_1`, `crash_3`, `crash_4`, `tear_3`, `cage_1`.
+  Game files: `metal_m_5`, `metal_h_3`, `metal_h_4`, `metal_h_6`, `punch_*`, `servo_0`–`servo_2`, `servo_4`, `hydro_0`–`hydro_2`, `spark_1`, `spark_2`, `crash_1`, `crash_3`, `crash_4`, `tear_3`, `cage_1`.
 
 - **Wood and Metal Sound Effects: Volume 2** — Ogrebane, https://opengameart.org/content/wood-and-metal-sound-effects-volume-2  
   Recorded metal impacts. Game files: `metal_m_3`, `metal_m_4`, `metal_h_5`, `cage_2`.
 
 - **Metal Interactions** — Iwan “qubodup” Gabovitch, https://opengameart.org/content/metal-interactions  
-  Recorded metal contacts, buttons, and a swing. Game files: `block_0`–`block_2`, `bounce_3`, `servo_5`.
+  Recorded metal contacts, buttons, and a swing. Game files: `block_0`–`block_2`, `servo_5`.
 
 - **Metal Impact Sounds** — Brian MacIntosh, https://opengameart.org/content/metal-impact-sounds  
-  Recorded clinks, thuds, and a long bong. Game files: `metal_l_0`–`metal_l_2`, `metal_h_0`, `metal_h_1`, `punch_3`, `bounce_2`.
+  Recorded thuds and a long bong. Game files: `metal_h_0`, `metal_h_1`, `punch_3`.
 
 - **Metal footsteps on concrete** — Thimras, https://opengameart.org/content/metal-footsteps-on-concrete  
-  Recorded metal-foot steps, 48 kHz. Game files: `step_01` … `step_23`.
+  Recorded metal-foot steps, 48 kHz, pitched down ~34% with a low-shelf boost for heavy servo stomps. Game files: `stomp_m_*`.
 
 - **Mech Stomp / Step Sound** — hc, based on a recording by qubodup, https://opengameart.org/content/mech-stomp-step-sound  
   Game files: `crash_2`.
@@ -42,8 +42,12 @@ No attribution required. Optional credit is appreciated: [Kenney](https://kenney
   Game files: `ui_click.ogg`, `ui_click_2.ogg`, `ui_tick.ogg`, `ui_confirm.ogg`, `ui_close.ogg`.
 
 - **Impact Sounds** — https://kenney.nl/assets/impact-sounds  
-  Fight bells only (combat impacts were replaced with recorded metal).  
-  Game files: `bell_*`.
+  Fight bells, plus heavy-robot impact layers. The impact layers are pitched down 20–38% with a
+  low-shelf boost (ffmpeg) so they read as human-size machines: `impactMetal_heavy` → `clank_h_*`
+  (debris on the mat), `impactPlate_heavy` / `impactPlate_medium` → `plate_h_*` / `plate_m_*`
+  (big metal impact), `impactPunch_heavy` → `thud_*` (body thud), `impactMining` → `rattle_*`
+  (short debris rattle), `footstep_concrete` → `stomp_k_*` (stomp body).  
+  Game files: `bell_*`, `clank_h_*`, `plate_h_*`, `plate_m_*`, `thud_*`, `rattle_*`, `stomp_k_*`.
 
 ## Brian MacIntosh (BMacZero) — CC0 1.0
 
@@ -68,9 +72,13 @@ No attribution required. Optional credit is appreciated: [Kenney](https://kenney
 Full-quality WAV masters were downloaded from Mixkit and recompressed to mono OGG for the game.
 
 
+## Announcer voice
+
+Original lines written for the game (Window Workshop Games), voiced with the Kokoro v1.0 TTS model (Apache-2.0; voice blend of am_michael / am_onyx / am_fenrir, processed: EQ, compression, -16 LUFS). Only the round start, round end, knockdown and KO lines are used (`sounds/announcer/ann_*.mp3`, 22 clips), played dry plus a light send into the arena reverb.
+
 ## Arena reverb
 
-`ir_hall.ogg` is an original, short hall impulse generated for this game (not a third-party recording). It feeds a light Web Audio convolver on the SFX bus.
+The arena reverb impulse (~1.6 s, early reflections plus a darkening tail) is generated in code at startup (`hookConvolver` in `js/audio.js`); no recording is used. The sub "thump" layer under impacts, falls and footsteps is a synthesized Web Audio sine sweep.
 
 ## ambientCG textures — CC0 1.0
 
@@ -80,4 +88,4 @@ Full-quality WAV masters were downloaded from Mixkit and recompressed to mono OG
 
 ## Poly Haven HDRI — CC0 1.0
 
-[Industrial Pipe and Valve 01](https://polyhaven.com/a/industrial_pipe_and_valve_01) 2K HDRI (`hdris/industrial_pipe_and_valve_01_2k.hdr`), used when `ARENA.hdri` or the Settings toggle is on. License: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/). Credit is optional.
+[Industrial Pipe and Valve 01](https://polyhaven.com/a/industrial_pipe_and_valve_01) 2K HDRI (`hdris/industrial_pipe_and_valve_01_2k.hdr`), on by default (Settings → HDRI environment). License: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/). Credit is optional.
