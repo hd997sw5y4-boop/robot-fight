@@ -1154,10 +1154,10 @@ export function applyPartHit(f, partId, damage, point, dir, scene, opts = {}) {
   const isLeg = partId.startsWith('leg');
   // Legs bend instead of breaking: an emptied leg stays on, bent as far as it goes. A leg (or
   // its foot) comes off only when the KO blow itself lands on a leg that was already badly
-  // damaged before it (at or under 35% health). A final hit near the foot takes the foot;
+  // damaged before it (at or under 20% health), and then only about half the time. A final hit near the foot takes the foot;
   // otherwise the whole leg goes. (Tearing any emptied or KO-hit leg off made nearly every
   // match end on a leg finisher.)
-  const legFinal = isLeg && !opts.blocked && opts.final && hpBefore <= part.max * 0.35;
+  const legFinal = isLeg && !opts.blocked && opts.final && hpBefore <= part.max * 0.2 && Math.random() < 0.5;
   if (legFinal && part.canDetach && !part.detached) {
     const foot = f.subs && f.subs['foot' + partId.slice(-1)];
     if (part.hp > 0 && foot && !foot.detached && point && subWorldPos(foot, _v2).distanceTo(point) < 0.38) detachSub(f, foot, dir, scene);

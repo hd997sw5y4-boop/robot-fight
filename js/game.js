@@ -705,6 +705,7 @@ function measureAir(f) {
   // feet (root space x). A wide pose would prop the toppled body up on an arm.
   out.__topple = {};
   const tv = new THREE.Vector3();
+  const savePos = f.root.position.clone(), saveRot = f.root.rotation.y;
   for (const name of TOPPLE_POSES) {
     const act = f.actions[name];
     if (!act) continue;
@@ -717,6 +718,7 @@ function measureAir(f) {
     act.stop();
     out.__topple[name] = { t, left: +L.toFixed(3), right: +R.toFixed(3) };
   }
+  f.root.position.copy(savePos); f.root.rotation.set(0, saveRot, 0);
   f.mixer.stopAllAction();
   f.current = null;
   setAnim(f, save || idleClipFor(f), 0.08);
@@ -1691,12 +1693,40 @@ function faceToward(f, other, dt, snap) {
     if (prog < 0.7) return;
     rate = 3;
   }
-  const want = Math.atan2(other.root.position.x - f.root.position.x, other.root.position.z - f.root.position.z);
+  const dx = other.root.position.x - f.root.position.x;
+  const dz = other.root.position.z - f.root.position.z;
+  // Bodies (nearly) on top of each other (a flip passing over, a push-out): the direction is
+  // noise, so keep the last target instead of chasing it.
+  if (dx * dx + dz * dz > (0.35 * SIZE) ** 2 || f.faceWant == null) f.faceWant = Math.atan2(dx, dz);
+  steerYaw(f, f.faceWant, dt, rate, snap);
+}
+
+// The one owner of a fighter's yaw: a critically damped spring toward the target heading with
+// a max turn rate, a small deadzone, wrapped angles, and a kept turn direction near 180 deg (so
+// it can't flip-flop left/right). Replaces the old per-frame exponential snaps, which fought
+// separation/push-out and shook back and forth when the target bearing jittered.
+const YAW_MAX_RATE = 7.5;   // rad/s
+const YAW_DEADZONE = 0.015; // rad
+function steerYaw(f, want, dt, rate = 9, snap = false) {
   const cur = f.root.rotation.y;
-  let diff = want - cur;
-  diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-  const k = snap ? 1 : 1 - Math.exp(-rate * Math.max(0, dt));
-  f.root.rotation.set(0, cur + diff * k, 0);
+  let diff = Math.atan2(Math.sin(want - cur), Math.cos(want - cur));
+  if (snap || !(dt > 0)) {
+    if (snap) { f.root.rotation.set(0, cur + diff, 0); f.yawVel = 0; }
+    return;
+  }
+  if (Math.abs(diff) > 2.7 && f.turnSign && Math.sign(diff) !== f.turnSign) diff += f.turnSign * 2 * Math.PI; // keep turning the same way
+  if (Math.abs(diff) > 0.3) f.turnSign = Math.sign(diff);
+  let v = f.yawVel || 0;
+  if (Math.abs(diff) < YAW_DEADZONE && Math.abs(v) < 0.2) { f.yawVel = 0; return; }
+  const w = rate * 0.9;
+  // Semi-implicit critically damped step (stable for any dt).
+  const h = Math.min(dt, 0.05);
+  v = (v + w * w * diff * h) / (1 + 2 * w * h + w * w * h * h);
+  v = Math.max(-YAW_MAX_RATE, Math.min(YAW_MAX_RATE, v));
+  let step = v * h;
+  if (Math.abs(step) > Math.abs(diff)) { step = diff; v = 0; } // never overshoot
+  f.yawVel = v;
+  f.root.rotation.set(0, cur + step, 0);
 }
 
 function faceEachOther(a, b, dt = 0, snap = false) {
@@ -1752,6 +1782,8 @@ function tryAttack(f, kind, clipName, exact = false) {
     const air = AIR_T && AIR_T[clip];
     if (air && air.air && (MODEL.animations.jumpKicks || []).includes(clip)) {
       action.time = Math.min(action.time, air.start);
+      // Jump kicks play at least at clip speed (a slow frame would hang ~3 s in the air).
+      action.timeScale = Math.min(cap, Math.max(action.timeScale, 1.05));
       const gap = f.root.position.distanceTo(other.root.position);
       const fwd = toward(f, other);
       const want = Math.max(0, Math.min(COMBAT.jumpKickTravel, gap - COMBAT.strikeGap));
@@ -2291,8 +2323,7 @@ function stepGroundAttack(f, def, dt) {
   // Face the downed body.
   if (f.groundAim) {
     const want = Math.atan2(f.groundAim.x - f.root.position.x, f.groundAim.z - f.root.position.z);
-    let diff = Math.atan2(Math.sin(want - f.root.rotation.y), Math.cos(want - f.root.rotation.y));
-    f.root.rotation.y += diff * Math.min(1, dt * 10);
+    steerYaw(f, want, dt, 10);
   }
   // Contact: the stomping foot coming down (after the knee peak) or the fist at the bottom.
   if (!f.groundHit && isLyingDown(def) && ct >= (f.groundKind === 'stomp' ? peak : a0) && ct <= end) {
@@ -2839,7 +2870,7 @@ function stepFighter(f, other, inp, dt) {
       ? (ct >= airKick.air.end - 0.01 || (action && !action.isRunning())) // ends on its feet
       : (f.retract ? retracted : pulled) || (!f.retract && ct >= tm.end - 0.01) || (action && !action.isRunning());
     // Safety net: no strike may hold the robot longer than this (selftest saw a 3 s kick lock).
-    const overdue = f.stateT > (airKick ? 3.2 : 2.2);
+    const overdue = f.stateT > (airKick ? 2.8 : 2.2);
     // The player can cancel the retraction into movement, guard or the next strike.
     const wantsOut = !f.isCpu && !airKick && ct > tm.a1 && (inp.block || inp.punch || inp.kick
       || Math.abs(inp.sidestep) + Math.abs(inp.inout) > 0.3);
@@ -4175,7 +4206,7 @@ function onLoad(gltf) {
   window.__rfKoTest = (id, partId, kind, force, wreckLeg) => {
     const f = id === 'p1' ? p1 : p2; const o = f === p1 ? p2 : p1;
     const part = f.parts[partId];
-    if (wreckLeg && part) part.hp = Math.round(part.max * 0.2);
+    if (wreckLeg && part) part.hp = Math.round(part.max * 0.15);
     const dir = new THREE.Vector3(f.root.position.x - o.root.position.x, 0, f.root.position.z - o.root.position.z).normalize();
     const pt = f.root.position.clone(); pt.y += ({ head: 2.25, torso: 1.45, armL: 1.5, armR: 1.5 }[partId] || 0.7) * SIZE;
     f.health = 0;
