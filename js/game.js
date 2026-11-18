@@ -84,7 +84,8 @@ shellCall('onReady', {
 
 // Phones start on Low (no shadows, no floor mirror, light crowd, pixel ratio <= 1.5); the
 // Settings switch still works there, with the mobile caps kept.
-let gfxKey = getSettings().gfx === 'low' ? 'low' : 'high';
+const normGfx = (k) => (k === 'low' || k === 'medium' ? k : 'high');
+let gfxKey = normGfx(getSettings().gfx);
 setChromeLow(gfxKey === "low");
 setWiresLow(gfxKey === "low");
 setDebrisLow(gfxKey === "low");
@@ -243,9 +244,19 @@ let lightMul = Math.max(0.5, Math.min(2, getSettings().light || 1));
 const litLights = [];
 
 let floorMirror = null;
+// Floor mirror resolution per preset (Medium renders it at half size).
+function setMirrorRes(m) {
+  const w = (GFX_PRESETS[gfxKey] && GFX_PRESETS[gfxKey].mirror) || 1024;
+  const rt = m.getRenderTarget && m.getRenderTarget();
+  if (!rt || rt.width === w) return;
+  const h = Math.round(w / Math.max(1, window.innerWidth / Math.max(1, window.innerHeight)));
+  rt.setSize(w, h);
+  const tx = m.material && m.material.uniforms && m.material.uniforms.texel;
+  if (tx) tx.value.set(1 / w, 1 / h);
+}
 function applyGfx(key) {
-  gfxKey = key === 'low' ? 'low' : 'high';
-  if (floorMirror) floorMirror.visible = gfxKey !== 'low';
+  gfxKey = normGfx(key);
+  if (floorMirror) { floorMirror.visible = gfxKey !== 'low'; setMirrorRes(floorMirror); }
   setChromeLow(gfxKey === 'low');
   setWiresLow(gfxKey === 'low');
   setDebrisLow(gfxKey === 'low');
@@ -4103,7 +4114,7 @@ function onLoad(gltf) {
   const built = buildArenaVisual(scene, { tiled, metalColor, metalRough, metalMetal });
   const lightRig = addArenaLights(scene, built.fixturePos);
   syncEnvironment(); // the void wall exists now: hide it if the HDRI backdrop is on
-  addFloorReflection(scene).then((m) => { floorMirror = m; m.visible = gfxKey !== 'low'; }).catch(() => {});
+  addFloorReflection(scene).then((m) => { floorMirror = m; m.visible = gfxKey !== 'low'; setMirrorRes(m); }).catch(() => {});
   if (lightRig) {
     trackLight(lightRig.hemi);
     trackLight(lightRig.fill);

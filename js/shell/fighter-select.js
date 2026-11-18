@@ -532,9 +532,10 @@ function makeStage(host) {
   const canvas = document.createElement('canvas');
   canvas.className = 'fs-stage';
   host.prepend(canvas);
-  const low = (document.getElementById('setGfx') || {}).value === 'low';
+  const gq = (document.getElementById('setGfx') || {}).value;
+  const low = gq === 'low';
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, low ? 1 : 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, low ? 1 : gq === 'medium' ? 1.5 : 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.55;

@@ -813,7 +813,7 @@ export function stadiumApplyEnv() {
 
 /** Called by game.js applyGfx before shadows are re-applied. Rebuilds at the new quality. */
 export function stadiumSetGfx(key) {
-  const next = key === 'low' ? 'low' : 'high';
+  const next = key === 'low' || key === 'medium' ? key : 'high';
   if (next === gfx && (built || !stadiumOwnsEnv())) return;
   gfx = next;
   if (ctx && stadiumOwnsEnv()) rebuild();
@@ -884,7 +884,7 @@ export function stadiumGfx() {
 
 export function initStadium(c) {
   ctx = c;
-  gfx = c.gfx === 'low' ? 'low' : 'high';
+  gfx = c.gfx === 'low' || c.gfx === 'medium' ? c.gfx : 'high';
   injectPicker();
   window.__rfSetArena = setArena;
   window.__rfGetArena = getArena;

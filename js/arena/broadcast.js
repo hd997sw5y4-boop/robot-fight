@@ -548,7 +548,7 @@ export function updateBroadcast() {
   }
   stepLive(dt, fighters);
   if (!want) return;
-  const cap = xrPresenting() ? CFG.vrFps : CFG.fps;
+  const cap = xrPresenting() ? CFG.vrFps : (stadiumGfx() === 'medium' ? 10 : CFG.fps); // Medium: slower jumbotron feed
   if (wall - lastRender < 1 / cap) return;
   lastRender = wall;
   renderFeed(fighters);

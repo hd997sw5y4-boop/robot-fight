@@ -8,6 +8,7 @@ import { IS_MOBILE } from './mobile.js';
 
 const KEYS = {
   gfx: 'rf_gfx',
+  gfxPicked: 'rf_gfx_picked',
   master: 'rf_vol_master',
   sfx: 'rf_vol_sfx',
   crowd: 'rf_vol_crowd',
@@ -27,8 +28,29 @@ const KEYS = {
 // Camera views, in the order the V key cycles them. 'arena' is the original orbit camera.
 export const CAM_MODES = ['arena', 'fighting', 'third', 'first', 'broadcast'];
 
+// Default graphics preset until the player picks one (KEYS.gfxPicked marks a real choice, so
+// an older auto-saved 'high' doesn't pin a Mac to High).
+function defaultGfx() {
+  if (IS_MOBILE) return 'low';
+  try {
+    const ua = navigator.userAgent || '';
+    if (/Macintosh|Mac OS X/.test(ua)) return 'medium';
+    if ((window.devicePixelRatio || 1) >= 1.5) return 'medium';
+    const c = document.createElement('canvas');
+    const gl = c.getContext('webgl');
+    if (gl) {
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      const r = String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+      const lose = gl.getExtension('WEBGL_lose_context');
+      if (lose) lose.loseContext();
+      if (/Intel|SwiftShader|llvmpipe|Software|Mali|Adreno|PowerVR|Apple GPU/i.test(r) && !/Iris Xe MAX|Arc/i.test(r)) return 'medium';
+    }
+  } catch (_) {}
+  return 'high';
+}
+
 const defaults = {
-  gfx: IS_MOBILE ? 'low' : 'high', // phones start on Low (js/mobile.js)
+  gfx: defaultGfx(), // phones Low; Macs / Retina / integrated GPUs Medium; other desktops High
   master: 1,
   sfx: 1,
   crowd: 0.7,
@@ -49,7 +71,7 @@ function read() {
   const s = { ...defaults };
   try {
     const gfx = localStorage.getItem(KEYS.gfx);
-    if (gfx === 'low' || gfx === 'high') s.gfx = gfx;
+    if (localStorage.getItem(KEYS.gfxPicked) === '1' && (gfx === 'low' || gfx === 'medium' || gfx === 'high')) s.gfx = gfx;
     const m = localStorage.getItem(KEYS.master);
     if (m != null && isFinite(+m)) s.master = Math.max(0, Math.min(1, +m));
     const x = localStorage.getItem(KEYS.sfx);
@@ -265,7 +287,8 @@ export function initSettings(nextHooks) {
   });
   const gfx = document.getElementById('setGfx');
   if (gfx) gfx.addEventListener('change', () => {
-    settings.gfx = gfx.value === 'low' ? 'low' : 'high';
+    settings.gfx = gfx.value === 'low' || gfx.value === 'medium' ? gfx.value : 'high';
+    try { localStorage.setItem(KEYS.gfxPicked, '1'); } catch (_) {}
     persist();
     if (hooks.applyGfx) hooks.applyGfx(settings.gfx);
   });

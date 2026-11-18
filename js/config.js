@@ -157,7 +157,10 @@ export const COMBAT = {
 
 export const GFX_PRESETS = {
   low: { pixelCap: 1, shadows: false, shadowSize: 512, exposure: 1.4 },
-  high: { pixelCap: 2, shadows: true, shadowSize: 2048, exposure: 1.55 },
+  // medium: Macs / Retina / integrated GPUs. Floor mirror at half resolution, jumbotron at
+  // 10 fps, medium crowd (stadium-config quality.medium); debris and HDRI as High.
+  medium: { pixelCap: 1.5, shadows: true, shadowSize: 1024, exposure: 1.55, mirror: 512 },
+  high: { pixelCap: 2, shadows: true, shadowSize: 2048, exposure: 1.55, mirror: 1024 },
   // phones/tablets (js/mobile.js): applied on top of low/high: pixel ratio and shadow caps.
   mobile: { pixelCap: 1.5, shadowSize: 1024 }, // Low on a phone uses 1.25
 };

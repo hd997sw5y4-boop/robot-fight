@@ -19,6 +19,7 @@ export const STADIUM = {
   tunnels: [Math.PI / 4, (3 * Math.PI) / 4, (5 * Math.PI) / 4, (7 * Math.PI) / 4],
   quality: {
     high: { segs: 160, crowd: 0.78, crowdUpper: 0.62, seatDetail: true, diagonals: true, cones: 6, spots: 4, glare: true, normals: true },
+    medium: { segs: 112, crowd: 0.56, crowdUpper: 0.38, seatDetail: true, diagonals: false, cones: 4, spots: 2, glare: true, normals: false },
     low: { segs: 72, crowd: 0.34, crowdUpper: 0.16, seatDetail: false, diagonals: false, cones: 3, spots: 0, glare: false, normals: false },
   },
 };
