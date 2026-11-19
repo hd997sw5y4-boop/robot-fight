@@ -196,10 +196,10 @@ export const GFX_PRESETS = {
   low: { pixelCap: 1, shadows: false, shadowSize: 512, exposure: 1.08, bloom: false, mirror: 0, minScale: 0.6 },
   // medium: Macs / Retina / integrated GPUs. Jumbotron at 10 fps; debris and HDRI as High.
   // Crowd/seat/truss layout is the Low stadium layout on every graphics setting.
-  medium: { pixelCap: 1.5, shadows: true, shadowSize: 1024, exposure: 1.12, bloom: false, mirror: 512, minScale: 0.55 },
-  high: { pixelCap: 1.5, shadows: true, shadowSize: 1024, exposure: 1.15, bloom: false, mirror: 512, minScale: 0.5 },
+  medium: { pixelCap: 1.25, shadows: true, shadowSize: 1024, exposure: 1.12, bloom: false, mirror: 512, minScale: 0.55 },
+  high: { pixelCap: 1.25, shadows: true, shadowSize: 1024, exposure: 1.15, bloom: false, mirror: 512, minScale: 0.5 },
   // phones/tablets (js/mobile.js): applied on top of low/high: pixel ratio and shadow caps.
-  mobile: { pixelCap: 1.5, shadowSize: 1024 }, // Low on a phone uses 1.25
+  mobile: { pixelCap: 1.25, shadowSize: 1024 }, // phones share the 1 / 1.25 caps
 };
 
 // Per-part wrecking. Names in `bind` are normalized (lowercase, no "mixamorig",

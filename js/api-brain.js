@@ -1,25 +1,36 @@
 'use strict';
 /*
- * Optional "AI API Brain" (Settings > AI API Brain, off by default). Plugs into the brain
- * seam in brain.js: think(snapshot) -> intent. A few times a second (throttled) it sends a
- * compact state JSON to an OpenAI-compatible chat-completions endpoint (xAI Grok, OpenAI, or
- * any base URL) and asks for ONE action from the game's action set. The reply steers the
- * robot until the next one; on any error, timeout or invalid reply the built-in CPU brain
- * drives, so a fight never stalls.
+ * Optional "AI API Brain" (Settings > AI API Brain, and AI Tournament). Plugs into the
+ * brain seam: think(snapshot) -> intent. A few times a second (throttled) it sends a
+ * compact state JSON to an OpenAI-compatible chat-completions endpoint (xAI Grok, OpenAI,
+ * or any base URL) and asks for ONE action. The reply steers the robot until the next one;
+ * on invalid JSON the built-in CPU brain drives; on timeout the last plan is kept.
  *
- * The API key is typed in by the user and kept only in this browser's localStorage. No key
- * ships with the game and nothing is sent anywhere except the endpoint the user picks.
+ * API keys stay only in this browser's localStorage. They are never written to the fight
+ * log or exports, never put in a URL, never console.logged, and are sent only to that
+ * entrant's chosen endpoint as Authorization: Bearer.
  */
 
 export const AI_ACTIONS = ['approach', 'retreat', 'circle_left', 'circle_right', 'punch', 'kick', 'jump_kick', 'flip_front', 'block', 'ground', 'wait'];
+export const AI_TARGETS = ['head', 'torso', 'armL', 'armR', 'legL', 'legR'];
 
 export const AI_PROVIDERS = {
   // grok-4.3 with reasoning off is xAI's fast current model (grok-3-mini and the old fast slugs
-  // now redirect to reasoning models, which spend a small token budget thinking and reply empty).
-  xai: { label: 'xAI Grok', base: 'https://api.x.ai/v1', model: 'grok-4.3', effort: 'none' },
-  openai: { label: 'OpenAI', base: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
-  custom: { label: 'Other OpenAI-compatible', base: '', model: '' },
+  // now redirect to reasoning models, which spend a token budget thinking and may reply empty).
+  xai: { label: 'xAI Grok', base: 'https://api.x.ai/v1', model: 'grok-4.3', effort: 'none', cors: 'ok' },
+  openai: { label: 'OpenAI', base: 'https://api.openai.com/v1', model: 'gpt-4o-mini', cors: 'limited' },
+  custom: { label: 'Other OpenAI-compatible', base: '', model: '', cors: 'unknown' },
 };
+
+// Same budget and throttle for every API brain (Settings and tournament).
+export const AI_BUDGET = { interval: 700, fresh: 1400, timeout: 6000, maxTokens: 400, maxCalls: 90 };
+
+export const SYSTEM = 'You control one heavy humanoid robot in a 3D fighting game. Each message is the current '
+  + 'state as JSON (distances in metres, health 0-100, parts 0-1 health, 0 means torn off). Reply with JSON '
+  + '{"action":"<one of: ' + AI_ACTIONS.join(', ') + '>","plan":"<up to 12 words>","target":"<optional one of: '
+  + AI_TARGETS.join(', ') + '>"} and nothing else. Punch lands within strikeRange.punch, '
+  + 'kick within strikeRange.kick; ground only works when opp.groundable is true; block when the opponent attacks; '
+  + 'flip_front (only when self.canFlip) flips over or toward the opponent; jump_kick is a flying kick (needs canFlip).';
 
 const K = {
   on: 'rf_ai_on', provider: 'rf_ai_provider', base: 'rf_ai_base', model: 'rf_ai_model',
@@ -30,6 +41,33 @@ const ls = {
   set(k, v) { try { localStorage.setItem(k, v); } catch (_) {} },
   del(k) { try { localStorage.removeItem(k); } catch (_) {} },
 };
+
+export function chatUrl(base) {
+  const b = String(base || '').trim().replace(/\/+$/, '');
+  if (!b) return '';
+  if (/\/chat\/completions$/i.test(b)) return b;
+  return b + '/chat/completions';
+}
+
+export function resolveProvider(cfg) {
+  const provider = (cfg && AI_PROVIDERS[cfg.provider]) ? cfg.provider : (AI_PROVIDERS[cfg && cfg.provider] ? cfg.provider : 'custom');
+  const def = AI_PROVIDERS[provider] || AI_PROVIDERS.custom;
+  const base = String((cfg && cfg.base) || def.base || '').replace(/\/+$/, '');
+  const model = String((cfg && cfg.model) || def.model || '').trim();
+  return { provider, base, model, label: def.label, cors: def.cors };
+}
+
+/** Strip secrets from any string that might be logged, exported, or shown. */
+export function scrubSecret(text, key) {
+  let s = String(text == null ? '' : text);
+  if (key) {
+    const k = String(key);
+    if (k.length >= 4) s = s.split(k).join('***');
+  }
+  s = s.replace(/Bearer\s+\S+/gi, 'Bearer ***');
+  s = s.replace(/\b(sk|xai|xai-key)-[A-Za-z0-9_\-]{8,}\b/g, (m) => m.slice(0, 3) + '…');
+  return s;
+}
 
 export function aiConfig() {
   const provider = AI_PROVIDERS[ls.get(K.provider)] ? ls.get(K.provider) : 'xai';
@@ -44,17 +82,41 @@ export function aiConfig() {
   };
 }
 
-// Does this fighter want the API brain right now?
-export function wantsApiBrain(id) {
+const tourneyKey = (id) => 'rf_ai_tourney_key_' + id;
+export function loadEntrantKey(id) { return id ? ls.get(tourneyKey(id), '') : ''; }
+export function saveEntrantKey(id, key) {
+  if (!id) return;
+  const v = String(key || '').trim();
+  if (!v || v === '••••••••') return;
+  ls.set(tourneyKey(id), v);
+}
+export function clearEntrantKey(id) { if (id) ls.del(tourneyKey(id)); }
+
+/** Config used for this fighter: a tournament entrant, or the Settings API brain. */
+export function fighterApiCfg(f) {
+  const custom = f && f.config && f.config.apiBrain;
+  if (custom && (custom.entrantId || custom.base || custom.model)) {
+    const r = resolveProvider(custom);
+    const key = custom.entrantId ? loadEntrantKey(custom.entrantId) : '';
+    return { ...r, key, on: true };
+  }
+  return aiConfig();
+}
+
+export function wantsApiBrain(id, f) {
+  if (f && f.config && f.config.apiBrain) {
+    const c = fighterApiCfg(f);
+    return !!(c.key && c.base && c.model);
+  }
   const c = aiConfig();
   return c.on && !!c.key && !!c.base && !!c.model && c.brain[id] === 'api';
 }
 
-const SYSTEM = 'You control one heavy humanoid robot in a 3D fighting game. Each message is the current '
-  + 'state as JSON (distances in metres, health 0-100, parts 0-1 health, 0 means torn off). Reply with JSON '
-  + '{"action":"<one of: ' + AI_ACTIONS.join(', ') + '>"} and nothing else. Punch lands within strikeRange.punch, '
-  + 'kick within strikeRange.kick; ground only works when opp.groundable is true; block when the opponent attacks; '
-  + 'flip_front (only when self.canFlip) flips over or toward the opponent; jump_kick is a flying kick (needs canFlip).';
+export function apiLabel(cfg) {
+  const r = resolveProvider(cfg || {});
+  const bits = ['API', r.label || r.provider, r.model].filter(Boolean);
+  return bits.join(' · ');
+}
 
 function compact(s) {
   const r2 = (v) => Math.round(v * 100) / 100;
@@ -66,45 +128,80 @@ function compact(s) {
   return { dist: r2(s.dist || 0), strikeRange: s.strikeRange && { punch: r2(s.strikeRange.punch), kick: r2(s.strikeRange.kick) }, self: side(s.self), opp: side(s.opp) };
 }
 
-// Reply text from any OpenAI-compatible shape (string or content parts).
+// Reply text from any OpenAI-compatible shape, including reasoning models that leave content empty.
 function replyText(j) {
-  const m = j && j.choices && j.choices[0] && (j.choices[0].message || j.choices[0].delta);
-  if (!m) return '';
-  const c = m.content;
-  if (typeof c === 'string') return c;
-  if (Array.isArray(c)) return c.map((p) => (typeof p === 'string' ? p : (p && (p.text || p.content)) || '')).join('');
-  return '';
+  const ch = j && j.choices && j.choices[0];
+  const m = ch && (ch.message || ch.delta) || {};
+  const parts = [];
+  const take = (c) => {
+    if (!c) return;
+    if (typeof c === 'string') parts.push(c);
+    else if (Array.isArray(c)) c.forEach((p) => parts.push(typeof p === 'string' ? p : (p && (p.text || p.content || p.output_text)) || ''));
+  };
+  take(m.content);
+  take(m.reasoning_content);
+  take(m.reasoning);
+  take(ch && ch.text);
+  if (j && j.output_text) take(j.output_text);
+  if (m.refusal) take(m.refusal);
+  return parts.join('\n').trim();
 }
 
 const norm = (v) => String(v || '').toLowerCase().trim().replace(/[\s-]+/g, '_');
 export function parseAction(text) {
+  const p = parseReply(text);
+  return p && p.action;
+}
+export function parseReply(text) {
   if (!text) return null;
   const t = String(text).replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-  // 1) JSON anywhere in the reply ({"action": "..."}), fenced or not.
+  let action = null, plan = '', target = '';
   const objs = t.match(/\{[^{}]*\}/g) || [];
   for (const o of objs) {
-    try { const j = JSON.parse(o); const a = norm(j.action || j.move || j.Action); if (AI_ACTIONS.includes(a)) return a; } catch (_) {}
+    try {
+      const j = JSON.parse(o);
+      const a = norm(j.action || j.move || j.Action);
+      if (AI_ACTIONS.includes(a)) action = a;
+      if (j.plan || j.reason || j.thought) plan = String(j.plan || j.reason || j.thought).slice(0, 160);
+      const tg = norm(j.target || j.aim || '');
+      if (AI_TARGETS.includes(tg)) target = tg;
+      if (action) break;
+    } catch (_) {}
   }
-  // 2) "action": "..." without valid JSON.
-  const kv = t.match(/action["'\s]*[:=]\s*["']?([a-z _-]+)/i);
-  if (kv && AI_ACTIONS.includes(norm(kv[1]))) return norm(kv[1]);
-  // 3) A bare action word ("circle left", "Punch."). The last mention wins (models reason first).
-  const re = new RegExp('\\b(' + AI_ACTIONS.map((a) => a.replace('_', '[\\s_-]?')).join('|') + ')\\b', 'gi');
-  const all = t.match(re);
-  return all ? norm(all[all.length - 1]).replace(/^circle(left|right)$/, 'circle_$1') : null;
+  if (!action) {
+    const kv = t.match(/action["'\s]*[:=]\s*["']?([a-z _-]+)/i);
+    if (kv && AI_ACTIONS.includes(norm(kv[1]))) action = norm(kv[1]);
+  }
+  if (!action) {
+    const re = new RegExp('\\b(' + AI_ACTIONS.map((a) => a.replace('_', '[\\s_-]?')).join('|') + ')\\b', 'gi');
+    const all = t.match(re);
+    action = all ? norm(all[all.length - 1]).replace(/^circle(left|right)$/, 'circle_$1') : null;
+    if (action && !AI_ACTIONS.includes(action)) action = null;
+  }
+  if (!action) return null;
+  return { action, plan, target };
 }
 
-/* ---------- shared status + call log ---------- */
-export const apiStatus = { ok: 0, fail: 0, lastOk: 0, lastFail: 0, lastError: '', lastLatency: 0, lastAction: '' };
+/* ---------- shared status + call log (never stores keys) ---------- */
+export const apiStatus = { ok: 0, fail: 0, lastOk: 0, lastFail: 0, lastError: '', lastLatency: 0, lastAction: '', lastKind: '' };
 const apiLog = [];
 const LOG_MAX = 5000;
 const listeners = new Set();
+const decisionListeners = new Set();
 function bump() { for (const fn of listeners) { try { fn(apiStatus); } catch (_) {} } }
 export function onApiStatus(fn) { listeners.add(fn); return () => listeners.delete(fn); }
+export function onApiDecision(fn) { decisionListeners.add(fn); return () => decisionListeners.delete(fn); }
+function emitDecision(rec) {
+  for (const fn of decisionListeners) { try { fn(rec); } catch (_) {} }
+}
 export function apiStatusText() {
   if (!apiStatus.ok && !apiStatus.fail) return 'API: waiting for the first reply';
   const failing = apiStatus.lastFail > apiStatus.lastOk;
-  if (failing) return 'API failed, using CPU: ' + (apiStatus.lastError || 'error');
+  if (failing) {
+    if (apiStatus.lastKind === 'key_rejected') return 'API key rejected, using CPU';
+    if (apiStatus.lastKind === 'cors') return 'API CORS/network error, using CPU';
+    return 'API failed, using CPU: ' + (apiStatus.lastError || 'error');
+  }
   return 'API: OK (' + apiStatus.lastLatency + ' ms, ' + apiStatus.ok + ' replies' + (apiStatus.fail ? ', ' + apiStatus.fail + ' failed' : '') + ')';
 }
 export function downloadApiLog() {
@@ -116,16 +213,130 @@ export function downloadApiLog() {
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 export function apiLogSize() { return apiLog.length; }
-// Models that take reasoning_effort; a 400 for it turns it off for the session.
+
 let effortRejected = false;
+let useMaxCompletion = false;
 function effortFor(c) {
   if (effortRejected) return null;
   const p = AI_PROVIDERS[c.provider];
-  if (/^grok-4\.20|^grok-build/.test(c.model)) return null; // these reject the field
-  if (/^grok-4\.[5-9]/.test(c.model)) return 'low';        // reasoning is always on: keep it short
+  if (/^grok-4\.20|^grok-build/.test(c.model)) return null;
+  if (/^grok-4\.[5-9]/.test(c.model)) return 'low';
   if (/^(o\d|gpt-5)/.test(c.model)) return 'low';
-  if (c.provider === 'xai' || /^grok/.test(c.model)) return 'none'; // grok-4.3 and old slugs redirected to it
+  if (c.provider === 'xai' || /^grok/.test(c.model)) return 'none';
   return p && p.model === c.model && p.effort ? p.effort : null;
+}
+
+function classify(status, body, err, key) {
+  const msg = scrubSecret((body || (err && err.message) || String(err || '')), key);
+  const low = msg.toLowerCase();
+  if (err && (err.name === 'AbortError' || low === 'timeout' || /aborted|timeout/i.test(low))) {
+    return { kind: 'timeout', error: 'timeout' };
+  }
+  if (status === 401 || status === 403 || /incorrect api key|invalid_api_key|invalid api key|unauthorized|forbidden|key rejected/i.test(low)) {
+    return { kind: 'key_rejected', error: 'key rejected' };
+  }
+  if (status === 429 || /rate.?limit|too many requests/i.test(low)) {
+    return { kind: 'rate_limit', error: 'rate limited (429)' };
+  }
+  if (!status && err && /failed to fetch|networkerror|load failed|cors|blocked by cors/i.test(low)) {
+    return { kind: 'cors', error: 'CORS or network error' };
+  }
+  if (/empty reply|no valid action|invalid json/i.test(low)) {
+    return { kind: 'invalid', error: msg || 'invalid reply' };
+  }
+  return { kind: 'error', error: msg || 'error' };
+}
+
+function retryAfterMs(res) {
+  if (!res) return 0;
+  const h = res.headers && res.headers.get && res.headers.get('Retry-After');
+  if (!h) return 0;
+  const n = +h;
+  if (Number.isFinite(n) && n >= 0) return Math.min(60, n) * 1000;
+  const when = Date.parse(h);
+  if (Number.isFinite(when)) return Math.max(0, Math.min(60000, when - Date.now()));
+  return 0;
+}
+
+/**
+ * One OpenAI-compatible /chat/completions call. The key is only sent as
+ * Authorization: Bearer to cfg.base; it is never logged or returned.
+ */
+export async function requestCompletion(cfg, opts = {}) {
+  const r = resolveProvider(cfg);
+  const key = cfg && cfg.key;
+  const url = chatUrl(r.base);
+  if (!url || !key || !r.model) {
+    return { ok: false, kind: 'error', error: !key ? 'no key' : 'missing endpoint or model', latency: 0, status: 0 };
+  }
+  const timeout = opts.timeout || AI_BUDGET.timeout;
+  const ctl = opts.signal || new AbortController();
+  const timer = opts.signal ? null : setTimeout(() => ctl.abort(), timeout);
+  const t0 = performance.now();
+  const messages = opts.messages || [{ role: 'user', content: opts.prompt || 'Reply with OK.' }];
+  const effort = opts.effort !== undefined ? opts.effort : effortFor({ ...r, provider: r.provider });
+  const body = { model: r.model, temperature: opts.temperature == null ? 0.4 : opts.temperature, messages };
+  const tok = opts.max_tokens || AI_BUDGET.maxTokens;
+  if (useMaxCompletion) body.max_completion_tokens = tok;
+  else body.max_tokens = tok;
+  if (effort) body.reasoning_effort = effort;
+  let status = 0;
+  let raw = '';
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      signal: ctl.signal || ctl,
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
+      body: JSON.stringify(body),
+    });
+    status = res.status;
+    try { raw = await res.text(); } catch (_) { raw = ''; }
+    const latency = Math.round(performance.now() - t0);
+    if (!res.ok) {
+      if (status === 400 && effort && /reasoning/i.test(raw)) effortRejected = true;
+      if (status === 400 && !useMaxCompletion && /max_completion_tokens/i.test(raw)) {
+        useMaxCompletion = true;
+        if (timer) clearTimeout(timer);
+        return requestCompletion(cfg, opts);
+      }
+      const cls = classify(status, raw, null, key);
+      return { ok: false, status, latency, retryAfter: retryAfterMs(res), ...cls };
+    }
+    let json = null;
+    try { json = raw ? JSON.parse(raw) : null; } catch (_) {
+      return { ok: false, status, latency, kind: 'invalid', error: 'invalid JSON' };
+    }
+    const text = replyText(json);
+    return { ok: true, status, latency, text, json, finish: json && json.choices && json.choices[0] && json.choices[0].finish_reason, servedModel: json && json.model };
+  } catch (e) {
+    const latency = Math.round(performance.now() - t0);
+    const cls = classify(status, '', e, key);
+    return { ok: false, status, latency, ...cls };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** One tiny call to verify a key. Never logs the key. */
+export async function testApiKey(cfg) {
+  const r = resolveProvider(cfg);
+  if (!cfg || !cfg.key) return { ok: false, kind: 'error', error: 'No key entered' };
+  if (!r.base || !r.model) return { ok: false, kind: 'error', error: 'Missing endpoint or model' };
+  const out = await requestCompletion({ ...r, key: cfg.key }, {
+    messages: [{ role: 'user', content: 'Reply with the single word OK.' }],
+    max_tokens: 8,
+    temperature: 0,
+    timeout: 8000,
+    effort: null,
+  });
+  if (out.ok) return { ok: true, kind: 'ok', error: '', latency: out.latency, model: out.servedModel || r.model, cors: r.cors };
+  return { ok: false, kind: out.kind, error: out.error, latency: out.latency, cors: r.cors, status: out.status };
+}
+
+export function corsNote(provider) {
+  if (provider === 'xai') return 'xAI allows browser calls (CORS *). A bad key comes back as “key rejected”.';
+  if (provider === 'openai') return 'OpenAI allows this site in preflight, but a 401 (bad key) may omit CORS headers, so a rejected key can look like a CORS error.';
+  return 'Custom endpoints may block browser CORS. If the test says CORS, the key never left this browser except to that URL.';
 }
 
 function actionIntent(a) {
@@ -141,81 +352,136 @@ function actionIntent(a) {
   return it;
 }
 
-export function createApiBrain(fallback, id) {
-  const st = { action: null, at: 0, used: false, inflight: false, lastReq: 0, backoff: 0, errors: 0, ok: 0 };
-  const INTERVAL = 700;   // ms between requests
-  const FRESH = 1400;     // ms an answer steers the robot
-  const TIMEOUT = 6000;   // ms before a request counts as failed
-  const MAX_TOKENS = 400;
+function emptyStats() {
+  return { calls: 0, errors: 0, timeouts: 0, invalid: 0, keyRejected: 0, rateLimited: 0, fallbackMs: 0, latencySum: 0, latencyN: 0, lastAction: '', lastPlan: '', lastTarget: '', lastError: '', lastKind: '', lastLatency: 0, targets: {}, styles: {} };
+}
+
+export function apiStatsSnapshot(brain) {
+  const s = (brain && brain.apiStats) || emptyStats();
+  return {
+    calls: s.calls,
+    errors: s.errors,
+    timeouts: s.timeouts,
+    invalidReplies: s.invalid,
+    keyRejected: s.keyRejected,
+    rateLimited: s.rateLimited,
+    avgLatency: s.latencyN ? Math.round(s.latencySum / s.latencyN) : null,
+    fallbackMs: Math.round(s.fallbackMs || 0),
+  };
+}
+
+export function createApiBrain(fallback, id, getCfg) {
+  const st = { action: null, plan: '', target: '', at: 0, used: false, inflight: false, lastReq: 0, backoff: 0, lastKind: '', cfg: null };
+  const stats = emptyStats();
+  const INTERVAL = AI_BUDGET.interval;
+  const FRESH = AI_BUDGET.fresh;
+  const MAX_CALLS = AI_BUDGET.maxCalls;
+
+  function cfgNow() {
+    if (typeof getCfg === 'function') return getCfg();
+    return aiConfig();
+  }
 
   async function ask(snap) {
-    const c = aiConfig();
+    const c = cfgNow();
+    st.cfg = { provider: c.provider, base: c.base, model: c.model };
     st.inflight = true;
     st.lastReq = performance.now();
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), TIMEOUT);
+    stats.calls += 1;
     const state = compact(snap);
-    const rec = { t: new Date().toISOString(), robot: id, model: c.model, state, reply: null, action: null, latencyMs: 0, error: null };
-    const t0 = performance.now();
-    try {
-      const effort = effortFor(c);
-      // Room for a reasoning model's thinking plus the one-line answer (it stays a short reply
-      // when reasoning is off).
-      const body = {
-        model: c.model, temperature: 0.4, max_tokens: MAX_TOKENS,
-        messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: JSON.stringify(state) }],
-      };
-      if (effort) body.reasoning_effort = effort;
-      const res = await fetch(c.base + '/chat/completions', {
-        method: 'POST',
-        signal: ctl.signal,
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + c.key },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        let msg = '';
-        try { msg = (await res.text()).slice(0, 200); } catch (_) {}
-        if (res.status === 400 && effort && /reasoning/i.test(msg)) effortRejected = true;
-        throw new Error('HTTP ' + res.status + (msg ? ' ' + msg.replace(/\s+/g, ' ') : ''));
+    const rec = { t: new Date().toISOString(), robot: id, provider: c.provider, model: c.model, state, reply: null, action: null, plan: null, target: null, latencyMs: 0, error: null, kind: null };
+    const out = await requestCompletion(c, {
+      messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: JSON.stringify(state) }],
+    });
+    rec.latencyMs = out.latency || 0;
+    rec.kind = out.ok ? 'ok' : out.kind;
+    if (out.ok) {
+      rec.reply = (out.text || '').slice(0, 500);
+      rec.servedModel = out.servedModel;
+      rec.finish = out.finish;
+      const parsed = parseReply(out.text);
+      if (!out.text) {
+        rec.kind = 'invalid';
+        rec.error = 'empty reply' + (out.finish ? ' (' + out.finish + ')' : '');
+        stats.invalid += 1;
+        stats.errors += 1;
+        st.lastKind = 'invalid';
+        st.action = null;
+        apiStatus.fail++; apiStatus.lastFail = Date.now(); apiStatus.lastError = rec.error; apiStatus.lastKind = 'invalid';
+      } else if (!parsed) {
+        rec.kind = 'invalid';
+        rec.error = 'no valid action in reply';
+        stats.invalid += 1;
+        stats.errors += 1;
+        st.lastKind = 'invalid';
+        st.action = null;
+        apiStatus.fail++; apiStatus.lastFail = Date.now(); apiStatus.lastError = rec.error; apiStatus.lastKind = 'invalid';
+      } else {
+        rec.action = parsed.action;
+        rec.plan = parsed.plan || null;
+        rec.target = parsed.target || null;
+        st.action = parsed.action;
+        st.plan = parsed.plan || '';
+        st.target = parsed.target || '';
+        st.at = performance.now();
+        st.used = false;
+        st.lastKind = 'ok';
+        stats.lastAction = parsed.action;
+        stats.lastPlan = st.plan;
+        stats.lastTarget = st.target;
+        stats.latencySum += rec.latencyMs;
+        stats.latencyN += 1;
+        if (parsed.target) stats.targets[parsed.target] = (stats.targets[parsed.target] || 0) + 1;
+        const style = (parsed.action === 'block' || parsed.action === 'retreat' || parsed.action === 'wait') ? 'defensive'
+          : (parsed.action === 'punch' || parsed.action === 'kick' || parsed.action === 'approach' || parsed.action === 'jump_kick') ? 'aggressive' : 'balanced';
+        stats.styles[style] = (stats.styles[style] || 0) + 1;
+        apiStatus.ok++; apiStatus.lastOk = Date.now(); apiStatus.lastAction = parsed.action; apiStatus.lastKind = 'ok';
       }
-      const j = await res.json();
-      const text = replyText(j);
-      rec.reply = text;
-      rec.servedModel = j && j.model;
-      rec.usage = j && j.usage;
-      rec.finish = j && j.choices && j.choices[0] && j.choices[0].finish_reason;
-      if (!text) throw new Error('empty reply' + (rec.finish ? ' (' + rec.finish + ')' : ''));
-      const a = parseAction(text);
-      if (!a) throw new Error('no valid action in reply');
-      rec.action = a;
-      st.action = a; st.at = performance.now(); st.used = false; st.errors = 0; st.ok++;
-      apiStatus.ok++; apiStatus.lastOk = Date.now(); apiStatus.lastAction = a;
-    } catch (e) {
-      st.errors++;
-      st.backoff = performance.now() + Math.min(15000, 1500 * st.errors); // CPU brain drives meanwhile
-      st.lastError = e && e.name === 'AbortError' ? 'timeout' : String(e && e.message || e);
-      rec.error = st.lastError;
-      apiStatus.fail++; apiStatus.lastFail = Date.now(); apiStatus.lastError = st.lastError;
-    } finally {
-      clearTimeout(timer);
-      st.inflight = false;
-      rec.latencyMs = Math.round(performance.now() - t0);
-      apiStatus.lastLatency = rec.latencyMs;
-      apiLog.push(rec);
-      if (apiLog.length > LOG_MAX) apiLog.shift();
-      bump();
+    } else {
+      rec.error = out.error;
+      st.lastKind = out.kind;
+      stats.errors += 1;
+      if (out.kind === 'timeout') stats.timeouts += 1;
+      else if (out.kind === 'invalid') stats.invalid += 1;
+      else if (out.kind === 'key_rejected') stats.keyRejected += 1;
+      else if (out.kind === 'rate_limit') stats.rateLimited += 1;
+      const wait = out.kind === 'key_rejected' ? 20000
+        : out.kind === 'rate_limit' ? Math.max(2000, out.retryAfter || 4000)
+        : Math.min(15000, 1500 * Math.max(1, stats.errors));
+      st.backoff = performance.now() + wait;
+      // Timeouts keep the last plan; invalid / rejected fall back to the CPU.
+      if (out.kind !== 'timeout') st.action = (out.kind === 'timeout') ? st.action : (out.kind === 'rate_limit' ? st.action : null);
+      if (out.kind === 'invalid') st.action = null;
+      apiStatus.fail++; apiStatus.lastFail = Date.now(); apiStatus.lastError = out.error; apiStatus.lastKind = out.kind;
     }
+    st.inflight = false;
+    stats.lastError = rec.error || '';
+    stats.lastKind = rec.kind;
+    stats.lastLatency = rec.latencyMs;
+    apiStatus.lastLatency = rec.latencyMs;
+    apiLog.push(rec);
+    if (apiLog.length > LOG_MAX) apiLog.shift();
+    bump();
+    emitDecision({ id, action: rec.action, plan: rec.plan, target: rec.target, error: rec.error, kind: rec.kind, latency: rec.latencyMs, provider: c.provider, model: c.model });
   }
 
   function think(snap) {
-    const cpu = fallback.think(snap); // keep the CPU brain warm: it takes over instantly on failure
+    const cpu = fallback.think(snap);
     const now = performance.now();
-    if (!wantsApiBrain(id)) return cpu;
-    if (!st.inflight && now - st.lastReq > INTERVAL && now > st.backoff) ask(snap);
-    if (!st.action || now - st.at > FRESH) return cpu;
+    const c = cfgNow();
+    if (!(c && c.key && c.base && c.model)) {
+      stats.fallbackMs += (snap.dt || 0) * 1000;
+      return cpu;
+    }
+    if (!st.inflight && stats.calls < MAX_CALLS && now - st.lastReq > INTERVAL && now > st.backoff) ask(snap);
+    const keepLast = st.lastKind === 'timeout' || st.inflight;
+    const fresh = st.action && (keepLast || now - st.at <= FRESH);
+    if (!fresh) {
+      stats.fallbackMs += (snap.dt || 0) * 1000;
+      return cpu;
+    }
     const it = actionIntent(st.action);
     if (it.attack || it.dodge) {
-      // One strike / flip per answer (edge-triggered), and only when it can be thrown.
       if (st.used) return { ...cpu, attack: null, dodge: null };
       if ((it.dodge || it.attack === 'jump') && !(snap.self && snap.self.canFlip)) return cpu;
       if (it.attack === 'ground' && !(snap.opp && snap.opp.groundable)) return cpu;
@@ -224,7 +490,7 @@ export function createApiBrain(fallback, id) {
     return it;
   }
 
-  return { kind: 'api', think, state: fallback.state, fallback, stats: st };
+  return { kind: 'api', think, state: fallback.state, fallback, stats: st, apiStats: stats };
 }
 
 /* ---------- settings section ---------- */
@@ -233,6 +499,26 @@ export function initApiBrainUI() {
   const on = $('aiOn'); const prov = $('aiProvider'); const base = $('aiBase'); const model = $('aiModel');
   const key = $('aiKey'); const clear = $('aiClear'); const b1 = $('aiBrainP1'); const b2 = $('aiBrainP2'); const note = $('aiNote');
   if (!on) return;
+  let testBtn = $('aiTestKey');
+  let testOut = $('aiTestOut');
+  if (!testBtn && key && key.parentNode) {
+    testBtn = document.createElement('button');
+    testBtn.type = 'button';
+    testBtn.id = 'aiTestKey';
+    testBtn.textContent = 'Test key';
+    key.parentNode.appendChild(testBtn);
+  }
+  if (!testOut && note) {
+    testOut = document.createElement('p');
+    testOut.className = 'hint';
+    testOut.id = 'aiTestOut';
+    note.after(testOut);
+  }
+  const typedKey = () => {
+    const v = key.value.trim();
+    if (v && v !== '••••••••') return v;
+    return ls.get(K.key);
+  };
   const paint = () => {
     const c = aiConfig();
     on.checked = c.on;
@@ -243,20 +529,32 @@ export function initApiBrainUI() {
     model.placeholder = AI_PROVIDERS[c.provider].model || 'model name';
     key.value = c.key ? '••••••••' : '';
     b1.value = c.brain.p1; b2.value = c.brain.p2;
-    note.textContent = c.key ? 'Key saved in this browser only.' : 'No key saved. The CPU brain fights until you add one.';
+    const saved = c.key ? 'Key saved in this browser only. ' : 'No key saved. The CPU brain fights until you add one. ';
+    note.textContent = saved + corsNote(c.provider);
   };
   on.addEventListener('change', () => { ls.set(K.on, on.checked ? '1' : '0'); paint(); });
   prov.addEventListener('change', () => { ls.set(K.provider, prov.value); paint(); });
   base.addEventListener('change', () => { if (base.value.trim()) ls.set(K.base, base.value.trim()); else ls.del(K.base); paint(); });
   model.addEventListener('change', () => { if (model.value.trim()) ls.set(K.model, model.value.trim()); else ls.del(K.model); paint(); });
-  key.addEventListener('focus', () => { if (key.value === '••••••••') key.value = ''; });
   key.addEventListener('change', () => { const v = key.value.trim(); if (v && v !== '••••••••') ls.set(K.key, v); paint(); });
-  clear.addEventListener('click', () => { ls.del(K.key); paint(); });
+  clear.addEventListener('click', () => { ls.del(K.key); if (testOut) testOut.textContent = ''; paint(); });
   b1.addEventListener('change', () => { ls.set(K.p1, b1.value); });
   b2.addEventListener('change', () => { ls.set(K.p2, b2.value); });
-  // Typing in these fields must not drive the robot or toggle the camera.
   for (const el of [base, model, key]) el.addEventListener('keydown', (e) => e.stopPropagation());
-  // Status line + log download (built here so the settings markup stays as it is).
+  if (testBtn) {
+    testBtn.addEventListener('click', async () => {
+      const c = aiConfig();
+      const k = typedKey();
+      if (k && k !== '••••••••') ls.set(K.key, k);
+      if (testOut) testOut.textContent = 'Testing key…';
+      const out = await testApiKey({ provider: c.provider, base: c.base, model: c.model, key: k });
+      if (!testOut) return;
+      if (out.ok) testOut.textContent = 'OK · ' + (out.model || c.model) + ' · ' + out.latency + ' ms';
+      else if (out.kind === 'key_rejected') testOut.textContent = 'Key rejected.';
+      else if (out.kind === 'cors') testOut.textContent = 'CORS or network error. ' + corsNote(c.provider);
+      else testOut.textContent = (out.error || 'Test failed') + (out.kind === 'timeout' ? '' : '');
+    });
+  }
   const stat = document.createElement('p');
   stat.className = 'hint';
   stat.id = 'aiStatus';
@@ -265,8 +563,7 @@ export function initApiBrainUI() {
   dl.id = 'aiLog';
   dl.textContent = 'Download AI log';
   dl.addEventListener('click', downloadApiLog);
-  note.after(stat, dl);
-  // Small HUD badge while an API brain is fighting.
+  (testOut || note).after(stat, dl);
   const hud = document.createElement('div');
   hud.id = 'aiHud';
   hud.style.cssText = 'position:fixed;left:50%;bottom:6px;transform:translateX(-50%);font:600 11px/1.3 system-ui,sans-serif;'
@@ -285,4 +582,12 @@ export function initApiBrainUI() {
   on.addEventListener('change', show);
   paint();
   show();
+}
+
+if (typeof window !== 'undefined') {
+  window.RFApiBrain = {
+    testApiKey, AI_PROVIDERS, AI_BUDGET, chatUrl, scrubSecret, corsNote,
+    fighterApiCfg, apiStatsSnapshot, apiLabel, loadEntrantKey, saveEntrantKey, clearEntrantKey,
+    onApiDecision, wantsApiBrain,
+  };
 }

@@ -4,7 +4,7 @@
   'use strict';
   const S = window.RFShell;
   const esc = S.esc;
-  const MENU_SCREENS = ['title', 'main', 'select', 'ladder', 'results', 'ending', 'pause', 'credits'];
+  const MENU_SCREENS = ['title', 'main', 'select', 'ladder', 'results', 'ending', 'pause', 'credits', 'tourney', 'tourney-results'];
   const ORBIT_SCREENS = ['title', 'main', 'credits'];
 
   /* ---------- persisted choices ---------- */
@@ -71,6 +71,7 @@
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="training"><b>Training</b><small>Practice on a dummy, no timer</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="watch"><b>Bot vs Bot</b><small>Sit back and watch two CPUs fight</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="watch" data-loop="1"><b>CPU vs CPU</b><small>Back-to-back CPU fights, looping, with a fight log</small></button>
+          <button type="button" class="rfs-f rfs-btn" data-act="tournament"><b>AI Tournament</b><small>Round-robin API brains, Elo and results</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="settings"><b>Settings</b><small>Graphics, sound, CPU difficulty, round time</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="credits"><b>Credits</b></button>
         </nav>
@@ -190,7 +191,7 @@
     const s = S.state.screen;
     if (s === 'title') return;
     if (s === 'main') return S.showScreen('title');
-    if (s === 'credits' || s === 'select') return S.showScreen('main');
+    if (s === 'credits' || s === 'select' || s === 'tourney' || s === 'tourney-results') return S.showScreen('main');
     if (s === 'ladder') return S.showScreen('select');
     if (s === 'pause') return resume();
     if (s === 'results' || s === 'ending') return toMain();
@@ -212,6 +213,7 @@
       }
       openSelect(b.dataset.mode);
     }
+    else if (act === 'tournament') { if (S.openTournament) S.openTournament(); }
     else if (act === 'settings') S.openSettings();
     else if (act === 'credits') S.showScreen('credits');
     else if (act === 'back') back();
@@ -258,6 +260,7 @@
     versus: ['Versus', 'Local two-player · best of 3'],
     training: ['Training', 'Dummy · no timer'],
     watch: ['Bot vs Bot', 'Watch two CPUs · best of 3'],
+    tournament: ['AI Tournament', 'API vs API · round-robin'],
   };
   function modeInfo(mode) {
     const row = MODE_INFO[mode] || ['', ''];
@@ -431,6 +434,10 @@
     const M = S.match;
     const cfg = M.cfg;
     const mode = cfg.mode;
+    if (mode === 'tournament') {
+      if (S.onTournamentMatchEnd) S.onTournamentMatchEnd(w, M);
+      return;
+    }
     const winner = w == null ? null : (w === 0 ? cfg.p1 : cfg.p2);
     const title = w == null ? 'Match drawn' : (mode !== 'versus' && mode !== 'watch' && w === 0 ? 'You win' : winner.name + ' wins');
     const last = M.rounds[M.rounds.length - 1];

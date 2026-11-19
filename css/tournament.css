@@ -1,0 +1,74 @@
+/* AI Tournament setup, in-fight HUD, and results (matches the planned mockup). */
+.rfs-screen[data-screen="tourney"],
+.rfs-screen[data-screen="tourney-results"] {
+  align-items: flex-start; justify-content: center;
+  background: radial-gradient(ellipse at 50% 0%, rgba(12,16,28,.82), rgba(6,8,14,.92));
+  overflow: auto;
+}
+.rft-wrap { width: min(1120px, 100%); margin: 0 auto; padding-bottom: 28px; }
+.rft-wrap h1 {
+  margin: 0 0 4px; font: 800 clamp(28px, 5vw, 52px)/1 var(--ww-font);
+  letter-spacing: .06em; text-transform: uppercase;
+  background: linear-gradient(180deg, #fff 30%, #c6d0ff 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.rft-sub { margin: 0 0 18px; color: var(--ww-text-2); letter-spacing: .08em; text-transform: uppercase; font-size: 12px; }
+.rft-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.rft-card {
+  background: #14161c; border: 1px solid var(--ww-accent-line); border-radius: 16px; padding: 14px 16px;
+}
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .rft-card { background: var(--ww-glass-strong); -webkit-backdrop-filter: var(--ww-blur); backdrop-filter: var(--ww-blur); }
+}
+.rft-card h3 { margin: 0 0 10px; display: flex; align-items: center; gap: 8px; font: 700 16px var(--ww-font); }
+.rft-sw { width: 16px; height: 16px; border-radius: 50%; box-shadow: 0 0 0 2px rgba(255,255,255,.15); }
+.rft-card label { display: flex; flex-direction: column; gap: 3px; margin: 0 0 8px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ww-text-2); }
+.rft-card input, .rft-card select {
+  appearance: none; border: 1px solid var(--ww-accent-line); border-radius: 8px; background: rgba(0,0,0,.35);
+  color: var(--ww-text); padding: 7px 9px; font: 600 13px var(--ww-font);
+}
+.rft-card input[type="password"] { letter-spacing: .12em; }
+.rft-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.rft-status { margin: 6px 0 0; font-size: 12px; color: var(--ww-text-2); min-height: 1.2em; }
+.rft-status.ok { color: #8dffc1; }
+.rft-status.bad { color: #ffb4a8; }
+.rft-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+.rft-note { margin: 10px 0 0; font-size: 12px; color: var(--ww-text-2); max-width: 70ch; }
+.rft-table { width: 100%; border-collapse: collapse; margin: 12px 0 22px; }
+.rft-table th { text-align: left; font: 600 11px var(--ww-font); letter-spacing: .1em; text-transform: uppercase; color: var(--ww-text-2); padding: 8px 10px; }
+.rft-table td { padding: 10px; border-top: 1px solid rgba(255,255,255,.06); font: 600 15px var(--ww-font); }
+.rft-table tr:first-child td { background: linear-gradient(90deg, rgba(255,200,120,.12), transparent 70%); }
+.rft-bar { display: inline-block; height: 8px; border-radius: 99px; background: rgba(255,255,255,.08); width: 120px; overflow: hidden; vertical-align: middle; }
+.rft-bar > i { display: block; height: 100%; border-radius: 99px; }
+.rft-hl { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 8px; }
+.rft-hl .rft-card small { color: var(--ww-text-2); letter-spacing: .08em; text-transform: uppercase; font-size: 11px; }
+.rft-hl b { display: block; margin-top: 6px; font-size: 20px; }
+
+/* In-fight overlay */
+.rft-hud { position: fixed; inset: 0; z-index: 12; pointer-events: none; font: 600 13px/1.35 var(--ww-font); color: #e8edff; }
+.rft-hud .rft-banner {
+  position: absolute; top: 58px; left: 50%; transform: translateX(-50%);
+  padding: 6px 16px; border-radius: 999px; background: rgba(10,14,24,.7); border: 1px solid rgba(154,171,255,.35);
+  letter-spacing: .08em; text-transform: uppercase; font-size: 12px; white-space: nowrap;
+}
+.rft-bubble {
+  position: absolute; top: 110px; max-width: 280px; padding: 10px 12px; border-radius: 12px;
+  background: rgba(8,10,16,.78); border: 1px solid rgba(255,255,255,.16);
+}
+.rft-bubble.l { left: 18px; }
+.rft-bubble.r { right: 18px; }
+.rft-bubble b { display: block; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; opacity: .7; margin-bottom: 4px; }
+.rft-tags { margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; }
+.rft-tags span { font-size: 11px; padding: 2px 6px; border-radius: 6px; background: rgba(255,255,255,.08); }
+.rft-meta { position: absolute; top: 18px; font-size: 11px; color: #c5cbe0; opacity: .85; }
+.rft-meta.l { left: 18px; }
+.rft-meta.r { right: 18px; text-align: right; }
+.rft-dlog {
+  position: absolute; right: 16px; bottom: 52px; width: min(320px, 42vw);
+  padding: 10px 12px; border-radius: 12px; background: rgba(8,10,16,.78); border: 1px solid rgba(255,255,255,.12);
+  font: 600 11px/1.45 ui-monospace, monospace; max-height: 160px; overflow: hidden;
+}
+.rft-dlog div { opacity: .9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rft-bar2 { position: absolute; left: 16px; bottom: 16px; display: flex; gap: 8px; pointer-events: auto; }
+.rft-bar2 button { pointer-events: auto; }
+body.rfs-menu .rft-hud, body.rfs-dimmed .rft-hud { display: none; }

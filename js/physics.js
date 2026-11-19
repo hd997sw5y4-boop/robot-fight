@@ -5,7 +5,7 @@ import * as CANNON from 'cannon-es';
 import * as THREE from 'three';
 import { ARENA, SIZE, WORLD_SCALE } from './config.js';
 
-const G = { ARENA: 1, FIGHTER: 2, DEBRIS: 8 };
+const G = { ARENA: 1, FIGHTER: 2, DEBRIS: 8, DOWN: 16 };
 
 function matY() { return ARENA.matTop || 0; }
 
@@ -50,7 +50,7 @@ export function initArenaPhysics() {
   // Plane origin is the mat top, matching the visual floor mesh top (ARENA.matTop).
   floor.position.set(0, ARENA.matTop || 0, 0);
   floor.collisionFilterGroup = G.ARENA;
-  floor.collisionFilterMask = G.FIGHTER | G.DEBRIS;
+  floor.collisionFilterMask = G.FIGHTER | G.DEBRIS | G.DOWN;
   floor.userData = { kind: 'floor' };
   world.addBody(floor);
 
@@ -64,7 +64,7 @@ export function initArenaPhysics() {
   // flush with the mat flats (apothem). A taller invisible extension of that wall
   // keeps jump / knockback from leaving the ring — one cage, not two.
   const visH = ARENA.cageHeight || 1.48;
-  const physH = Math.max(visH + 0.67, 2.15 * WORLD_SCALE);
+  const physH = Math.max(visH + 0.67, 3.4 * WORLD_SCALE);
   const halfT = 0.06;
   for (let i = 0; i < 8; i++) {
     const A = corners[i];
@@ -80,7 +80,7 @@ export function initArenaPhysics() {
     const yaw = Math.atan2(dir.x, dir.z) + Math.PI / 2;
     wall.quaternion.setFromEuler(0, yaw, 0);
     wall.collisionFilterGroup = G.ARENA;
-    wall.collisionFilterMask = G.FIGHTER | G.DEBRIS;
+    wall.collisionFilterMask = G.FIGHTER | G.DEBRIS | G.DOWN;
     wall.userData = { kind: 'cage' };
     world.addBody(wall);
   }
@@ -89,7 +89,7 @@ export function initArenaPhysics() {
     post.addShape(new CANNON.Cylinder(0.11, 0.11, physH, 8));
     post.position.set(c.x, matY() + physH / 2, c.z);
     post.collisionFilterGroup = G.ARENA;
-    post.collisionFilterMask = G.FIGHTER | G.DEBRIS;
+    post.collisionFilterMask = G.FIGHTER | G.DEBRIS | G.DOWN;
     post.userData = { kind: 'post' };
     world.addBody(post);
   }
@@ -125,6 +125,30 @@ export function attachFighter(f) {
       if (n > 1.1 && bounceHook) bounceHook('cage', n);
     }
   });
+}
+
+/** Down / KO / get-up / jump-ghost: still hit the cage and floor, but not the other robot. */
+export function setFighterDowned(f, downed) {
+  const body = f && f.phys && f.phys.body;
+  if (!body) return;
+  if (downed) {
+    body.collisionFilterGroup = G.DOWN;
+    body.collisionFilterMask = G.ARENA;
+  } else {
+    body.collisionFilterGroup = G.FIGHTER;
+    body.collisionFilterMask = G.ARENA | G.FIGHTER;
+  }
+  body.collisionResponse = true;
+}
+
+export function clampBodyToCage(x, z, pad = 0.45) {
+  const a = (ARENA.apothem || 6.1) - pad;
+  let nx = Math.max(-a, Math.min(a, x));
+  let nz = Math.max(-a, Math.min(a, z));
+  const m = a * Math.SQRT2;
+  const s = Math.abs(nx) + Math.abs(nz);
+  if (s > m) { const k = m / s; nx *= k; nz *= k; }
+  return [nx, nz];
 }
 
 export function setFighterMove(f, vx, vz) {
@@ -163,6 +187,7 @@ export function impactVelocity(atk, def, dir) {
 }
 
 export function spawnDebris({ mesh, mass, velocity, angularVelocity, ownerId, small }) {
+  if (typeof window !== 'undefined' && window.RFFightLog && window.RFFightLog.noteFrameWork) window.RFFightLog.noteFrameWork('debris');
   mesh.updateWorldMatrix(true, true);
   const box = new THREE.Box3().setFromObject(mesh);
   const size = box.getSize(new THREE.Vector3());
@@ -284,6 +309,14 @@ function syncDebris(dt) {
     if (d.body.position.y < floor) {
       d.body.position.y = floor;
       if (d.body.velocity.y < 0) d.body.velocity.y = 0;
+    }
+    const [cx, cz] = clampBodyToCage(d.body.position.x, d.body.position.z, 0.08);
+    if (cx !== d.body.position.x || cz !== d.body.position.z) {
+      d.body.position.x = cx;
+      d.body.position.z = cz;
+      d.body.velocity.x *= 0.2;
+      d.body.velocity.z *= 0.2;
+      d._out = true;
     }
     const v = d.body.velocity.length();
     const w = d.body.angularVelocity.length();

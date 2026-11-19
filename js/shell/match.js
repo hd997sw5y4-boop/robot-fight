@@ -104,6 +104,10 @@
   function fighterCfg(p, side, cpuAi) {
     const cfg = { name: p.label, color: S.hex(p.paint.primary), control: cpuAi ? 'cpu' : (side === 'p1' || M.cfg.mode === 'versus' ? 'player' : 'cpu') };
     if (cpuAi) cfg.ai = cpuAi;
+    if (p.apiBrain) {
+      const a = { provider: p.apiBrain.provider, base: p.apiBrain.base, model: p.apiBrain.model, entrantId: p.apiBrain.entrantId };
+      cfg.apiBrain = a;
+    }
     return cfg;
   }
   function launch(opts) {
@@ -129,7 +133,7 @@
     ensureHud();
     S.clearTimers();
     M.cfg = cfg;
-    M.bestOf = S.bestOf(true);
+    M.bestOf = cfg.bestOf || (cfg.mode === 'tournament' ? 1 : S.bestOf(true));
     if (M.cfg) M.cfg.bestOf = M.bestOf;
     M.wins = [0, 0];
     M.rounds = [];
@@ -146,19 +150,20 @@
   function beginRound(n) {
     S.clearCall();
     const training = M.cfg.mode === 'training';
+    const skipIntro = training || !!(M.cfg && M.cfg.skipIntro);
     const cpuAi = M.cfg.opp ? S.aiFor(M.cfg.opp, M.cfg.mode) : null;
     M.round = n;
     M.t = 0;
     M.stats = blankStats();
     prevSt = [null, null];
     prevT = [0, 0];
-    M.phase = training ? 'fight' : 'intro';
+    M.phase = skipIntro ? 'fight' : 'intro';
     launch({
       p1: fighterCfg(M.cfg.p1, 'p1', null),
       p2: fighterCfg(M.cfg.p2, 'p2', cpuAi),
       round: n,
       roundTime: 0,
-      skipIntro: training,
+      skipIntro,
     });
     M.lastHp = S.fighters().map((f) => f.health);
     M.timeLeft = training || !S.roundLength() ? null : S.roundLength();
@@ -175,6 +180,7 @@
       S.sfx('confirm');
     };
     S.emit('roundBegin', n);
+    if (skipIntro) { announce(); return; }
     // [fight-presentation hook] Round 1 opens with the tale of the tape + camera intro; the round
     // call follows once it ends (or is skipped). Without the presentation layer: unchanged.
     if (n === 1 && S.tape && S.tape.start(announce)) return;

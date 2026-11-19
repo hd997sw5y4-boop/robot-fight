@@ -35,7 +35,7 @@
   window.RFShellHook = {
     onReady(h) { handle = h; tryReady(); },
     input(side) { return S.inputFor ? S.inputFor(side) : null; },
-    cpuControls(side) { return !!(S.match && S.match.cfg && S.match.cfg.mode === 'watch' && side === 'p1'); },
+    cpuControls(side) { return !!(S.match && S.match.cfg && (S.match.cfg.mode === 'watch' || S.match.cfg.mode === 'tournament') && side === 'p1'); },
     clearTapped() { if (S.clearTapped) S.clearTapped(); },
   };
   const modUrl = (p) => new URL(p, document.baseURI).href;
