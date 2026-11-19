@@ -865,14 +865,13 @@ function emitSparks(point, dir, count = 16) {
   }
 }
 
+const smokeMat = new THREE.MeshBasicMaterial({
+  color: 0x8a8f96, transparent: true, opacity: 0.35, depthWrite: false, toneMapped: false,
+});
+const smokeMatPool = [];
 function emitSmoke(point) {
-  const mat = new THREE.MeshBasicMaterial({
-    color: 0x8a8f96,
-    transparent: true,
-    opacity: 0.35,
-    depthWrite: false,
-    toneMapped: false,
-  });
+  const mat = smokeMatPool.pop() || smokeMat.clone();
+  mat.opacity = 0.35;
   const m = new THREE.Mesh(SMOKE_GEO, mat);
   m.position.copy(point);
   m.position.x += (Math.random() - 0.5) * 0.08;
@@ -1420,7 +1419,7 @@ export function stepDamage(scene, dt) {
     s.m.material.opacity = 0.35 * (1 - t);
     if (s.age >= s.life) {
       scene.remove(s.m);
-      s.m.material.dispose();
+      if (s.m.material && s.m.material !== smokeMat) smokeMatPool.push(s.m.material);
       smokes.splice(i, 1);
     }
   }
@@ -1782,4 +1781,28 @@ export function previewDamage(p2, scene, towardCam) {
     x: d.obj.position.x, y: d.obj.position.y, z: d.obj.position.z, settled: d.settled, owner: d.owner,
   }));
   return { last, debris };
+}
+
+
+/** Hidden stand-ins so renderer.compile can warm sparks, oil, puddles and smoke. */
+export function warmupDamage(scene) {
+  if (!scene || warmupDamage._done) return;
+  warmupDamage._done = true;
+  getPuddleMats();
+  const g = new THREE.Group();
+  g.visible = false;
+  g.add(new THREE.Mesh(SPARK_GEO, sparkMat));
+  g.add(new THREE.Mesh(SPARK_GEO, sparkMatHot));
+  g.add(new THREE.Mesh(OIL_GEO, oilDropMat));
+  g.add(new THREE.Mesh(SMOKE_GEO, smokeMat));
+  const puddles = getPuddleMats();
+  if (puddles && puddles[0]) g.add(new THREE.Mesh(PUDDLE_GEO, puddles[0]));
+  scene.add(g);
+  warmupDamage._group = g;
+}
+export function warmupDamageCleanup(scene) {
+  const g = warmupDamage._group;
+  if (!g) return;
+  if (g.parent) g.parent.remove(g);
+  warmupDamage._group = null;
 }

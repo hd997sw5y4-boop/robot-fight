@@ -61,6 +61,8 @@ import {
   clearAllDebris,
   syncPartHud,
   previewDamage,
+  warmupDamage,
+  warmupDamageCleanup,
   applyStrikeWear,
   strikeMul,
   debugBreakSub,
@@ -1789,14 +1791,17 @@ function consumeAttacks(inp, dt = 0) {
   };
 }
 
-function toward(me, other) {
-  const v = new THREE.Vector3(
+const _toward = new THREE.Vector3();
+const _moveRight = new THREE.Vector3();
+const _moveVel = new THREE.Vector3();
+function toward(me, other, out = _toward) {
+  out.set(
     other.root.position.x - me.root.position.x,
     0,
     other.root.position.z - me.root.position.z,
   );
-  if (v.lengthSq() < 1e-6) return new THREE.Vector3(me.id === 'p1' ? 1 : -1, 0, 0);
-  return v.normalize();
+  if (out.lengthSq() < 1e-6) return out.set(me.id === 'p1' ? 1 : -1, 0, 0);
+  return out.normalize();
 }
 
 function clipWorldSpeed(f, name) {
@@ -1819,14 +1824,14 @@ function locoMoveSpeeds(f, blocking) {
 }
 
 function moveFighter(f, other, sidestep, inout, dt, speeds) {
-  const fwd = toward(f, other);
-  const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
+  const fwd = toward(f, other, _toward);
+  _moveRight.set(-fwd.z, 0, fwd.x);
   const along = inout >= 0 ? speeds.fwd : speeds.back;
-  const vel = new THREE.Vector3();
-  vel.addScaledVector(right, sidestep * speeds.strafe);
-  vel.addScaledVector(fwd, inout * along);
-  setFighterMove(f, vel.x, vel.z);
-  return Math.hypot(vel.x, vel.z);
+  _moveVel.set(0, 0, 0);
+  _moveVel.addScaledVector(_moveRight, sidestep * speeds.strafe);
+  _moveVel.addScaledVector(fwd, inout * along);
+  setFighterMove(f, _moveVel.x, _moveVel.z);
+  return Math.hypot(_moveVel.x, _moveVel.z);
 }
 
 // Spacing is normally kept by footwork (stepFighter backs a robot off with its walk when it is
@@ -4738,6 +4743,9 @@ function onLoad(gltf) {
   faceEachOther(p1, p2, 0, true);
   paintRound();
   syncHud();
+  warmupDamage(scene);
+  try { renderer.compile(scene, camera); } catch (_) {}
+  warmupDamageCleanup(scene);
   document.getElementById('loader').classList.add('hidden');
   document.getElementById('banner').classList.add('show');
   document.getElementById('again').addEventListener('click', resetMatch);

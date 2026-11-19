@@ -25,6 +25,9 @@ const _s = new THREE.Quaternion();
 const _id = new THREE.Quaternion();
 const _a = new THREE.Vector3();
 const Y = new THREE.Vector3(0, 1, 0);
+const _tInv = new THREE.Quaternion();
+const _swHold = new THREE.Quaternion();
+const _rCal = new THREE.Quaternion();
 
 function key(name) { return String(name || '').replace(/^mixamorig[:._]*/i, ''); }
 
@@ -46,7 +49,7 @@ function decompose(r, a) {
   const p = r.x * a.x + r.y * a.y + r.z * a.z;
   _t.set(a.x * p, a.y * p, a.z * p, r.w);
   if (_t.lengthSq() < 1e-12) _t.identity(); else _t.normalize();
-  _s.copy(r).multiply(_t.clone().invert());
+  _s.copy(r).multiply(_tInv.copy(_t).invert());
   return 2 * Math.atan2(p, r.w);
 }
 
@@ -70,7 +73,7 @@ export function applyJointLimits(f) {
         // Calibrate only from a standing pose. Measuring mid-punch or mid-knockdown
         // locked a bad hinge axis and then fought every later clip, including idle.
         if (!standing) continue;
-        const r = _r.clone();
+        const r = _rCal.copy(_r);
         if (r.w < 0) r.set(-r.x, -r.y, -r.z, -r.w);
         const ang = 2 * Math.acos(Math.min(1, r.w));
         if (ang < 20 * D || ang > 90 * D) continue;
@@ -86,8 +89,8 @@ export function applyJointLimits(f) {
       if (th2 !== th) changed = true;
       if (!changed) continue;
       if (fold > 75 * D) f.jointStats.flips++;
-      const sw = _s.clone();
-      _r.copy(sw).multiply(twistQ(j.axis, th2));
+      _swHold.copy(_s);
+      _r.copy(_swHold).multiply(twistQ(j.axis, th2));
     } else {
       const th = decompose(_r, Y);
       let changed = clampSwing(j.lim.swing);
@@ -97,8 +100,8 @@ export function applyJointLimits(f) {
       if (th2 !== th) changed = true;
       if (!changed) continue;
       if (fold > 80 * D) f.jointStats.flips++;
-      const sw = _s.clone();
-      _r.copy(sw).multiply(twistQ(Y, th2));
+      _swHold.copy(_s);
+      _r.copy(_swHold).multiply(twistQ(Y, th2));
     }
     b.quaternion.copy(j.rest).multiply(_r);
     f.jointStats.clamped++;
