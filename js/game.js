@@ -1461,8 +1461,10 @@ function setAnim(f, name, fade = 0.2) {
     || (MODEL.animations.victoryVariants || []).includes(clipName)
     || clipName === MODEL.animations.victory
     || ['KnockedOut', 'GettingUp', 'KnockedDown', 'StandingReactDeathBackward', 'StumbleBackwards', 'LivershotKnockdown'].includes(clipName);
-  const poppy = isPoppyClip(clipName);
-  const fadeT = Math.max(poppy ? 0.24 : 0.15, Math.min(poppy ? 0.42 : 0.4, fade));
+  // fadeIn/crossFadeTo multiply their 0→1 interpolant by this.weight, so the incoming
+  // clip must be weight 1 or it stays invisible (idle base layer fills the gap, but
+  // the attack still runs and can deal damage). The interpolant is what blends in.
+  const fadeT = Math.max(0.15, Math.min(0.4, fade));
   if (f.current === clipName && next.isRunning() && next.getEffectiveWeight() > 0.5) {
     // Don't hard-reset a playing clip — that pops mid-pose. Let it finish or keep looping.
     return next;
@@ -1470,8 +1472,7 @@ function setAnim(f, name, fade = 0.2) {
   const prev = f.actions[f.current];
   next.reset();
   next.enabled = true;
-  // Start at weight 0 so the incoming pose blends in instead of popping on the first frame.
-  next.setEffectiveWeight(0);
+  next.setEffectiveWeight(1);
   next.timeScale = 0.9 + Math.random() * 0.2;
   // No time warping: a warped cross-fade rescales both clips' playback by their length ratio
   // (and leaves the new clip at timeScale x 1/old), which overrode every strike's speed and
@@ -1974,8 +1975,8 @@ function tryAttack(f, kind, clipName, exact = false) {
   f.shield.visible = false;
   const st0 = STRIKE_T && STRIKE_T[clip];
   // Blend over the skipped lead-in slowly enough that no limb tip outruns ~6 m/s from the blend.
-  let fadeAtk = Math.max(0.18, Math.min(0.4, ((st0 && st0.gap0) || 0) / (6 * SIZE)));
-  if (isPoppyClip(clip)) fadeAtk = Math.max(0.26, fadeAtk);
+  // Short fade-in over the skipped lead-in so the swing is at full weight before contact.
+  let fadeAtk = Math.max(0.12, Math.min(0.18, ((st0 && st0.gap0) || 0) / (6 * SIZE)));
   setAnim(f, clip, fadeAtk);
   setFighterMove(f, 0, 0); // no walking velocity carried into the strike
   playSfx('whoosh');
