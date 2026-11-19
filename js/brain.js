@@ -205,7 +205,7 @@ export function createPacedBrain(getProfile) {
         break;
       }
       case 'approach': {
-        const want = s.plan === 'kick' ? kickR - 0.05 : punchR - 0.05;
+        const want = s.plan === 'kick' ? kickR - 0.08 : punchR - 0.14;
         intent.move = dist > want + 0.04 ? 1 : (dist < want - 0.3 ? -0.5 : 0);
         intent.run = dist > 2.6 || (s.burst && dist > want + 0.2);
         // Cut the angle a little while closing, unless the target is on the ropes: then
@@ -227,8 +227,8 @@ export function createPacedBrain(getProfile) {
       }
       case 'strike': {
         if (self.cooldown <= 0 && !nowAttacking) {
-          const kickOk = self.canKick && dist <= kickR + 0.05 && dist > punchR - 0.15;
-          const punchOk = self.canPunch && dist <= punchR + 0.08;
+          const kickOk = self.canKick && dist <= kickR + 0.02 && dist > punchR - 0.2;
+          const punchOk = self.canPunch && dist <= punchR - 0.02;
           let kind = null;
           if (s.plan === 'kick' && kickOk) kind = 'kick';
           else if (punchOk) kind = 'punch';
@@ -239,7 +239,10 @@ export function createPacedBrain(getProfile) {
             // Now and then a kick becomes a jump kick (it closes a little distance in the air).
             if (kind === 'kick' && self.canFlip && Math.random() < (prof.jump != null ? prof.jump : 0.05)) intent.attack = 'jump';
             s.plan = planStrike(prof, self) || 'punch'; // next one in the chain
-          } else intent.move = dist > punchR ? 1 : -0.6;
+          } else {
+            intent.move = dist > punchR - 0.14 ? 1 : -0.6;
+            intent.run = dist > punchR + 0.1;
+          }
         }
         if (s.modeT > s.modeLen) endCombo(prof, aggr, self);
         break;

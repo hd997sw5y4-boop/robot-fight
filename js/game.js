@@ -1858,7 +1858,8 @@ function separate(a, b, dt = 0) {
   // which matters during strikes when the torso leans in.
   let push = d < COMBAT.separateHard ? (COMBAT.separateHard - d) / 2 : 0;
   const cg = chestGap(a, b);
-  const chestMin = 0.6 * SIZE;
+  const striking = a.state === 'punch' || a.state === 'kick' || b.state === 'punch' || b.state === 'kick';
+  const chestMin = striking ? 0.42 * SIZE : 0.6 * SIZE;
   if (cg < chestMin) push = Math.max(push, (chestMin - cg) / 2);
   // After an exchange both step back out a little so they don't stay glued together.
   for (const f of [a, b]) {
@@ -1963,6 +1964,12 @@ function tryAttack(f, kind, clipName, exact = false) {
   const clip = exact && clipName ? clipName : fitStrikeClip(f, kind, clipName
     || (kind === 'punch' ? pickPunch(f) : pickKick(f, true))
     || MODEL.animations[kind], other);
+  if (f.isCpu && other && STRIKE_T) {
+    const tip = strikeTip(clip);
+    const gap = f.root.position.distanceTo(other.root.position);
+    const close = Math.min((kind === 'kick' ? COMBAT.kickLunge : COMBAT.punchLunge) || 0, 0.36 * SIZE);
+    if (tip != null && tip + close < gap - 0.06) return false;
+  }
   if (kind === 'punch' && !f.isCpu) f.lastPunchAt = performance.now() / 1000;
   if (kind === 'punch') f.chainHit = false;
   f.state = kind;
@@ -2028,6 +2035,7 @@ function tryAttack(f, kind, clipName, exact = false) {
 // punching arm is almost fully straight and the fist actually reaches the longer punch range.
 // Elbows and uppercuts stay the short in-fighting clips.
 const PUNCH_EXTEND_CLIPS = new Set(['LeadJab', 'Punching', 'PunchCombo', 'RightHook']);
+const PUNCH_AIM_CLIPS = new Set(['LeadJab', 'Punching', 'PunchCombo', 'RightHook', 'Uppercut', 'ElbowPunching']);
 
 // Choose a strike whose measured reach fits the gap: the fist/foot should just reach the
 // body surface (short elbows and uppercuts up close, jabs and long kicks from further out),
@@ -2043,10 +2051,12 @@ function strikeTip(name) {
 function fitStrikeClip(f, kind, clip, other) {
   if (!STRIKE_T || !other) return clip;
   const gap = f.root.position.distanceTo(other.root.position);
-  const lunge = (kind === 'kick' ? COMBAT.kickLunge : COMBAT.punchLunge) || 0;
+  // Only credit a short step-in: the full lunge often stops once chests are close,
+  // so assuming the whole punchLunge made Punching / Uppercut look in range and then miss.
+  const lunge = Math.min((kind === 'kick' ? COMBAT.kickLunge : COMBAT.punchLunge) || 0, 0.36 * SIZE);
   const fits = (n) => {
     const tip = strikeTip(n);
-    return tip != null && tip + lunge >= gap - 0.02 && tip <= gap + 0.3;
+    return tip != null && tip + lunge >= gap - 0.02 && tip <= gap + 0.35;
   };
   if (clip && fits(clip)) return clip;
   const pool = kind === 'punch' ? punchClipsFor(f) : availableClips(f, MODEL.animations.kickVariants);
@@ -2294,7 +2304,9 @@ function capsuleProbe(def, p, only) {
 function strikeContact(atk, def, kind) {
   const bones = atk.strikeBones && atk.strikeBones[kind];
   if (!bones || !bones.length) return null; // no limb, no hit
-  const shell = (TIP_SHELL[kind] || 0.08) * SIZE;
+  const shell = kind === 'kick'
+    ? Math.max((TIP_SHELL.kick || 0.125) * SIZE, COMBAT.kickShell || 0)
+    : Math.max((TIP_SHELL.punch || 0.12) * SIZE, COMBAT.fistShell || 0);
   atk.model.updateWorldMatrix(true, true);
   def.model.updateWorldMatrix(true, true);
   // Swept test from the bone's previous position, so a fast strike can't step past the body
@@ -2532,8 +2544,26 @@ function isPoppyClip(clip) {
 function pruneOrphanTracks(clip, root) {
   if (!clip || !clip.tracks || !root) return;
   const names = new Set();
-  root.traverse((o) => { if (o.name) names.add(o.name); });
-  const kept = clip.tracks.filter((tr) => names.has(String(tr.name).split('.')[0]));
+  const add = (n) => { if (n) names.add(n); };
+  root.traverse((o) => {
+    add(o.name);
+    if (o.isSkinnedMesh && o.skeleton) for (const b of o.skeleton.bones) add(b && b.name);
+  });
+  const nodeName = (tr) => {
+    const raw = String(tr.name || '');
+    if (THREE.PropertyBinding && THREE.PropertyBinding.parseTrackName) {
+      try {
+        const p = THREE.PropertyBinding.parseTrackName(raw);
+        if (p && p.nodeName) return p.nodeName;
+      } catch (_) {}
+    }
+    const parts = raw.split('.');
+    if (parts.length >= 2 && /^(quaternion|position|scale)$/i.test(parts[parts.length - 1])) {
+      return parts.slice(0, -1).join('.');
+    }
+    return parts[0];
+  };
+  const kept = clip.tracks.filter((tr) => names.has(nodeName(tr)));
   if (kept.length !== clip.tracks.length) clip.tracks = kept;
 }
 
@@ -2882,7 +2912,7 @@ function applyGroundBow(f) {
 // body still lunges in; this only extends the arm on top of the clip. Hooks keep a little
 // elbow bend so they still read as hooks.
 function punchExtendWeight(f) {
-  if (f.state !== 'punch' || f.retract || !PUNCH_EXTEND_CLIPS.has(f.attackClip)) return 0;
+  if (f.state !== 'punch' || f.retract || !PUNCH_AIM_CLIPS.has(f.attackClip)) return 0;
   const action = f.actions[f.attackClip];
   if (!action) return 0;
   const tm = strikeTiming(f, action);
@@ -2940,6 +2970,7 @@ function applyPunchReach(f) {
   const other = f === p1 ? p2 : p1;
   if (!other || !f.ikArms) return;
   const hook = f.attackClip === 'RightHook';
+  const tight = f.attackClip === 'Uppercut' || f.attackClip === 'ElbowPunching';
   const side = punchingArmSide(f);
   const arm = f.ikArms[side];
   if (!arm || !arm.upper || !arm.lower || !arm.hand) return;
@@ -2953,7 +2984,7 @@ function applyPunchReach(f) {
   const len2 = _ikB.distanceTo(_ikC);
   if (len1 < 0.02 || len2 < 0.02) return;
   const full = len1 + len2;
-  const lock = hook ? 0.90 : 0.975; // nearly straight; hooks keep a visible bend
+  const lock = tight ? 0.82 : hook ? 0.90 : 0.975; // nearly straight; hooks / uppercuts keep a bend
   const curLen = _ikA.distanceTo(_ikC);
 
   // Aim: blend the clip's punch direction with a line to the opponent's chest.
@@ -2964,13 +2995,13 @@ function applyPunchReach(f) {
   _ikT.set(other.root.position.x, chestY, other.root.position.z).sub(_ikA);
   if (_ikT.lengthSq() > 1e-6) _ikT.normalize();
   else _ikT.copy(_ikD);
-  const aimMix = hook ? 0.25 : 0.55;
+  const aimMix = tight ? 0.72 : hook ? 0.35 : 0.82;
   _ikD.lerp(_ikT, aimMix * w).normalize();
 
   const wantLen = curLen + (full * lock - curLen) * w;
   // Don't drive the fist through the opponent; the body lunge still closes the rest of the gap.
   const toChest = Math.hypot(other.root.position.x - _ikA.x, other.root.position.z - _ikA.z);
-  const maxToBody = Math.max(0.1, toChest - (COMBAT.bodyRadius || 0.27 * SIZE) - 0.06);
+  const maxToBody = Math.max(0.1, toChest - (COMBAT.bodyRadius || 0.27 * SIZE) - 0.02);
   const reach = Math.min(wantLen, maxToBody);
   _ikT.copy(_ikA).addScaledVector(_ikD, reach);
 
@@ -3446,7 +3477,7 @@ function stepFighter(f, other, inp, dt) {
     const gap = f.root.position.distanceTo(other.root.position);
     const airKick = f.airMove && f.airMove.action === action ? f.airMove : null;
     if (airKick) stepAirMove(f, dt); // jump kick: travels only while airborne, lands still
-    else if (!f.atkContact && ct < tm.a0 && chestGap(f, other) > 0.72 * SIZE && !limbInside(f, other, f.state)) {
+    else if (!f.atkContact && ct < tm.a0 && chestGap(f, other) > 0.46 * SIZE && !limbInside(f, other, f.state)) {
       // Step into every swing; chestGap / limbInside stop the body driving through the opponent.
       const lunge = (f.state === 'kick' ? COMBAT.kickLunge : COMBAT.punchLunge) || 0;
       const fwd = toward(f, other);

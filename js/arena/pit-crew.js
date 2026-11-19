@@ -168,9 +168,21 @@ function pickBones(raw) {
 
 const BONE_TRACK = {
   Hips: 'Hips', Chest: 'Chest', Head: 'Head',
-  UpperArmL: 'UpperArm.L', UpperArmR: 'UpperArm.R',
-  LowerArmL: 'LowerArm.L', LowerArmR: 'LowerArm.R',
+  UpperArmL: 'UpperArmL', UpperArmR: 'UpperArmR',
+  LowerArmL: 'LowerArmL', LowerArmR: 'LowerArmR',
 };
+
+// Three.js PropertyBinding splits on '.', so a bone named UpperArm.L never binds
+// a track called UpperArm.L.quaternion. Drop the dots before posing or clipping.
+function stripBoneDots(rootObj) {
+  const fix = (o) => {
+    if (o && typeof o.name === 'string' && o.name.includes('.')) o.name = o.name.replace(/\./g, '');
+  };
+  rootObj.traverse((o) => {
+    fix(o);
+    if (o.isSkinnedMesh && o.skeleton) for (const b of o.skeleton.bones) fix(b);
+  });
+}
 
 function storeRest(bones) {
   for (const b of Object.values(bones)) {
@@ -324,6 +336,7 @@ function makePerson(gltf, teamHex, seed, style, { tint = true } = {}) {
   if (tint) tintClothes(model, teamHex);
   fitOnFloor(model, { height: 1.72 });
   group.add(model);
+  stripBoneDots(model);
   const bones = pickBones(boneMap(model));
   storeRest(bones);
   const mixer = new THREE.AnimationMixer(model);
