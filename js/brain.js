@@ -236,8 +236,6 @@ export function createPacedBrain(getProfile) {
           if (kind) {
             intent.attack = kind;
             s.inRangeT = 0;
-            // Now and then a kick becomes a jump kick (it closes a little distance in the air).
-            if (kind === 'kick' && self.canFlip && Math.random() < (prof.jump != null ? prof.jump : 0.05)) intent.attack = 'jump';
             s.plan = planStrike(prof, self) || 'punch'; // next one in the chain
           } else {
             intent.move = dist > punchR - 0.14 ? 1 : -0.6;

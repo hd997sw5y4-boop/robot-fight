@@ -127,7 +127,6 @@
       else inp.dashFwd = true;
     }
     inp.flipFront = b(5) && inp.inout > 0.5;
-    inp.jumpKick = b(11);
     return inp;
   };
   const padPrev = new Map();

@@ -11,6 +11,10 @@ export const SIZE = 1.12 * WORLD_SCALE;
 // Root padding that keeps a fighter capsule inside the cage (chest sphere is 0.48*SIZE).
 export const CAGE_PAD = 0.48 * SIZE + 0.14;
 
+// Flip / backflip clips kept in the GLB so joint limits can still be fitted from them,
+// but they are not loaded into the fight mixer (they read as a back or side flip kick).
+export const UNUSED_CLIPS = ['FlipKick', 'SpinFlipKick', 'ChapaGiratoria', 'MeiaLuaDeCompasso', 'Backflip', 'BackFlipToUppercut'];
+
 // Shared special-move energy (rocket punch + thruster dash). Costs are absolute points
 // on a 0–energyMax pool that refills after a short delay.
 export const SPECIAL = {
@@ -63,13 +67,13 @@ export const MODEL = {
     punchRight: ['Punching', 'PunchCombo', 'ElbowPunching', 'LeadJab', 'RightHook', 'Uppercut'],
     punchLeft: [],
 
-    // --- kicks (specials / jump kicks) ---
+    // --- kicks (standing, front-facing). Flip-kick clips stay in the GLB for joint
+    // fitting but are not mapped here and are not loaded into the mixer.
     kick: 'Kicking',
     kickVariants: ['Kicking', 'MmaKick', 'RoundhouseKick', 'SideKick', 'MeiaLuaDeFrente', 'LegSweep', 'KneeKickLead'],
-    kickSpecial: ['FlipKick', 'ChapaGiratoria', 'SpinFlipKick', 'MeiaLuaDeCompasso'],
-    flipSpecial: ['FlipKick', 'ChapaGiratoria', 'SpinFlipKick', 'MeiaLuaDeCompasso'],
-    // Airborne moves: the root holds the clip's own height (no grounding pull) until landing.
-    jumpKicks: ['FlipKick', 'SpinFlipKick'],
+    kickSpecial: [],
+    flipSpecial: [],
+    jumpKicks: [],
 
     // --- blocks-dodges ---
     dodgeBack: null, // 'Backflip' removed (lands on its hands and crawls back up: read as climbing)
@@ -154,7 +158,7 @@ export const COMBAT = {
     LeadJab: 0.18, Punching: 0.2, PunchCombo: 0.26, ElbowPunching: 0.26, RightHook: 0.26, Uppercut: 0.28,
     // kicks
     Kicking: 0.36, MmaKick: 0.36, SideKick: 0.36, KneeKickLead: 0.32, LegSweep: 0.38, RoundhouseKick: 0.42,
-    MeiaLuaDeFrente: 0.44, FlipKick: 0.5, ChapaGiratoria: 0.5, SpinFlipKick: 0.55, MeiaLuaDeCompasso: 0.55,
+    MeiaLuaDeFrente: 0.44,
   },
   whiffMul: 1.6,
   punchSpeed: 1.45,      // punch clip playback (damage slows it again)
@@ -186,7 +190,7 @@ export const COMBAT = {
   downRest: 0.85,      // seconds lying still before getting up (same every time: robots don't tire)
   downMax: 4.2,        // safety: get up by this long after the knockdown started
   getupTime: 1.25,     // the GettingUp clip is played over about this long
-  // Flips (Y front flip, U jump kick; pad RB+toward front flip, R3 jump kick). No back flip.
+  // Front flip dodge (Y, or R1 + forward). No back flip and no jump / flip kicks.
   dodge: {
     back: 1.75 * SIZE,      // metres a back flip carries the robot away
     frontPast: 1.0 * SIZE,  // a front flip lands this far beyond the opponent (when there's room)
@@ -195,7 +199,6 @@ export const COMBAT = {
     ringMargin: 0.75 * SIZE, // landing spot stays this far inside the ring
     maxLegDamage: 0.55,     // a leg damaged past this (or a lost leg / foot) can't flip
   },
-  jumpKickTravel: 0.6 * SIZE, // a jump kick closes up to this much distance in the air
   // Stomp / ground punch on a downed robot (key I, pad Y).
   ground: {
     reach: 1.05 * SIZE,      // nearest lying body segment must be this close (root XZ)

@@ -8,7 +8,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { IS_MOBILE } from './mobile.js';
-import { SIZE, CAM_SIZE, MODEL, ARENA, COMBAT, DAMAGE, GFX_PRESETS, LOOP_CLIPS, getFighterStats, CAGE_PAD, SPECIAL } from './config.js';
+import { SIZE, CAM_SIZE, MODEL, ARENA, COMBAT, DAMAGE, GFX_PRESETS, LOOP_CLIPS, UNUSED_CLIPS, getFighterStats, CAGE_PAD, SPECIAL } from './config.js';
 import { CLIP_SPEEDS } from './clip-speeds.js';
 import { applyChrome, setChromeLow } from './chrome.js';
 import { initJointLimits, applyJointLimits, fitJointLimits, hingeOf, hingeAngle, flexHinge } from './joints.js';
@@ -1090,6 +1090,7 @@ function makeFighter(gltf, color, side) {
   const mixer = new THREE.AnimationMixer(model);
   const actions = {};
   for (const clip of gltf.animations) {
+    if (UNUSED_CLIPS.includes(clip.name)) continue;
     pruneOrphanTracks(clip, model);
     const act = mixer.clipAction(clip);
     const loop = LOOP_CLIPS.includes(clip.name);
@@ -1179,7 +1180,7 @@ function makeFighter(gltf, color, side) {
 // Attacks skip the slow lead-in, hit on the measured frames and hand control back as soon as
 // the strike is pulled back, instead of locking the robot for the whole (long) Mixamo clip.
 let STRIKE_T = null;
-// Airborne clips (jump kicks, flips), measured once: when the whole body leaves the mat and
+// Airborne clips (front flip dodge), measured once: when the whole body leaves the mat and
 // lands again (root at 0, the clip's own hips height), plus the standing baseline.
 let AIR_T = null;
 function measureAir(f) {
@@ -2079,13 +2080,9 @@ function nextPlayerPunch(f) {
   return { clip: chain[idx] || chain[0], chain: idx };
 }
 
-function pickKick(f, allowFlip) {
-  const jumps = MODEL.animations.jumpKicks || [];
-  // No jump kicks on a broken / badly bent leg.
-  const special = availableClips(f, MODEL.animations.flipSpecial || MODEL.animations.kickSpecial).filter((n) => canFlip(f) || !jumps.includes(n));
+function pickKick(f) {
   const basic = availableClips(f, MODEL.animations.kickVariants);
-  const useSpecial = allowFlip && special.length && Math.random() < 0.14;
-  const clip = pickClip(useSpecial ? special : basic, MODEL.animations.kick, f.lastKick, f);
+  const clip = pickClip(basic, MODEL.animations.kick, f.lastKick, f);
   f.lastKick = clip;
   return clip;
 }
@@ -2174,7 +2171,7 @@ window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 function clearStuckKeys() {
   keys.clear();
   tapped.clear();
-  held.punch = held.kick = held.ground = held.flipFront = held.jumpKick = held.rocket = held.dashFwd = held.dashBack = false;
+  held.punch = held.kick = held.ground = held.flipFront = held.rocket = held.dashFwd = held.dashBack = false;
 }
 window.addEventListener('blur', clearStuckKeys);
 document.addEventListener('visibilitychange', () => { if (document.hidden) clearStuckKeys(); });
@@ -2191,7 +2188,6 @@ function rawInput() {
   inp.tapKick = tapped.has('k');
   inp.tapGround = tapped.has('i');
   inp.tapFlipFront = tapped.has('y');
-  inp.tapJumpKick = tapped.has('u');
   inp.tapRocket = tapped.has('q');
   inp.tapDashFwd = tapped.has('e');
   inp.tapDashBack = tapped.has('x');
@@ -2201,7 +2197,6 @@ function rawInput() {
   inp.ground = keys.has('i') || inp.tapGround;
   inp.run = keys.has('shift');
   inp.flipFront = keys.has('y') || inp.tapFlipFront; // (P is pause)
-  inp.jumpKick = keys.has('u') || inp.tapJumpKick;
   inp.rocket = keys.has('q') || inp.tapRocket;
   inp.dashFwd = keys.has('e') || inp.tapDashFwd;
   inp.dashBack = keys.has('x') || inp.tapDashBack;
@@ -2220,14 +2215,13 @@ function rawInput() {
     if (gp.buttons[1]?.pressed) inp.kick = true;
     if (gp.buttons[3]?.pressed) inp.ground = true;
     // DualSense / Chrome standard mapping: L1 rocket, R2 dash (stick back = back dash),
-    // R1+forward front flip, R3 jump kick, Square blocks (L1/R2 are no longer block).
+    // R1+forward front flip, Square blocks (L1/R2 are no longer block).
     if (gp.buttons[4]?.pressed) inp.rocket = true;
     if (gp.buttons[7]?.pressed) {
       if (inp.inout < -0.25) inp.dashBack = true;
       else inp.dashFwd = true;
     }
     if (gp.buttons[5]?.pressed && inp.inout > 0.5) inp.flipFront = true;
-    if (gp.buttons[11]?.pressed) inp.jumpKick = true;
     if (gp.buttons[2]?.pressed) inp.block = true;
   }
   inp.sidestep = Math.max(-1, Math.min(1, inp.sidestep));
@@ -2242,7 +2236,6 @@ function consumeAttacks(inp, dt = 0) {
   const kick = (inp.kick && !held.kick) || !!inp.tapKick;
   const ground = (!!inp.ground && !held.ground) || !!inp.tapGround;
   const flipFront = (!!inp.flipFront && !held.flipFront) || !!inp.tapFlipFront;
-  const jumpKick = (!!inp.jumpKick && !held.jumpKick) || !!inp.tapJumpKick;
   const rocket = (!!inp.rocket && !held.rocket) || !!inp.tapRocket;
   const dashFwd = (!!inp.dashFwd && !held.dashFwd) || !!inp.tapDashFwd;
   const dashBack = (!!inp.dashBack && !held.dashBack) || !!inp.tapDashBack;
@@ -2250,7 +2243,6 @@ function consumeAttacks(inp, dt = 0) {
   held.kick = inp.kick;
   held.ground = !!inp.ground;
   held.flipFront = !!inp.flipFront;
-  held.jumpKick = !!inp.jumpKick;
   held.rocket = !!inp.rocket;
   held.dashFwd = !!inp.dashFwd;
   held.dashBack = !!inp.dashBack;
@@ -2258,7 +2250,6 @@ function consumeAttacks(inp, dt = 0) {
   else if (dashFwd) { held.buf = 'dashFwd'; held.bufT = COMBAT.inputBuffer || 0.3; logInputPress('p1', 'dash_forward'); }
   else if (dashBack) { held.buf = 'dashBack'; held.bufT = COMBAT.inputBuffer || 0.3; logInputPress('p1', 'dash_back'); }
   else if (flipFront) { held.buf = 'flipFront'; held.bufT = COMBAT.inputBuffer || 0.3; }
-  else if (jumpKick) { held.buf = 'jumpKick'; held.bufT = COMBAT.inputBuffer || 0.3; }
   else if (ground) { held.buf = 'ground'; held.bufT = COMBAT.inputBuffer || 0.3; }
   else if (punch) { held.buf = 'punch'; held.bufT = COMBAT.inputBuffer || 0.3; logInputPress('p1', 'punch'); }
   else if (kick) { held.buf = 'kick'; held.bufT = COMBAT.inputBuffer || 0.3; logInputPress('p1', 'kick'); }
@@ -2270,7 +2261,7 @@ function consumeAttacks(inp, dt = 0) {
   return {
     sidestep: inp.sidestep, inout: inp.inout, block: inp.block, run: !!inp.run,
     punch: b === 'punch', kick: b === 'kick', ground: b === 'ground',
-    flipFront: b === 'flipFront', jumpKick: b === 'jumpKick',
+    flipFront: b === 'flipFront',
     rocket: b === 'rocket', dashFwd: b === 'dashFwd', dashBack: b === 'dashBack',
   };
 }
@@ -2480,9 +2471,6 @@ function tryAttack(f, kind, clipName, exact = false) {
   setAnim(f, clip, fadeAtk);
   setFighterMove(f, 0, 0); // no walking velocity carried into the strike
   playSfx('whoosh');
-  // [announcer hook]
-  const flips = MODEL.animations.flipSpecial || MODEL.animations.kickSpecial || [];
-  if (kind === 'kick' && flips.includes(clip)) announce('jumpKick', { delay: 0.18 });
   const action = f.actions[clip] || f.actions[kind];
   if (action) {
     // Faster strikes: punches ~1.3x, kicks ~1.15x (damage slows them again), starting just
@@ -2506,17 +2494,6 @@ function tryAttack(f, kind, clipName, exact = false) {
     f.strikeCap = cap;
     // Start in the wind-up, not at the measured contact frame, so the strike reads.
     if (st) action.time = isPoppyClip(clip) ? Math.max(0, st.start - 0.12) : Math.max(0, st.start - 0.22);
-    // Jump kicks (also when picked as a CPU special): airborne root, travel in the air only.
-    const air = AIR_T && AIR_T[clip];
-    if (air && air.air && (MODEL.animations.jumpKicks || []).includes(clip)) {
-      action.time = Math.min(action.time, air.start);
-      // Jump kicks play at least at clip speed (a slow frame would hang ~3 s in the air).
-      action.timeScale = Math.min(cap, Math.max(action.timeScale, 1.05));
-      const gap = f.root.position.distanceTo(other.root.position);
-      const fwd = toward(f, other);
-      const want = Math.max(0, Math.min(COMBAT.jumpKickTravel, gap - COMBAT.strikeGap));
-      startAir(f, clip, fwd, Math.min(want, ringRoom(f, fwd, want)));
-    }
   }
   return true;
 }
@@ -2628,7 +2605,7 @@ function endAttack(f, fade = 0.2) {
   setAnim(f, idleClipFor(f), isPoppyClip(f.attackClip) ? Math.max(fade, 0.28) : fade);
 }
 
-/* ---------- flips: back / front flip dodges and jump kicks ---------- */
+/* ---------- front flip dodge ---------- */
 function canFlip(f) {
   if (!f.parts) return true;
   const D = COMBAT.dodge;
@@ -2740,16 +2717,6 @@ function stepDodge(f, other, dt) {
     setAnim(f, idleClipFor(f), 0.22);
   }
 }
-function tryJumpKick(f, other) {
-  if (!canFlip(f) || f.dodgeCD > 0) return false;
-  const list = availableClips(f, MODEL.animations.jumpKicks || []).filter((n) => AIR_T && AIR_T[n] && AIR_T[n].air);
-  if (!list.length) return false;
-  const clip = list[Math.floor(Math.random() * list.length)];
-  if (!tryAttack(f, 'kick', clip, true)) return false;
-  f.dodgeCD = COMBAT.dodge.cooldown * 0.6;
-  return true;
-}
-
 const _seg = new THREE.Vector3();
 const _bp = new THREE.Vector3();
 // A strike lands when a fist/forearm (punch) or foot/shin (kick) actually reaches the
@@ -3966,7 +3933,6 @@ function intentToInput(f, opp, intent) {
   } else f._aiBlockClip = null;
   if (intent.dodge === 'front') inp.flipFront = true;
   if (intent.attack === 'ground') inp.ground = true;
-  else if (intent.attack === 'jump') inp.jumpKick = true;
   else if (intent.attack === 'rocket' || intent.attack === 'rocket_punch') inp.rocket = true;
   else if (intent.attack === 'dash_forward' || intent.attack === 'dashFwd') inp.dashFwd = true;
   else if (intent.attack === 'dash_back' || intent.attack === 'dashBack') inp.dashBack = true;
@@ -4009,7 +3975,7 @@ function stepFighter(f, other, inp, dt) {
   f.invuln = Math.max(0, f.invuln - dt);
   f.stateT += dt;
   f.dodgeCD = Math.max(0, (f.dodgeCD || 0) - dt);
-  // Flip / jump kick interrupted (hit, KO, round end): drop the airborne state.
+  // Flip interrupted (hit, KO, round end): drop the airborne state.
   if ((f.dodge && f.state !== 'dodge') || (f.airLock != null && f.state !== 'dodge' && f.state !== 'kick')) endAir(f);
   if (f.state === 'ko') {
     setFighterMove(f, 0, 0);
@@ -4085,7 +4051,7 @@ function stepFighter(f, other, inp, dt) {
     // drives inside striking distance (that pushed fists through torsos).
     const gap = f.root.position.distanceTo(other.root.position);
     const airKick = f.airMove && f.airMove.action === action ? f.airMove : null;
-    if (airKick) stepAirMove(f, dt); // jump kick: travels only while airborne, lands still
+    if (airKick) stepAirMove(f, dt); // airborne travel only, lands still
     else if (!f.atkContact && ct < tm.a0 && chestGap(f, other) > 0.46 * SIZE && !limbInside(f, other, f.state)) {
       // Step into every swing; chestGap / limbInside stop the body driving through the opponent.
       const lunge = (f.state === 'kick' ? COMBAT.kickLunge : COMBAT.punchLunge) || 0;
@@ -4113,7 +4079,7 @@ function stepFighter(f, other, inp, dt) {
         if (f.specialKind !== 'rocket') applyHit(f, other, spec, f.state, null, tip && tip.pr.point ? { point: tip.pr.point, part: tip.pr.part } : null);
       }
       if (f.contactT < 0) f.contactT = f.stateT;
-      // (A jump kick can't hang in mid-air: it lands through its follow-through instead.)
+      // (An airborne attack can't hang in mid-air: it lands through its follow-through instead.)
       if (action && !airKick) action.timeScale = Math.min(action.timeScale, 0.08);
     } else if (f.contactT >= 0 && action && !airKick) action.timeScale = Math.min(action.timeScale, 0.25);
     // The fist stops at the surface: after contact the strike is pulled back (blend to guard)
@@ -4170,7 +4136,6 @@ function stepFighter(f, other, inp, dt) {
   if (inp.dashBack && tryDash(f, other, -1)) return;
   if (inp.ground && tryGroundAttack(f, other)) return;
   if (inp.flipFront && tryDodge(f, other, 'front')) return;
-  if (inp.jumpKick && tryJumpKick(f, other)) return;
   if (inp.punch) {
     if (!f.isCpu) {
       const next = nextPlayerPunch(f);

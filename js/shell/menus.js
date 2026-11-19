@@ -54,14 +54,14 @@
     <li><kbd>J</kbd> <span>punch</span> <kbd>K</kbd> <span>kick</span> <kbd>L</kbd> <span>block</span></li>
     <li><kbd>Q</kbd> <span>rocket punch</span> <kbd>E</kbd> <span>dash forward</span> <kbd>X</kbd> <span>dash back</span></li>
     <li><kbd>I</kbd> <span>stomp / ground punch a downed robot</span></li>
-    <li><kbd>U</kbd> <span>jump kick</span> <kbd>Y</kbd> <span>front flip</span></li>
+    <li><kbd>Y</kbd> <span>front flip</span></li>
     <li>Hold <kbd>Shift</kbd> <span>run forward / back</span></li>
     <li><kbd>V</kbd> <span>camera view: arena, fighting, 3rd person, 1st person, broadcast</span> <kbd>C</kbd> <span>broadcast on/off</span></li>
     <li><kbd>Esc</kbd> / <kbd>P</kbd> <span>pause</span></li>
     <li>Mouse drag <span>spin camera</span> · wheel <span>zoom</span> · double-click <span>reset view</span></li>`;
   const KEYS_P1 = '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>F</kbd> punch · <kbd>G</kbd> kick · <kbd>H</kbd> block · <kbd>Q</kbd> rocket punch · <kbd>E</kbd> dash forward · <kbd>X</kbd> dash back · <kbd>T</kbd> ground attack · hold <kbd>Left Shift</kbd> run';
   const KEYS_P2 = '<kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> move · <kbd>.</kbd> punch · <kbd>/</kbd> kick · <kbd>Right Shift</kbd> block · <kbd>[</kbd> rocket punch · <kbd>]</kbd> dash forward · <kbd>;</kbd> dash back · <kbd>,</kbd> ground attack · hold <kbd>Right Ctrl</kbd> run';
-  const PAD = '<li><span>Left stick / D-pad</span> move · <span class="ps">✕</span> punch · <span class="ps">○</span> kick · <span class="ps">□</span> block · <span class="ps">△</span> ground · <span class="ps">L1</span> rocket punch · <span class="ps">R2</span> dash (stick back = back dash) · hold <span class="ps">L2</span>/<span class="ps">L3</span> run · <span class="ps">R1</span>+forward front flip · <span class="ps">R3</span> jump kick · <span class="ps">Options</span> pause</li>';
+  const PAD = '<li><span>Left stick / D-pad</span> move · <span class="ps">✕</span> punch · <span class="ps">○</span> kick · <span class="ps">□</span> block · <span class="ps">△</span> ground · <span class="ps">L1</span> rocket punch · <span class="ps">R2</span> dash (stick back = back dash) · hold <span class="ps">L2</span>/<span class="ps">L3</span> run · <span class="ps">R1</span>+forward front flip · <span class="ps">Options</span> pause</li>';
 
 
 const PAD_SVG = `<svg viewBox="0 0 760 390" class="ps-svg" role="img" aria-label="Controller diagram">
@@ -124,7 +124,7 @@ const PAD_SVG = `<svg viewBox="0 0 760 390" class="ps-svg" role="img" aria-label
     <text x="690" y="158" text-anchor="end">○ Kick</text>
     <text x="690" y="188" text-anchor="end">□ Block</text>
     <text x="690" y="218" text-anchor="end">✕ Punch</text>
-    <text x="690" y="248" text-anchor="end">Right stick look / R3 jump kick</text>
+    <text x="690" y="248" text-anchor="end">Right stick</text>
     <text x="380" y="28" text-anchor="middle">Options — Pause</text>
   </g>
 </svg>`;
@@ -756,7 +756,7 @@ const PAD_SVG = `<svg viewBox="0 0 760 390" class="ps-svg" role="img" aria-label
     if (!fromPad) S._ctrlTabLock = which;
   }
   const HINT_KB = '<kbd>A</kbd>/<kbd>D</kbd> sidestep · <kbd>W</kbd>/<kbd>S</kbd> in/out · <kbd>J</kbd> punch · <kbd>K</kbd> kick · <kbd>L</kbd> block · <kbd>Q</kbd> rocket · <kbd>E</kbd> dash · <kbd>X</kbd> back dash · <kbd>I</kbd> ground · <kbd>V</kbd> camera · <kbd>Esc</kbd> pause';
-  const HINT_PS = '<span class="ps">LS</span>/<span class="ps">D-pad</span> move · <span class="ps">✕</span> punch · <span class="ps">○</span> kick · <span class="ps">□</span> block · <span class="ps">△</span> ground · <span class="ps">L1</span> rocket · <span class="ps">R2</span> dash · <span class="ps">L2</span> run · <span class="ps">R1</span>+fwd flip · <span class="ps">R3</span> jump kick · <span class="ps">Options</span> pause';
+  const HINT_PS = '<span class="ps">LS</span>/<span class="ps">D-pad</span> move · <span class="ps">✕</span> punch · <span class="ps">○</span> kick · <span class="ps">□</span> block · <span class="ps">△</span> ground · <span class="ps">L1</span> rocket · <span class="ps">R2</span> dash · <span class="ps">L2</span> run · <span class="ps">R1</span>+fwd flip · <span class="ps">Options</span> pause';
   function paintControlsHint() {
     const el = document.getElementById('controlsHint');
     if (!el) return;

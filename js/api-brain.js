@@ -15,7 +15,7 @@
 
 import { memoryKey, isLearningOn, promptNotes, defaultLearningOn, setDefaultLearningOn, clearMemory } from './api-learn.js';
 
-export const AI_ACTIONS = ['approach', 'retreat', 'circle_left', 'circle_right', 'punch', 'kick', 'jump_kick', 'flip_front', 'block', 'ground', 'wait', 'rocket_punch', 'dash_forward', 'dash_back'];
+export const AI_ACTIONS = ['approach', 'retreat', 'circle_left', 'circle_right', 'punch', 'kick', 'flip_front', 'block', 'ground', 'wait', 'rocket_punch', 'dash_forward', 'dash_back'];
 export const AI_TARGETS = ['head', 'torso', 'armL', 'armR', 'legL', 'legR'];
 
 export const AI_PROVIDERS = {
@@ -37,7 +37,7 @@ export const SYSTEM = 'You control one heavy humanoid robot in a 3D fighting gam
   + 'If the message says you are IN RANGE, attack, block or reposition; do not close the gap. '
   + 'If it says you are TOO CLOSE, retreat or circle is available — it is your choice, not a requirement. '
   + 'If you are AT THE CAGE, escape lists the directions that leave the wall; retreat peels along or off the fence, it does not walk through it. '
-  + 'ground only works when opp.groundable is true; flip_front and jump_kick need self.canFlip.';
+  + 'ground only works when opp.groundable is true; flip_front needs self.canFlip.';
 
 const K = {
   on: 'rf_ai_on', provider: 'rf_ai_provider', base: 'rf_ai_base', model: 'rf_ai_model',
@@ -144,7 +144,7 @@ export function rangeInfo(s) {
   if (self.canPunch !== false && inRange.punch) legal.push('punch');
   if (self.canKick !== false && inRange.kick) legal.push('kick');
   if (self.canFlip) {
-    legal.push('jump_kick', 'flip_front');
+    legal.push('flip_front');
   }
   if (opp.groundable) legal.push('ground');
   const sp = self.specials || {};
@@ -446,7 +446,6 @@ function actionIntent(a) {
   else if (a === 'circle_left') it.strafe = -1;
   else if (a === 'circle_right') it.strafe = 1;
   else if (a === 'punch' || a === 'kick' || a === 'ground') it.attack = a;
-  else if (a === 'jump_kick') it.attack = 'jump';
   else if (a === 'rocket_punch') it.attack = 'rocket_punch';
   else if (a === 'dash_forward') it.attack = 'dash_forward';
   else if (a === 'dash_back') it.attack = 'dash_back';
@@ -553,7 +552,7 @@ export function createApiBrain(id, getCfg) {
         stats.latencyN += 1;
         if (parsed.target) stats.targets[parsed.target] = (stats.targets[parsed.target] || 0) + 1;
         const style = (parsed.action === 'block' || parsed.action === 'retreat' || parsed.action === 'wait') ? 'defensive'
-          : (parsed.action === 'punch' || parsed.action === 'kick' || parsed.action === 'approach' || parsed.action === 'jump_kick') ? 'aggressive' : 'balanced';
+          : (parsed.action === 'punch' || parsed.action === 'kick' || parsed.action === 'approach') ? 'aggressive' : 'balanced';
         stats.styles[style] = (stats.styles[style] || 0) + 1;
         apiStatus.ok++; apiStatus.lastOk = Date.now(); apiStatus.lastAction = parsed.action; apiStatus.lastKind = 'ok';
       }
