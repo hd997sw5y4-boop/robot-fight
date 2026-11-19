@@ -4564,9 +4564,10 @@ function tick() {
     if (f.koTip) stepKoTip(f, dt);
     stepEyes(f, dt);
     if (window.__rfDiag) diagFootStage(f, 2);
-    const jc0 = f.jointStats && f.jointStats.clamped || 0;
+    const jf0 = (f.jointStats && f.jointStats.flips) || 0;
     applyJointLimits(f);
-    if (f.jointStats && f.jointStats.clamped - jc0 >= 2) logGlitch('jointFlip', { id: f.id, n: f.jointStats.clamped - jc0, state: f.state, clip: f.current });
+    const jf = f.jointStats ? f.jointStats.flips - jf0 : 0;
+    if (jf > 0) logGlitch('jointFlip', { id: f.id, n: jf, state: f.state, clip: f.current });
     if (window.__rfDiag) diagFootStage(f, 3);
     groundFeet(f, dt);
     clampRootMotion(f, dt);

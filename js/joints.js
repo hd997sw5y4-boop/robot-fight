@@ -37,7 +37,7 @@ export function initJointLimits(f) {
     else if (TWISTS[k]) joints.push({ bone: o, kind: 'twist', lim: TWISTS[k], rest: o.quaternion.clone() });
   });
   f.joints = joints;
-  f.jointStats = { clamped: 0 };
+  f.jointStats = { clamped: 0, flips: 0 };
 }
 
 // Split r into twist about unit axis a and the remaining swing; returns signed twist angle.
@@ -61,17 +61,19 @@ function twistQ(a, ang) { return _t.setFromAxisAngle(a, ang); }
 
 export function applyJointLimits(f) {
   if (!f.joints) return;
+  const standing = f.state === 'idle' || f.state === 'walk' || f.state === 'block';
   for (const j of f.joints) {
     const b = j.bone;
     _r.copy(j.rest).invert().multiply(b.quaternion);
     if (j.kind === 'hinge') {
       if (!j.axis) {
-        // Calibrate the bend axis from the first clearly bent pose (any state).
-        // Skipping attacks used to leave punches unclamped and elbows/knees inverted.
+        // Calibrate only from a standing pose. Measuring mid-punch or mid-knockdown
+        // locked a bad hinge axis and then fought every later clip, including idle.
+        if (!standing) continue;
         const r = _r.clone();
         if (r.w < 0) r.set(-r.x, -r.y, -r.z, -r.w);
         const ang = 2 * Math.acos(Math.min(1, r.w));
-        if (ang < 20 * D || ang > 150 * D) continue;
+        if (ang < 20 * D || ang > 90 * D) continue;
         j.axis = new THREE.Vector3(r.x, r.y, r.z).normalize();
       }
       const th = decompose(_r, j.axis);
@@ -80,8 +82,10 @@ export function applyJointLimits(f) {
       const hi = j.lim.max * D;
       let th2 = th;
       if (th < lo) th2 = lo; else if (th > hi) th2 = hi;
+      const fold = Math.abs(th2 - th);
       if (th2 !== th) changed = true;
       if (!changed) continue;
+      if (fold > 75 * D) f.jointStats.flips++;
       const sw = _s.clone();
       _r.copy(sw).multiply(twistQ(j.axis, th2));
     } else {
@@ -89,8 +93,10 @@ export function applyJointLimits(f) {
       let changed = clampSwing(j.lim.swing);
       const lim = j.lim.twist * D;
       const th2 = Math.max(-lim, Math.min(lim, th));
+      const fold = Math.abs(th2 - th);
       if (th2 !== th) changed = true;
       if (!changed) continue;
+      if (fold > 80 * D) f.jointStats.flips++;
       const sw = _s.clone();
       _r.copy(sw).multiply(twistQ(Y, th2));
     }
