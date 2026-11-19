@@ -7,13 +7,16 @@
 import * as THREE from 'three';
 
 const D = Math.PI / 180;
-// Hinges: the bend axis is measured from the fighting idle (knees and elbows are bent there).
+// Hinges: the bend axis and range are fitted from the model's own clips at load (fitJointLimits).
+// These are the minimum ranges; the authored envelope (plus a small margin) is added on top,
+// so a keyframed pose is never rewritten and only procedural or blend errors get clamped.
 const HINGES = {
-  // Knees cannot hyperextend: axis is calibrated from idle in the flex direction, so 0 is
-  // straight and negative would be backward. Elbows keep a little play.
+  // Knees cannot hyperextend: 0 is straight along the fitted flex axis, negative is backward.
   LeftLeg: { min: 0, max: 140, side: 18 }, RightLeg: { min: 0, max: 140, side: 18 },
   LeftForeArm: { min: -10, max: 150, side: 30 }, RightForeArm: { min: -10, max: 150, side: 30 },
 };
+const FIT_MIN_BEND = 40 * D; // keys bent at least this much define the hinge axis
+const FIT_MARGIN = 3 * D;
 // Twist about the bone's own axis (+Y in a Mixamo rig) and total swing.
 const TWISTS = {
   LeftFoot: { twist: 45, swing: 100 }, RightFoot: { twist: 45, swing: 100 },
@@ -30,19 +33,23 @@ const Y = new THREE.Vector3(0, 1, 0);
 const _tInv = new THREE.Quaternion();
 const _swHold = new THREE.Quaternion();
 const _rCal = new THREE.Quaternion();
+const _fq = new THREE.Quaternion();
 
 function key(name) { return String(name || '').replace(/^mixamorig[:._]*/i, ''); }
+
+// Bind rest saved by the loader before any clip posed the bone (userData.restQ).
+function restOf(o) { return (o.userData && o.userData.restQ ? o.userData.restQ : o.quaternion).clone(); }
 
 export function initJointLimits(f) {
   const joints = [];
   f.model.traverse((o) => {
     if (!o.isBone && o.type !== 'Bone') return;
     const k = key(o.name);
-    if (HINGES[k]) joints.push({ bone: o, kind: 'hinge', lim: HINGES[k], rest: o.quaternion.clone(), axis: null });
-    else if (TWISTS[k]) joints.push({ bone: o, kind: 'twist', lim: TWISTS[k], rest: o.quaternion.clone() });
+    if (HINGES[k]) joints.push({ bone: o, key: k, kind: 'hinge', lim: { ...HINGES[k] }, rest: restOf(o), axis: null });
+    else if (TWISTS[k]) joints.push({ bone: o, key: k, kind: 'twist', lim: { ...TWISTS[k] }, rest: restOf(o) });
   });
   f.joints = joints;
-  f.jointStats = { clamped: 0, flips: 0 };
+  f.jointStats = { clamped: 0, flips: 0, flipBones: [] };
 }
 
 // Split r into twist about unit axis a and the remaining swing; returns signed twist angle.
@@ -70,7 +77,7 @@ export function applyJointLimits(f) {
     const b = j.bone;
     _r.copy(j.rest).invert().multiply(b.quaternion);
     if (j.kind === 'hinge') {
-      if (!j.axis) continue; // Axis is set once from bind→idle at load.
+      if (!j.axis) continue; // Fitted once from the clips at load.
       const th = decompose(_r, j.axis);
       let changed = clampSwing(j.lim.side);
       const lo = j.lim.min * D;
@@ -80,7 +87,7 @@ export function applyJointLimits(f) {
       const fold = Math.abs(th2 - th);
       if (th2 !== th) changed = true;
       if (!changed) continue;
-      if (fold > 75 * D) f.jointStats.flips++;
+      if (fold > 75 * D) { f.jointStats.flips++; f.jointStats.flipBones.push(j.key); }
       _swHold.copy(_s);
       _r.copy(_swHold).multiply(twistQ(j.axis, th2));
     } else {
@@ -91,7 +98,7 @@ export function applyJointLimits(f) {
       const fold = Math.abs(th2 - th);
       if (th2 !== th) changed = true;
       if (!changed) continue;
-      if (fold > 80 * D) f.jointStats.flips++;
+      if (fold > 80 * D) { f.jointStats.flips++; f.jointStats.flipBones.push(j.key); }
       _swHold.copy(_s);
       _r.copy(_swHold).multiply(twistQ(Y, th2));
     }
@@ -100,18 +107,78 @@ export function applyJointLimits(f) {
   }
 }
 
-// Measure each hinge axis from the current pose (FightingIdle, already applied by the
-// caller) relative to the bind rest stored in initJointLimits. Call once at load so
-// knockdowns and other non-standing poses are limited from the first frame.
-export function calibrateHingeAxes(f) {
-  if (!f || !f.joints) return;
+// Fit each joint from the model's clips. Hinges: the axis is the mean rotation axis (from
+// the bind rest) of every key bent at least FIT_MIN_BEND, which points in the flex direction.
+// Every joint's limits then widen to the authored envelope. The old axis came from a single
+// FightingIdle frame against a rest that was itself FightingIdle frame 0, so it was ~14 deg
+// off on the left knee and the limits rewrote clip poses.
+export function fitJointLimits(f, clips) {
+  if (!f || !f.joints || !clips) return;
   for (const j of f.joints) {
-    if (j.kind !== 'hinge' || j.axis) continue;
-    _r.copy(j.rest).invert().multiply(j.bone.quaternion);
-    const r = _rCal.copy(_r);
-    if (r.w < 0) r.set(-r.x, -r.y, -r.z, -r.w);
-    const ang = 2 * Math.acos(Math.min(1, r.w));
-    if (ang < 12 * D || ang > 120 * D) continue;
-    j.axis = new THREE.Vector3(r.x, r.y, r.z).normalize();
+    const tracks = [];
+    for (const c of clips) {
+      for (const t of c.tracks) {
+        if (!t.name.endsWith('.quaternion')) continue;
+        if (key(t.name.slice(0, -'.quaternion'.length)) === j.key) tracks.push(t.values);
+      }
+    }
+    if (!tracks.length) continue;
+    const restInv = _rCal.copy(j.rest).invert();
+    if (j.kind === 'twist') {
+      let tw = 0; let sw = 0;
+      for (const v of tracks) {
+        for (let i = 0; i < v.length; i += 4) {
+          _r.copy(restInv).multiply(_fq.fromArray(v, i));
+          tw = Math.max(tw, Math.abs(decompose(_r, Y)));
+          if (_s.w < 0) _s.set(-_s.x, -_s.y, -_s.z, -_s.w);
+          sw = Math.max(sw, 2 * Math.acos(Math.min(1, _s.w)));
+        }
+      }
+      j.lim.twist = Math.max(j.lim.twist, (tw + FIT_MARGIN) / D);
+      j.lim.swing = Math.max(j.lim.swing, (sw + FIT_MARGIN) / D);
+      continue;
+    }
+    const sum = new THREE.Vector3();
+    let n = 0;
+    for (const v of tracks) {
+      for (let i = 0; i < v.length; i += 4) {
+        _r.copy(restInv).multiply(_fq.fromArray(v, i));
+        if (_r.w < 0) _r.set(-_r.x, -_r.y, -_r.z, -_r.w);
+        if (2 * Math.acos(Math.min(1, _r.w)) < FIT_MIN_BEND) continue;
+        sum.add(_a.set(_r.x, _r.y, _r.z).normalize());
+        n++;
+      }
+    }
+    if (n < 20 || sum.lengthSq() < 1e-6) continue; // no reliable data: leave this joint free
+    j.axis = sum.normalize();
+    let lo = Infinity; let hi = -Infinity; let side = 0;
+    for (const v of tracks) {
+      for (let i = 0; i < v.length; i += 4) {
+        _r.copy(restInv).multiply(_fq.fromArray(v, i));
+        const th = decompose(_r, j.axis);
+        if (_s.w < 0) _s.set(-_s.x, -_s.y, -_s.z, -_s.w);
+        lo = Math.min(lo, th); hi = Math.max(hi, th);
+        side = Math.max(side, 2 * Math.acos(Math.min(1, _s.w)));
+      }
+    }
+    j.lim.min = Math.min(j.lim.min, (lo - FIT_MARGIN) / D);
+    j.lim.max = Math.max(j.lim.max, (hi + FIT_MARGIN) / D);
+    j.lim.side = Math.max(j.lim.side, (side + FIT_MARGIN) / D);
   }
+  f.hinges = {};
+  for (const j of f.joints) if (j.kind === 'hinge' && j.axis) f.hinges[j.key] = j;
+}
+
+// Hinge flex of a bone along its fitted axis: bend in radians (positive flexes) and the
+// current flex angle. Used by the leg code instead of world-axis turns, which twist a knee
+// whose leg is not square to the body.
+export function hingeOf(f, bone) {
+  return f && f.hinges ? f.hinges[key(bone && bone.name)] || null : null;
+}
+export function hingeAngle(j) {
+  _r.copy(j.rest).invert().multiply(j.bone.quaternion);
+  return decompose(_r, j.axis);
+}
+export function flexHinge(j, ang) {
+  j.bone.quaternion.multiply(_fq.setFromAxisAngle(j.axis, ang));
 }

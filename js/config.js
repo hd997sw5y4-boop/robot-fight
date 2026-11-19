@@ -130,8 +130,6 @@ export const ARENA = {
   // visible rail; physics also uses a taller extension of the same wall so jump-outs stay in.
   cage: true,
   cageHeight: 1.48 * WORLD_SCALE,
-  // Two-bone stance IK is off: the solver was twisting legs and lifting feet off the mat.
-  stanceIK: false,
   // HDRI is used for robot/mat reflections only (on by default; toggle saved).
   // The surround stays a dark void. Poly Haven Industrial Pipe and Valve 01 2K (CC0).
   hdriUrl: './hdris/industrial_pipe_and_valve_01_2k.hdr',

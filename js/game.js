@@ -11,7 +11,7 @@ import { IS_MOBILE } from './mobile.js';
 import { SIZE, CAM_SIZE, MODEL, ARENA, COMBAT, DAMAGE, GFX_PRESETS, LOOP_CLIPS, getFighterStats, CAGE_PAD, SPECIAL } from './config.js';
 import { CLIP_SPEEDS } from './clip-speeds.js';
 import { applyChrome, setChromeLow } from './chrome.js';
-import { initJointLimits, applyJointLimits, calibrateHingeAxes } from './joints.js';
+import { initJointLimits, applyJointLimits, fitJointLimits, hingeOf, hingeAngle, flexHinge } from './joints.js';
 import { setWiresLow, setWireObstacles } from './wires.js';
 import { createApiBrain, wantsApiBrain, initApiBrainUI, fighterApiCfg, apiLabel, apiStatsSnapshot, onApiDecision } from './api-brain.js';
 import { memoryKey, isLearningOn, promptNotes, rememberApiFights } from './api-learn.js';
@@ -536,27 +536,6 @@ function settleAfterBell(f) {
     f.state = 'idle';
     setAnim(f, idleClipFor(f), 0.22);
   }
-}
-
-function calibrateFighterJoints(f) {
-  const act = f.actions.FightingIdle || f.actions[MODEL.animations.idle];
-  if (!act) return;
-  const saved = [];
-  f.model.traverse((o) => { if (o.isBone || o.type === 'Bone') saved.push([o, o.quaternion.clone()]); });
-  const clip = act.getClip();
-  act.reset();
-  act.enabled = true;
-  act.setEffectiveWeight(1);
-  act.paused = true;
-  act.play();
-  for (const u of [0.35, 0.2, 0.5, 0.7, 0.15]) {
-    act.time = u * clip.duration;
-    f.mixer.update(0);
-    calibrateHingeAxes(f);
-    if (f.joints && f.joints.every((j) => j.kind !== 'hinge' || j.axis)) break;
-  }
-  act.stop();
-  for (const [o, q] of saved) o.quaternion.copy(q);
 }
 
 let fighterGltf = null;
@@ -1121,6 +1100,9 @@ function makeFighter(gltf, color, side) {
   for (const [key, val] of Object.entries(MODEL.animations)) {
     if (typeof val === 'string' && actions[val]) actions[key] = actions[val];
   }
+  // Joint limits measure every bone from its bind rest. Save it before the idle poses the
+  // bones: limits measured from FightingIdle frame 0 treated a ~20 deg bent knee as straight.
+  model.traverse((o) => { if (o.isBone || o.type === 'Bone') { o.userData.restQ = o.quaternion.clone(); o.userData.restP = o.position.clone(); } });
   const startIdle = MODEL.animations.idle || 'FightingIdle';
   if (actions[startIdle]) actions[startIdle].play();
   mixer.update(0);
@@ -1176,8 +1158,8 @@ function makeFighter(gltf, color, side) {
       setAnim(f, idleClipFor(f), 0.15);
     }
   });
-  initJointLimits(f); // rest pose, before any clip has posed the bones
-  calibrateFighterJoints(f);
+  initJointLimits(f); // bind rest saved above, before the idle posed the bones
+  fitJointLimits(f, gltf.animations);
   // Stat profile (js/config.js FIGHTER_PROFILES): Blue Striker / Red Bruiser by default; a shell
   // config may name another profile. f.stat holds the multipliers fight code applies.
   f.stats = getFighterStats((f.config && f.config.profile) || side);
@@ -1597,8 +1579,6 @@ const _ikA = new THREE.Vector3();
 const _ikB = new THREE.Vector3();
 const _ikC = new THREE.Vector3();
 const _ikT = new THREE.Vector3();
-const _ikFwd = new THREE.Vector3();
-const _ikKnee = new THREE.Vector3();
 const _ikQ = new THREE.Quaternion();
 const _ikQ2 = new THREE.Quaternion();
 const _ikD = new THREE.Vector3();
@@ -1606,9 +1586,6 @@ const _ikAxis = new THREE.Vector3();
 const _ikWQ = new THREE.Quaternion();
 const _ikPQ = new THREE.Quaternion();
 const _ikWant = new THREE.Quaternion();
-const _ikM = new THREE.Matrix4();
-const _ikInv = new THREE.Matrix4();
-const _ikOne = new THREE.Vector3(1, 1, 1);
 
 function matTopY() {
   return (ARENA.matTop != null) ? ARENA.matTop : 0;
@@ -1771,10 +1748,7 @@ function groundFeet(f, dt) {
   }
   f.root.position.y = f.groundY;
   f.model.updateWorldMatrix(true, true);
-  // Stance IK is temporarily skipped: the two-bone solver was twisting the legs
-  // and lifting planted feet 8–15 cm off the mat after the 121addd grounding change.
-  if (!skipIK && ARENA.stanceIK) plantStanceIK(f, top);
-  if (!skipIK) plantFeet(f, top);
+  plantFeet(f, top, dt, skipIK);
 
   // Per-frame clamp after IK; not stored, so it can't accumulate.
   minY = onBody ? Math.min(lowestFootY(f) ?? Infinity, lowestBodyY(f) ?? Infinity) : lowestFootY(f);
@@ -1786,148 +1760,142 @@ function groundFeet(f, dt) {
   }
 }
 
-// Limited foot plant: lock a nearly-planted foot's world XZ while idle/blocking, without
-// the two-bone leg solver that used to twist the knees.
-const _plantW = new THREE.Vector3();
-const _plantL = new THREE.Vector3();
-function plantFeet(f, top) {
+// Foot plant: while idle or blocking, with no footwork and no turn, a nearly planted foot is
+// held where it landed by bending the knee on its hinge and swinging the thigh. Rotations
+// only: bones keep their length (the old plant moved the foot bone inside the shin, and since
+// no clip animates that position the offset stuck and grew until the knee looked bent
+// backward). The hold eases in and out, the anchor creeps after the clip foot so it never
+// stores tension, and any attack, step or turn releases it within ~0.1 s.
+const PLANT_IN = 0.18;     // s to engage
+const PLANT_OUT = 0.08;    // s to release
+const PLANT_FOLLOW = 3;    // 1/s anchor creep toward the clip foot
+const PLANT_MAX = 0.08;    // furthest the anchor may trail the clip foot (world units)
+const PLANT_SPEED = 0.25;  // root speed (units/s) that counts as footwork
+const PLANT_TURN = 0.8;    // root yaw rate (rad/s) that counts as a turn
+const DEG = Math.PI / 180;
+function plantFeet(f, top, dt, off) {
   if (!f.ikLegs) return;
-  if (f.state !== 'idle' && f.state !== 'block') { f.footPlant = null; return; }
-  if (!f.footPlant) f.footPlant = { L: null, R: null };
+  const P = f.footPlant || (f.footPlant = { L: { w: 0, x: 0, z: 0 }, R: { w: 0, x: 0, z: 0 } });
+  const r = f.root;
+  const last = f._plantRoot || (f._plantRoot = { x: r.position.x, z: r.position.z, yaw: r.rotation.y });
+  const step = Math.max(dt || 0, 1e-3);
+  const speed = Math.hypot(r.position.x - last.x, r.position.z - last.z) / step;
+  const turn = Math.abs(Math.atan2(Math.sin(r.rotation.y - last.yaw), Math.cos(r.rotation.y - last.yaw))) / step;
+  last.x = r.position.x; last.z = r.position.z; last.yaw = r.rotation.y;
+  const still = !off && (f.state === 'idle' || f.state === 'block') && f.airLock == null
+    && speed < PLANT_SPEED && turn < PLANT_TURN;
   for (const side of ['L', 'R']) {
-    if (f.parts && f.parts[side === 'L' ? 'legL' : 'legR'] && f.parts[side === 'L' ? 'legL' : 'legR'].detached) {
-      f.footPlant[side] = null;
-      continue;
-    }
     const leg = f.ikLegs[side];
-    if (!leg || !leg.foot || !leg.foot.parent) continue;
-    leg.foot.updateWorldMatrix(true, false);
-    leg.foot.getWorldPosition(_ikC);
-    let low = _ikC.y;
-    if (leg.toe) {
-      leg.toe.updateWorldMatrix(true, false);
-      leg.toe.getWorldPosition(_ikT);
-      low = Math.min(low, _ikT.y);
-    }
-    if (Math.abs(top - low) > 0.045) { f.footPlant[side] = null; continue; }
-    const plant = f.footPlant[side];
-    if (!plant) { f.footPlant[side] = _ikC.clone(); continue; }
-    const dx = plant.x - _ikC.x;
-    const dz = plant.z - _ikC.z;
-    const d = Math.hypot(dx, dz);
-    if (d > 0.08) { f.footPlant[side] = _ikC.clone(); continue; }
-    if (d < 0.0015) continue;
-    _plantW.set(_ikC.x + dx, _ikC.y, _ikC.z + dz);
-    leg.foot.parent.worldToLocal(_plantL.copy(_plantW));
-    leg.foot.position.x = _plantL.x;
-    leg.foot.position.z = _plantL.z;
-    leg.foot.updateMatrix();
-    leg.foot.updateWorldMatrix(true, false);
-  }
-}
-
-function plantStanceIK(f, top) {
-  if (!f.ikLegs) return;
-  for (const side of ['L', 'R']) {
-    if (f.parts && f.parts[side === 'L' ? 'legL' : 'legR'] && f.parts[side === 'L' ? 'legL' : 'legR'].detached) continue;
-    const leg = f.ikLegs[side];
+    const p = P[side];
     if (!leg || !leg.thigh || !leg.shin || !leg.foot) continue;
-    leg.foot.updateWorldMatrix(true, false);
+    const part = f.parts && f.parts[side === 'L' ? 'legL' : 'legR'];
+    const sub = f.subs && f.subs[side === 'L' ? 'footL' : 'footR'];
     leg.foot.getWorldPosition(_ikC);
     let low = _ikC.y;
-    if (leg.toe) {
-      leg.toe.updateWorldMatrix(true, false);
-      leg.toe.getWorldPosition(_ikT);
-      low = Math.min(low, _ikT.y);
-    }
-    const sink = top - low;
-    // Swing foot, or a huge hover: leave the clip alone. Only nudge a nearly planted foot.
-    if (sink < -0.06 || sink > 0.10) continue;
-    const qThigh = leg.thigh.quaternion.clone();
-    const qShin = leg.shin.quaternion.clone();
-    const qFoot = leg.foot.quaternion.clone();
-    const before = _ikC.clone();
-    _ikT.copy(_ikC);
-    _ikT.y += sink;
-    twoBoneIK(leg.thigh, leg.shin, leg.foot, _ikT);
-    leg.foot.updateWorldMatrix(true, false);
+    if (leg.toe) { leg.toe.getWorldPosition(_ikT); low = Math.min(low, _ikT.y); }
+    const want = still && !(part && part.detached) && !(sub && sub.detached) && Math.abs(top - low) < 0.045 ? 1 : 0;
+    if (p.w <= 0) { p.x = _ikC.x; p.z = _ikC.z; } // a fresh plant starts where the foot is
+    p.w += (want - p.w) * Math.min(1, step / (want ? PLANT_IN : PLANT_OUT));
+    if (!want && p.w < 0.01) p.w = 0;
+    const kf = Math.min(1, step * PLANT_FOLLOW);
+    p.x += (_ikC.x - p.x) * kf;
+    p.z += (_ikC.z - p.z) * kf;
+    let dx = p.x - _ikC.x;
+    let dz = p.z - _ikC.z;
+    const d = Math.hypot(dx, dz);
+    if (d > PLANT_MAX) { dx *= PLANT_MAX / d; dz *= PLANT_MAX / d; p.x = _ikC.x + dx; p.z = _ikC.z + dz; }
+    if (p.w <= 0 || Math.min(d, PLANT_MAX) * p.w < 0.0015) continue;
+    _ikT.set(_ikC.x + dx * p.w, _ikC.y, _ikC.z + dz * p.w);
+    reachFoot(f, leg, _ikT);
+  }
+}
+
+// Move the ankle to target by flexing the knee on its fitted hinge (sets the hip-to-ankle
+// distance) and turning the thigh by the shortest arc (sets the direction), then give the
+// foot back its world orientation so the sole stays flat. The knee never leaves its hinge
+// plane, so it cannot twist or bend backward.
+function reachFoot(f, leg, target) {
+  const knee = hingeOf(f, leg.shin);
+  if (!knee) return;
+  leg.thigh.getWorldPosition(_ikA);
+  leg.shin.getWorldPosition(_ikB);
+  leg.foot.getWorldPosition(_ikC);
+  leg.foot.getWorldQuaternion(_ikWQ);
+  const l1 = _ikA.distanceTo(_ikB);
+  const l2 = _ikB.distanceTo(_ikC);
+  if (l1 < 1e-4 || l2 < 1e-4) return;
+  const reach = (d) => Math.acos(Math.max(-1, Math.min(1, (l1 * l1 + l2 * l2 - d * d) / (2 * l1 * l2))));
+  const d1 = Math.max(Math.abs(l1 - l2) + 1e-4, Math.min(l1 + l2 - 1e-4, _ikA.distanceTo(target)));
+  // The knee's inner angle grows as the leg straightens; flex is the opposite way.
+  const th = hingeAngle(knee);
+  const lo = Math.max(knee.lim.min, 2) * DEG;
+  const hi = knee.lim.max * DEG;
+  const dFlex = Math.max(lo - th, Math.min(hi - th, reach(_ikA.distanceTo(_ikC)) - reach(d1)));
+  if (Math.abs(dFlex) > 1e-5) {
+    flexHinge(knee, dFlex);
+    leg.shin.updateMatrixWorld(true);
     leg.foot.getWorldPosition(_ikC);
-    // If the solver missed the target or yanked the ankle, restore the clip pose.
-    if (_ikC.distanceTo(_ikT) > 0.04 || _ikC.distanceTo(before) > 0.12) {
-      leg.thigh.quaternion.copy(qThigh);
-      leg.shin.quaternion.copy(qShin);
-      leg.foot.quaternion.copy(qFoot);
-      leg.thigh.updateMatrix();
-      leg.shin.updateMatrix();
-      leg.foot.updateMatrix();
-      leg.thigh.updateWorldMatrix(true, true);
+  }
+  _ikD.copy(_ikC).sub(_ikA).normalize();
+  _ikAxis.copy(target).sub(_ikA).normalize();
+  _ikQ.setFromUnitVectors(_ikD, _ikAxis);
+  if (leg.thigh.parent) {
+    leg.thigh.parent.getWorldQuaternion(_ikQ2);
+    _ikQ.premultiply(_stPQ.copy(_ikQ2).invert()).multiply(_ikQ2);
+  }
+  leg.thigh.quaternion.premultiply(_ikQ);
+  leg.thigh.updateMatrixWorld(true);
+  leg.shin.getWorldQuaternion(_ikQ2);
+  leg.foot.quaternion.copy(_ikQ2.invert().multiply(_ikWQ));
+  leg.foot.updateMatrixWorld(true);
+}
+
+// Leg hand-off out of a get-up. When GettingUp ends (or cuts) while the legs are still in
+// the floor pose, they used to snap to the guard in one frame; instead the last shown leg pose
+// is held and eased into the live clip. The same ease covers any one-frame leg pop while
+// getting up and just after.
+const LEG_BLEND_T = 0.35;
+const LEG_WATCH_T = 0.6;      // s after a get-up in which a pop is still caught
+const LEG_POP_RATE = 900 * DEG; // per-second leg turn that counts as a pop (30 deg at 30 fps)
+const _lbQ = new THREE.Quaternion();
+function blendLegPose(f, dt) {
+  if (!f._legBones) {
+    f._legBones = [];
+    for (const s of ['L', 'R']) {
+      const l = f.ikLegs && f.ikLegs[s];
+      if (l) for (const b of [l.thigh, l.shin, l.foot, l.toe]) if (b) f._legBones.push(b);
     }
   }
-}
-
-function twoBoneIK(thigh, shin, foot, target) {
-  thigh.updateWorldMatrix(true, false);
-  shin.updateWorldMatrix(true, false);
-  foot.updateWorldMatrix(true, false);
-  thigh.getWorldPosition(_ikA);
-  shin.getWorldPosition(_ikB);
-  foot.getWorldPosition(_ikC);
-  const l1 = Math.max(0.05, _ikA.distanceTo(_ikB));
-  const l2 = Math.max(0.05, _ikB.distanceTo(_ikC));
-  const toT = target.clone().sub(_ikA);
-  let dist = toT.length();
-  const maxD = l1 + l2 - 0.002;
-  if (dist < 0.02) return;
-  if (dist > maxD) {
-    toT.multiplyScalar(maxD / dist);
-    dist = maxD;
-    target = _ikA.clone().add(toT);
+  const bones = f._legBones;
+  if (!bones.length) return;
+  const lb = f.legBlend || (f.legBlend = {
+    prev: bones.map((b) => b.quaternion.clone()), from: bones.map(() => new THREE.Quaternion()),
+    t: 0, dur: 0, st: f.state, watch: 0,
+  });
+  const getup = f.state === 'getup';
+  const exited = lb.st === 'getup' && !getup;
+  lb.watch = getup ? LEG_WATCH_T : Math.max(0, lb.watch - (dt || 0));
+  let pop = false;
+  if (!exited && lb.watch > 0 && !(lb.t < lb.dur)) {
+    const lim = Math.max(30 * DEG, LEG_POP_RATE * (dt || 1 / 60));
+    for (let i = 0; i < bones.length && !pop; i++) pop = lb.prev[i].angleTo(bones[i].quaternion) > lim;
   }
-  const minD = Math.abs(l1 - l2) + 0.002;
-  if (dist < minD) {
-    toT.multiplyScalar(minD / dist);
-    dist = minD;
-    target = _ikA.clone().add(toT);
+  if (exited || pop) {
+    for (let i = 0; i < bones.length; i++) lb.from[i].copy(lb.prev[i]);
+    lb.t = 0;
+    lb.dur = LEG_BLEND_T;
   }
-  const axis = _ikFwd.copy(_ikB).sub(_ikA).cross(_ikC.clone().sub(_ikA));
-  if (axis.lengthSq() < 1e-8) {
-    axis.set(0, 0, 1).applyQuaternion(thigh.getWorldQuaternion(_ikQ));
+  if (lb.t < lb.dur) {
+    lb.t += dt || 0;
+    const u = Math.min(1, lb.t / lb.dur);
+    const e = u * u * (3 - 2 * u);
+    for (let i = 0; i < bones.length; i++) {
+      _lbQ.copy(bones[i].quaternion);
+      bones[i].quaternion.slerpQuaternions(lb.from[i], _lbQ, e);
+    }
   }
-  axis.normalize();
-  const cosA = Math.max(-1, Math.min(1, (l1 * l1 + dist * dist - l2 * l2) / (2 * l1 * dist)));
-  const ang = Math.acos(cosA);
-  _ikKnee.copy(toT).normalize();
-  const rot = _ikQ2.setFromAxisAngle(axis, ang);
-  _ikKnee.applyQuaternion(rot).multiplyScalar(l1).add(_ikA);
-
-  alignBoneToward(thigh, _ikA, _ikKnee, shin);
-  shin.updateWorldMatrix(true, false);
-  shin.getWorldPosition(_ikB);
-  alignBoneToward(shin, _ikB, target, foot);
-}
-
-function alignBoneToward(bone, origin, toward, child) {
-  const parent = bone.parent;
-  child.updateWorldMatrix(true, false);
-  child.getWorldPosition(_footY);
-  const cur = _footY.clone().sub(origin);
-  const want = toward.clone().sub(origin);
-  if (cur.lengthSq() < 1e-10 || want.lengthSq() < 1e-10) return;
-  cur.normalize();
-  want.normalize();
-  _ikQ.setFromUnitVectors(cur, want);
-  const worldQ = bone.getWorldQuaternion(_ikQ2);
-  worldQ.premultiply(_ikQ);
-  if (parent) {
-    parent.updateWorldMatrix(true, false);
-    const parentQ = new THREE.Quaternion();
-    parent.getWorldQuaternion(parentQ);
-    bone.quaternion.copy(parentQ.invert().multiply(worldQ));
-  } else {
-    bone.quaternion.copy(worldQ);
-  }
-  bone.updateMatrix();
-  bone.updateWorldMatrix(true, false);
+  for (let i = 0; i < bones.length; i++) lb.prev[i].copy(bones[i].quaternion);
+  lb.st = f.state;
 }
 
 function resolveClip(f, name) {
@@ -5067,6 +5035,14 @@ function rotateBoneWorldAxis(bone, axis, angle) {
   bone.quaternion.premultiply(_stQ);
   bone.updateMatrixWorld(true);
 }
+// Flex a knee along its fitted hinge axis. A turn about the body's right axis twisted any
+// knee whose leg was not square to the body (fighting stance, strafe).
+function bendKnee(f, shin, ang) {
+  const j = hingeOf(f, shin);
+  if (!j || Math.abs(ang) < 1e-4) return;
+  flexHinge(j, ang);
+  shin.updateMatrixWorld(true);
+}
 function applyStumpLeg(f, dt) {
   const lost = {
     L: !!(f.subs && f.subs.footL && f.subs.footL.detached && !(f.parts.legL && f.parts.legL.detached)),
@@ -5093,7 +5069,7 @@ function applyStumpLeg(f, dt) {
       _stFwd.set(Math.sin(f.root.rotation.y), 0, Math.cos(f.root.rotation.y));
       rotateBoneWorldAxis(leg.thigh, _stFwd, (side === 'L' ? -1 : 1) * 0.1 * b * ang); // knocked out of line
       rotateBoneWorldAxis(leg.thigh, _stAxis, -0.1 * b * ang);
-      rotateBoneWorldAxis(leg.shin, _stAxis, 0.32 * b * ang);                     // knee stays bent
+      bendKnee(f, leg.shin, 0.32 * b * ang);                                       // knee stays bent
       if (leg.foot) rotateBoneWorldAxis(leg.foot, _stFwd, (side === 'L' ? 1 : -1) * 0.12 * b * ang); // ankle rolled
     }
     if (w < 0.01) continue;
@@ -5106,7 +5082,7 @@ function applyStumpLeg(f, dt) {
       hip = 0.5 + pump; knee = 0.85 + pump;
     } else { hip = 0.16; knee = 0.3; }
     rotateBoneWorldAxis(leg.thigh, _stAxis, -hip * w); // knee comes forward
-    rotateBoneWorldAxis(leg.shin, _stAxis, knee * w);  // stump folds back
+    bendKnee(f, leg.shin, knee * w);                   // stump folds back
     // Pin the torn foot/toe so the stump cannot whip (yaw spikes after a foot comes off).
     if (leg.foot && leg.foot.userData.bindQ) leg.foot.quaternion.slerp(leg.foot.userData.bindQ, 0.55 * w);
     if (leg.toe && leg.toe.userData.bindQ) leg.toe.quaternion.slerp(leg.toe.userData.bindQ, 0.65 * w);
@@ -5306,9 +5282,11 @@ function tick() {
     stepEyes(f, dt);
     if (window.__rfDiag) diagFootStage(f, 2);
     const jf0 = (f.jointStats && f.jointStats.flips) || 0;
+    if (f.jointStats) f.jointStats.flipBones.length = 0;
     applyJointLimits(f);
     const jf = f.jointStats ? f.jointStats.flips - jf0 : 0;
-    if (jf > 0) logGlitch('jointFlip', { id: f.id, n: jf, state: f.state, clip: f.current });
+    if (jf > 0) logGlitch('jointFlip', { id: f.id, n: jf, state: f.state, clip: f.current, bones: f.jointStats.flipBones.join(',') });
+    blendLegPose(f, dt);
     if (window.__rfDiag) diagFootStage(f, 3);
     groundFeet(f, dt);
     clampRootMotion(f, dt);
@@ -5648,6 +5626,18 @@ function onLoad(gltf) {
   }));
   // Foot twist about the shin axis (deg) and knee/elbow hinge angles, for spin/inversion checks.
   window.__rfBrainStats = () => [p1, p2].map((f) => f.brain && { kind: f.brain.kind, stats: f.brain.stats ? { ok: f.brain.stats.ok, errors: f.brain.stats.errors, action: f.brain.stats.action, err: f.brain.stats.lastError } : null });
+  // Leg check: knee flex (deg) on the fitted hinge, how far knee/ankle/toe sit from their bind
+  // spot inside the parent bone (must stay 0: bones never stretch), and foot plant weights.
+  window.__rfLegCheck = () => [p1, p2].map((f) => ({
+    id: f.id, state: f.state, clip: f.current,
+    knee: ['LeftLeg', 'RightLeg'].map((k) => (f.hinges && f.hinges[k] ? +(hingeAngle(f.hinges[k]) * 57.2958).toFixed(1) : null)),
+    boneOff: ['L', 'R'].map((s) => Math.max(...['shin', 'foot', 'toe'].map((n) => {
+      const b = f.ikLegs && f.ikLegs[s][n];
+      return b && b.userData.restP ? +b.position.distanceTo(b.userData.restP).toFixed(6) : 0;
+    }))),
+    plant: f.footPlant ? [+f.footPlant.L.w.toFixed(2), +f.footPlant.R.w.toFixed(2)] : null,
+    flips: f.jointStats ? f.jointStats.flips : 0,
+  }));
   window.__rfFootDiag = () => [p1, p2].map((f) => f._footDiag && { max: f._footDiag.max.map((v) => +v.toFixed(1)), mixJump: +f._footDiag.mixJump.toFixed(1) });
   window.__rfFootYaw = () => [p1, p2].map((f) => {
     const out = { st: f.state, clip: f.current, clamped: f.jointStats && f.jointStats.clamped, axes: (f.joints || []).filter((j) => j.axis).map((j) => j.bone.name.replace('mixamorig', '') + ':' + j.axis.toArray().map((v) => v.toFixed(2)).join(',')) };
