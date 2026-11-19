@@ -190,14 +190,23 @@ export function logStrike(side, clip, result, damage) {
   }
 }
 
-export function logCpuIdle(side, inRange) {
+export function logCpuIdle(side, inRange, canThrow = true) {
   if (!current) return;
-  const last = current.lastActAt[side] || current._t0;
-  if (inRange && performance.now() - last > 8000) {
-    const t = +((performance.now() - current._t0) / 1000).toFixed(2);
+  current.lastEligibleAt = current.lastEligibleAt || { p1: 0, p2: 0 };
+  const now = performance.now();
+  // Intro, knockdowns, hitstun and being out of range must not accumulate toward "stuck".
+  if (!inRange || !canThrow) {
+    current.lastEligibleAt[side] = 0;
+    return;
+  }
+  if (!current.lastEligibleAt[side]) current.lastEligibleAt[side] = now;
+  const last = Math.max(current.lastActAt[side] || 0, current.lastEligibleAt[side]);
+  if (now - last > 8000) {
+    const t = +((now - current._t0) / 1000).toFixed(2);
     const already = current.cpuFlags.some((f) => f.kind === 'cpuStuck' && f.side === side && t - f.t < 8);
     if (!already) current.cpuFlags.push({ t, kind: 'cpuStuck', side });
-    current.lastActAt[side] = performance.now();
+    current.lastActAt[side] = now;
+    current.lastEligibleAt[side] = now;
   }
 }
 

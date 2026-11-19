@@ -53,6 +53,7 @@ export function createPacedBrain(getProfile) {
     lastHp: null,     // [self, opp] health last frame: momentum from who is landing
     oppWasAtk: false,
     punishOk: false,
+    inRangeT: 0,
   };
 
   function setMode(mode, len) {
@@ -132,6 +133,18 @@ export function createPacedBrain(getProfile) {
 
     const punchR = snap.strikeRange.punch / SIZE;
     const kickR = snap.strikeRange.kick / SIZE;
+
+    // If the CPU has been able to act inside kick range for too long without throwing,
+    // force a strike so it cannot stall in circle / read / approach.
+    if (!opp.down && self.cooldown <= 0 && dist <= kickR + 0.2) {
+      s.inRangeT += snap.dt;
+      if (s.inRangeT > (aggr >= 1.2 ? 1.15 : 1.6) && s.mode !== 'strike') {
+        s.plan = planStrike(prof, self) || 'punch';
+        s.combo = aggr >= 1.2 ? 3 : 2;
+        s.guardUntil = 0;
+        setMode('strike', 2.2);
+      }
+    } else s.inRangeT = 0;
 
     // Opponent on the mat: sometimes go in for a stomp / ground punch (decided once per
     // knockdown), otherwise step off and wait for it to stand.
@@ -222,6 +235,7 @@ export function createPacedBrain(getProfile) {
           else if (kickOk) kind = 'kick';
           if (kind) {
             intent.attack = kind;
+            s.inRangeT = 0;
             // Now and then a kick becomes a jump kick (it closes a little distance in the air).
             if (kind === 'kick' && self.canFlip && Math.random() < (prof.jump != null ? prof.jump : 0.05)) intent.attack = 'jump';
             s.plan = planStrike(prof, self) || 'punch'; // next one in the chain
@@ -279,6 +293,14 @@ export function createPacedBrain(getProfile) {
   function endCombo(prof, aggr, self) {
     const r = Math.random();
     s.circleDir = Math.random() < 0.5 ? -1 : 1;
+    // Hard / high-tempo: cut the long circle and come back in.
+    if (aggr >= 1.2) {
+      if (r < Math.min(0.2, prof.block || 0.12)) setMode('guard', rand(0.16, 0.28));
+      else if (r < 0.4) setMode('reset', rand(0.1, 0.2));
+      else startApproach(prof, self);
+      s.readNext = false;
+      return;
+    }
     if (r < (prof.block || 0.12)) setMode('guard', rand(0.25, 0.45));
     else if (r < 0.32) setMode('reset', rand(0.18, 0.35));
     else if (r < 0.82) setMode('circle', rand(0.7, 1.3) / Math.sqrt(aggr));

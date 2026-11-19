@@ -2117,7 +2117,7 @@ function endAttack(f, fade = 0.2) {
   }
   const spec = COMBAT[f.state] || COMBAT.punch;
   const base = (COMBAT.recoverByClip && COMBAT.recoverByClip[f.attackClip]) || spec.recover || 0.25;
-  const who = f.isCpu ? (COMBAT.cpuRecoverMul || 1) : (COMBAT.playerRecoverMul || 1);
+  const who = f.isCpu ? ((aiProfile(f).recoverMul) || COMBAT.cpuRecoverMul || 1) : (COMBAT.playerRecoverMul || 1);
   const rec = base * who * (f.hitThisAttack ? 1 : (COMBAT.whiffMul || 2)) * ((f.atkMods && f.atkMods.cooldownMul) || 1) * (!f.isCpu && f.chain > 0 ? 0.8 : 1);
   f.cooldown = Math.max(f.cooldown, rec / statOf(f, 'recovery'));
   f.state = 'idle';
@@ -4582,10 +4582,11 @@ function tick() {
     stepFootSounds(f, dt);
   }
   if (canAct) {
-    const reach = (COMBAT.punch && COMBAT.punch.range) || 2.2 * SIZE;
+    const reach = (COMBAT.kick && COMBAT.kick.reach) || (COMBAT.punch && COMBAT.punch.reach) || 1.7 * SIZE;
     const gap = p1.root.position.distanceTo(p2.root.position);
-    if (p1.isCpu) logCpuIdle('p1', gap < reach * 1.15);
-    if (p2.isCpu) logCpuIdle('p2', gap < reach * 1.15);
+    const canThrow = (f) => !DOWN_STATES.has(f.state) && f.state !== 'hit' && f.state !== 'punch' && f.state !== 'kick' && f.state !== 'ground';
+    if (p1.isCpu) logCpuIdle('p1', gap < reach * 1.25, canThrow(p1));
+    if (p2.isCpu) logCpuIdle('p2', gap < reach * 1.25, canThrow(p2));
   }
   updateContactShadows(p1);
   updateContactShadows(p2);

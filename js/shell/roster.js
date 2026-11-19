@@ -74,21 +74,30 @@
   };
 
   /* ---------- AI personality (fed to the game AI through api.js fighter config `ai`) ---------- */
-  const DIFF = { easy: { think: 1.45, react: 0.6, atk: 0.8 }, normal: { think: 1, react: 1, atk: 1 }, hard: { think: 0.72, react: 1.18, atk: 1.1 } };
+  const DIFF = {
+    easy:   { think: 1.45, react: 0.6,  atk: 0.8,  aggr: 0.85 },
+    normal: { think: 1,    react: 1,    atk: 1,    aggr: 1 },
+    hard:   { think: 0.42, react: 1.45, atk: 1.28, aggr: 1.4, reactFloor: 0.55, thinkCap: 0.16, aggrFloor: 1.25, recoverMul: 0.6, ground: 0.7 },
+  };
   const AGGR = { Balanced: 0.8, Evasive: 0.7, Tank: 0.9, Aggressive: 1.45, 'Counter-puncher': 0.85, Boss: 1.3 };
   S.aiFor = (opp, mode) => {
     const p = opp.prof;
     const cpu = (S.api && S.fight && S.cpuSetting && S.cpuSetting()) || 'normal';
     const d = mode === 'fight' ? (DIFF[cpu] || DIFF.normal) : DIFF.normal;
+    const think0 = p.think[0] * d.think;
+    const think1 = p.think[1] * d.think;
+    const cap = d.thinkCap;
     return {
       personality: opp.id,
-      think: [p.think[0] * d.think, p.think[1] * d.think],
-      react: Math.min(0.88, p.react * d.react),
-      punch: Math.min(0.75, p.punch * d.atk),
+      think: cap != null ? [Math.min(cap, think0), Math.min(cap + 0.06, think1)] : [think0, think1],
+      react: Math.min(0.92, Math.max(p.react * d.react, d.reactFloor || 0)),
+      punch: Math.min(0.8, p.punch * d.atk),
       kick: p.kick * d.atk,
       special: p.special,
-      block: p.block,
-      aggression: AGGR[opp.style] || 1,
+      block: Math.min(0.45, p.block * (cpu === 'hard' ? 1.25 : 1)),
+      aggression: Math.max(d.aggrFloor || 0, (AGGR[opp.style] || 1) * (d.aggr || 1)),
+      recoverMul: d.recoverMul,
+      ground: d.ground != null ? d.ground : p.ground,
     };
   };
   // CPU difficulty from the Settings sheet (read from its saved value; settings.js is not touched).
