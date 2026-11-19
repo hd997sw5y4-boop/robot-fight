@@ -4700,8 +4700,8 @@ function tick() {
   hitLight.intensity = Math.max(0, hitLight.intensity - dt * 28);
   setBuzz(isSettingsOpen() ? 0 : buzzFromFighters());
   syncHud(dt);
-  updateBroadcast();
-  updatePostfight();
+  try { updateBroadcast(); } catch (e) { console.warn('[broadcast]', e); }
+  try { updatePostfight(); } catch (e) { console.warn('[postfight]', e); }
   updateCageFade(cagePanels, camera, rawDt);
   renderFrame();
   stepDynamicRes(wallDt);
