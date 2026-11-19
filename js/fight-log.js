@@ -82,6 +82,7 @@ export function sanitizeLog(value, seen) {
   for (const [k, v] of Object.entries(value)) {
     if (k.charAt(0) === '_' && k !== '_t0') continue;
     if (SECRET_KEY.test(k)) continue;
+    if (typeof v === 'function') continue;
     out[k] = sanitizeLog(v, memo);
   }
   return out;
@@ -97,31 +98,112 @@ function loadAll() {
   } catch (_) { return { fights: [], version: 1 }; }
 }
 
+let lastSaveError = '';
+
+function paintSaveError() {
+  try {
+    const el = document.getElementById('setLogSaveErr');
+    if (!el) return;
+    el.textContent = lastSaveError ? 'log save failed' : '';
+    el.hidden = !lastSaveError;
+  } catch (_) {}
+}
+
+function setSaveError(msg) {
+  lastSaveError = msg ? String(msg) : '';
+  if (lastSaveError) console.warn('Fight log save failed:', lastSaveError);
+  paintSaveError();
+}
+
+export function logSaveError() { return lastSaveError; }
+
 function saveAll(data) {
-  data = sanitizeLog(data) || { fights: [], version: 1 };
-  let fights = (data.fights || []).slice(-MAX_FIGHTS);
-  const pack = (list) => {
-    for (const f of list) shrinkFight(f);
-    return JSON.stringify({ version: 1, fights: list });
-  };
-  let out = pack(fights);
-  while (out.length > MAX_BYTES && fights.length) {
-    const last = fights[fights.length - 1];
-    if (last && last.path && last.path.length > 80) {
-      last.path = last.path.filter((_, i) => i % 2 === 0);
-      out = pack(fights);
-      continue;
-    }
-    if (fights.length === 1) break;
-    fights = fights.slice(1);
+  let out;
+  try {
+    data = sanitizeLog(data) || { fights: [], version: 1 };
+    let fights = (data.fights || []).slice(-MAX_FIGHTS);
+    const pack = (list) => {
+      for (const f of list) shrinkFight(f);
+      return JSON.stringify({ version: 1, fights: list });
+    };
     out = pack(fights);
-  }
-  try { localStorage.setItem(KEY, out); } catch (_) {
+    while (out.length > MAX_BYTES && fights.length) {
+      const last = fights[fights.length - 1];
+      if (last && last.path && last.path.length > 80) {
+        last.path = last.path.filter((_, i) => i % 2 === 0);
+        out = pack(fights);
+        continue;
+      }
+      if (fights.length === 1) break;
+      fights = fights.slice(1);
+      out = pack(fights);
+    }
+    localStorage.setItem(KEY, out);
+    setSaveError('');
+    return true;
+  } catch (err) {
     try {
-      fights = fights.slice(Math.max(0, fights.length - 4));
+      const fights = ((data && data.fights) || []).slice(-4);
       localStorage.setItem(KEY, JSON.stringify({ version: 1, fights: sanitizeLog(fights) }));
-    } catch (__) {}
+      setSaveError('');
+      return true;
+    } catch (err2) {
+      setSaveError((err2 && err2.message) || (err && err.message) || 'storage error');
+      return false;
+    }
   }
+}
+
+function upsertFight(fight) {
+  if (!fight || !fight.id) return false;
+  const all = loadAll();
+  const clean = sanitizeLog(fight);
+  const i = (all.fights || []).findIndex((f) => f && f.id === clean.id);
+  if (i >= 0) all.fights[i] = clean;
+  else all.fights.push(clean);
+  return saveAll(all);
+}
+
+function finalizedFps(raw) {
+  const s = raw && raw.fps;
+  if (!s) return s;
+  if (s.mean != null || s.samples != null) return s;
+  return {
+    samples: s.n || 0,
+    mean: s.n ? +(s.sum / s.n).toFixed(1) : null,
+    min: s.n ? +s.min.toFixed(1) : null,
+    max: s.n ? +s.max.toFixed(1) : null,
+    dropsBelow20: s.drops || 0,
+    below30: s.below30 || 0,
+  };
+}
+
+function snapshotCurrent(ended) {
+  if (!current) return null;
+  const fps = finalizedFps(current);
+  const rec = {
+    ...current,
+    ended: ended || current.ended || 'complete',
+    endedAt: current.endedAt || nowIso(),
+    durationS: +((performance.now() - current._t0) / 1000).toFixed(2),
+    fps,
+  };
+  rec.summary = buildSummary(rec);
+  const clean = sanitizeLog(rec);
+  if (clean && '_t0' in clean) delete clean._t0;
+  return clean;
+}
+
+export function hasOpenFight() { return !!current; }
+
+function commitOpenFight(ended, extra) {
+  if (!current) return null;
+  if (extra) Object.assign(current, extra);
+  const rec = snapshotCurrent(ended);
+  upsertFight(rec);
+  const done = rec;
+  current = null;
+  return done;
 }
 
 function shrinkFight(f) {
@@ -177,6 +259,7 @@ function emptyQuality() {
 
 export function startFight({ p1, p2, mode, labels } = {}) {
   installConsoleHook();
+  if (current && current.mode !== 'training') commitOpenFight('quit');
   current = {
     id: `f-${Date.now().toString(36)}`,
     startedAt: nowIso(),
@@ -205,6 +288,7 @@ export function startFight({ p1, p2, mode, labels } = {}) {
     learning: null,
     winner: null,
     method: null,
+    ended: null,
     endedAt: null,
     summary: null,
   };
@@ -499,6 +583,8 @@ function buildSummary(fight) {
     pathSamples: pathN,
     inputLatencyMs: avgLag,
     cpuStuck: (fight.cpuFlags || []).filter((f) => f.kind === 'cpuStuck').length,
+    heldRepeats: (fight.qevents || []).filter((e) => e && e.k === 'heldRepeat').length || undefined,
+    ended: fight.ended || undefined,
     api: fight.apiStats || undefined,
     learning: fight.learning ? {
       p1: fight.learning.p1 ? { on: !!fight.learning.p1.on, note: fight.learning.p1.note || '' } : null,
@@ -507,44 +593,47 @@ function buildSummary(fight) {
   };
 }
 
-export function endFight({ winner, method, p1, p2, labels, apiStats } = {}) {
+export function endFight({ winner, method, p1, p2, labels, apiStats, ended } = {}) {
   if (!current) return null;
   if (p1) current.sides.p1.label = (labels && labels.p1) || sideLabel(p1, null, current.sides.p1.label);
   if (p2) current.sides.p2.label = (labels && labels.p2) || sideLabel(p2, null, current.sides.p2.label);
   if (p1 && p1.config && p1.config.apiBrain) current.sides.p1.api = { provider: p1.config.apiBrain.provider, model: p1.config.apiBrain.model };
   if (p2 && p2.config && p2.config.apiBrain) current.sides.p2.api = { provider: p2.config.apiBrain.provider, model: p2.config.apiBrain.model };
   if (apiStats) current.apiStats = sanitizeLog(apiStats);
+  current.winner = winner || current.winner || null;
+  current.method = method || current.method || null;
   current.endedAt = nowIso();
-  current.durationS = +((performance.now() - current._t0) / 1000).toFixed(2);
-  current.winner = winner || null;
-  current.method = method || null;
-  const s = current.fps;
-  current.fps = {
-    samples: s.n,
-    mean: s.n ? +(s.sum / s.n).toFixed(1) : null,
-    min: s.n ? +s.min.toFixed(1) : null,
-    max: s.n ? +s.max.toFixed(1) : null,
-    dropsBelow20: s.drops,
-    below30: s.below30,
-  };
-  current.summary = buildSummary(current);
-  delete current._prev;
-  delete current._pathAt;
-  delete current._stuck;
-  delete current._press;
-  delete current.lastEligibleAt;
-  const all = loadAll();
-  all.fights.push(sanitizeLog(current));
-  saveAll(all);
-  const done = current;
-  current = null;
-  return done;
+  return commitOpenFight(ended || 'complete');
 }
 
-export function getLog() { return sanitizeLog(loadAll()); }
+export function abandonFight(ended) {
+  if (!current) return null;
+  if (!current.method) current.method = ended || 'quit';
+  return commitOpenFight(ended || 'quit');
+}
+
+export function logHeldRepeat(side, info) {
+  const action = info && info.action;
+  const reason = info && info.reason;
+  qpush('heldRepeat', { id: side, action: String(action || '').slice(0, 24), reason: String(reason || '').slice(0, 48) });
+}
+
+function logWithOpen() {
+  const all = loadAll();
+  if (current) {
+    const snap = snapshotCurrent(current.ended || 'in-progress');
+    const i = (all.fights || []).findIndex((f) => f && f.id === snap.id);
+    if (i >= 0) all.fights[i] = snap;
+    else all.fights.push(snap);
+  }
+  return sanitizeLog(all);
+}
+
+export function getLog() { return logWithOpen(); }
 
 export function downloadLog() {
-  const data = sanitizeLog(loadAll());
+  const data = logWithOpen();
+  try { if (current) upsertFight(snapshotCurrent(current.ended || 'in-progress')); } catch (err) { setSaveError(err && err.message); }
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -557,7 +646,7 @@ export function downloadLog() {
 }
 
 export async function copyLog() {
-  const text = JSON.stringify(sanitizeLog(loadAll()), null, 2);
+  const text = JSON.stringify(logWithOpen(), null, 2);
   if (navigator.clipboard && navigator.clipboard.writeText) {
     await navigator.clipboard.writeText(text);
     return true;
@@ -574,8 +663,9 @@ export async function copyLog() {
 export function clearLog() {
   current = null;
   try { localStorage.removeItem(KEY); } catch (_) {}
+  setSaveError('');
 }
 
 if (typeof window !== 'undefined') {
-  window.RFFightLog = { startFight, endFight, logFps, logGlitch, logStrike, logRound, getLog, downloadLog, copyLog, clearLog, sanitizeLog, noteFrameWork, setFightLearning };
+  window.RFFightLog = { startFight, endFight, abandonFight, logFps, logGlitch, logStrike, logRound, getLog, downloadLog, copyLog, clearLog, sanitizeLog, noteFrameWork, setFightLearning, logHeldRepeat, logSaveError, hasOpenFight };
 }

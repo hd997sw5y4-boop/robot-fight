@@ -31,10 +31,11 @@ export const AI_BUDGET = { interval: 700, fresh: 1400, timeout: 6000, maxTokens:
 
 export const SYSTEM = 'You control one heavy humanoid robot in a 3D fighting game. Each message is the current '
   + 'state as JSON (distances in metres, health 0-100, parts 0-1 health, 0 means torn off). Reply with JSON '
-  + '{"action":"<one of: ' + AI_ACTIONS.join(', ') + '>","plan":"<up to 12 words>","target":"<optional one of: '
-  + AI_TARGETS.join(', ') + '>"} and nothing else. Punch lands within strikeRange.punch, '
-  + 'kick within strikeRange.kick; ground only works when opp.groundable is true; block when the opponent attacks; '
-  + 'flip_front (only when self.canFlip) flips over or toward the opponent; jump_kick is a flying kick (needs canFlip).';
+  + '{"action":"<one of the Allowed actions>","plan":"<up to 12 words>","target":"<optional one of: '
+  + AI_TARGETS.join(', ') + '>"} and nothing else. inRange.punch / inRange.kick are true when that strike can land now. '
+  + 'legal is the only set of actions that work at this distance — do not pick approach when it is omitted. '
+  + 'If the message says you are IN RANGE, attack, block or reposition; do not close the gap. '
+  + 'ground only works when opp.groundable is true; flip_front and jump_kick need self.canFlip.';
 
 const K = {
   on: 'rf_ai_on', provider: 'rf_ai_provider', base: 'rf_ai_base', model: 'rf_ai_model',
@@ -123,14 +124,65 @@ export function apiLabel(cfg) {
   return bits.join(' · ');
 }
 
+const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
+
+/** Range flags and legal actions for the current distance. Used in the prompt and the in-range guard. */
+export function rangeInfo(s) {
+  const dist = r2(s && s.dist);
+  const punch = r2(s && s.strikeRange && s.strikeRange.punch);
+  const kick = r2(s && s.strikeRange && s.strikeRange.kick);
+  const self = (s && s.self) || {};
+  const opp = (s && s.opp) || {};
+  const inRange = { punch: !!(punch && dist <= punch + 0.02), kick: !!(kick && dist <= kick + 0.02) };
+  const any = inRange.punch || inRange.kick;
+  const legal = [];
+  if (!any) legal.push('approach');
+  legal.push('retreat', 'circle_left', 'circle_right', 'wait');
+  if (self.canBlock !== false) legal.push('block');
+  if (self.canPunch !== false && inRange.punch) legal.push('punch');
+  if (self.canKick !== false && inRange.kick) legal.push('kick');
+  if (self.canFlip) {
+    legal.push('jump_kick', 'flip_front');
+  }
+  if (opp.groundable) legal.push('ground');
+  return { dist, inRange, legal, strikeRange: { punch, kick } };
+}
+
 function compact(s) {
-  const r2 = (v) => Math.round(v * 100) / 100;
   const side = (x) => x && ({
     health: Math.round(x.health), state: x.state, attacking: !!x.attacking, blocking: !!x.blocking,
     down: !!x.down, edge: r2(x.edge || 0), parts: x.parts && Object.fromEntries(Object.entries(x.parts).map(([k, v]) => [k, r2(v)])),
     canPunch: x.canPunch, canKick: x.canKick, groundable: x.groundable, canFlip: x.canFlip, heavy: x.heavy,
   });
-  return { dist: r2(s.dist || 0), strikeRange: s.strikeRange && { punch: r2(s.strikeRange.punch), kick: r2(s.strikeRange.kick) }, self: side(s.self), opp: side(s.opp) };
+  const info = rangeInfo(s);
+  return {
+    dist: info.dist,
+    strikeRange: info.strikeRange,
+    inRange: info.inRange,
+    legal: info.legal,
+    self: side(s.self),
+    opp: side(s.opp),
+  };
+}
+
+function inStrikeRange(snap) {
+  const info = rangeInfo(snap || {});
+  return !!(info.inRange.punch || info.inRange.kick);
+}
+
+function userPrompt(state, snap, recent) {
+  const info = rangeInfo(snap || state || {});
+  const lines = [];
+  if (info.inRange.punch || info.inRange.kick) {
+    const bits = [info.inRange.punch ? 'punch' : '', info.inRange.kick ? 'kick' : ''].filter(Boolean).join(' and ');
+    lines.push('You are IN RANGE (' + bits + '): attack, block or reposition.');
+  } else {
+    lines.push('You are out of range. Close the gap before you strike.');
+  }
+  lines.push('Allowed actions: ' + info.legal.join(', ') + '.');
+  if (recent && recent.length) lines.push('Your last actions: ' + recent.join('; ') + '.');
+  lines.push(JSON.stringify(state));
+  return lines.join('\n');
 }
 
 // Reply text from any OpenAI-compatible shape, including reasoning models that leave content empty.
@@ -203,11 +255,32 @@ export function apiStatusText() {
   if (!apiStatus.ok && !apiStatus.fail) return 'API: waiting for the first reply';
   const failing = apiStatus.lastFail > apiStatus.lastOk;
   if (failing) {
-    if (apiStatus.lastKind === 'key_rejected') return 'API key rejected, using CPU';
-    if (apiStatus.lastKind === 'cors') return 'API CORS/network error, using CPU';
-    return 'API failed, using CPU: ' + (apiStatus.lastError || 'error');
+    if (apiStatus.lastKind === 'key_rejected') return 'API key rejected, holding guard';
+    if (apiStatus.lastKind === 'cors') return 'API CORS/network error, holding last action';
+    return 'API no answer (' + (apiStatus.lastKind || 'error') + '), holding last action'
+      + (apiStatus.lastError ? ': ' + apiStatus.lastError : '');
   }
   return 'API: OK (' + apiStatus.lastLatency + ' ms, ' + apiStatus.ok + ' replies' + (apiStatus.fail ? ', ' + apiStatus.fail + ' failed' : '') + ')';
+}
+
+const lastById = { p1: null, p2: null };
+function rememberSide(id, rec) {
+  if (!id) return;
+  lastById[id] = rec;
+}
+
+export function apiSideStatus(id) { return lastById[id] || null; }
+
+function sideStatusLine(id, label) {
+  const rec = lastById[id];
+  if (!rec) return label + ': —';
+  const act = rec.action || rec.heldAction || '—';
+  if (rec.kind === 'key_rejected') return label + ': Key rejected';
+  if (rec.kind && rec.kind !== 'ok') {
+    const why = rec.kind === 'timeout' ? 'no answer (timeout)' : ('no answer (' + rec.kind + ')');
+    return label + ': ' + act + ' · ' + why;
+  }
+  return label + ': ' + act + (rec.target ? ' → ' + rec.target : '');
 }
 export function downloadApiLog() {
   const blob = new Blob([apiLog.map((r) => JSON.stringify(r)).join('\n') + (apiLog.length ? '\n' : '')], { type: 'application/x-ndjson' });
@@ -382,7 +455,7 @@ function guardIntent() {
 }
 
 export function createApiBrain(id, getCfg) {
-  const st = { action: null, plan: '', target: '', at: 0, used: false, inflight: false, lastReq: 0, backoff: 0, lastKind: '', cfg: null, keyRejected: false, holding: false };
+  const st = { action: null, plan: '', target: '', at: 0, used: false, inflight: false, lastReq: 0, backoff: 0, lastKind: '', cfg: null, keyRejected: false, holding: false, recent: [] };
   const stats = emptyStats();
   const INTERVAL = AI_BUDGET.interval;
   const MAX_CALLS = AI_BUDGET.maxCalls;
@@ -404,7 +477,7 @@ export function createApiBrain(id, getCfg) {
     const notes = isLearningOn(learnKey) ? promptNotes(learnKey) : '';
     const sys = notes ? (SYSTEM + '\n\nYour notes from past fights: ' + notes) : SYSTEM;
     const out = await requestCompletion(c, {
-      messages: [{ role: 'system', content: sys }, { role: 'user', content: JSON.stringify(state) }],
+      messages: [{ role: 'system', content: sys }, { role: 'user', content: userPrompt(state, snap, st.recent) }],
     });
     rec.latencyMs = out.latency || 0;
     rec.kind = out.ok ? 'ok' : out.kind;
@@ -420,6 +493,7 @@ export function createApiBrain(id, getCfg) {
         stats.errors += 1;
         st.lastKind = 'invalid';
         stats.noAnswer += 1;
+        st.recent = (st.recent || []).concat(['no answer (empty)']).slice(-5);
         apiStatus.fail++; apiStatus.lastFail = Date.now(); apiStatus.lastError = rec.error; apiStatus.lastKind = 'invalid';
       } else if (!parsed) {
         rec.kind = 'invalid';
@@ -428,6 +502,7 @@ export function createApiBrain(id, getCfg) {
         stats.errors += 1;
         st.lastKind = 'invalid';
         stats.noAnswer += 1;
+        st.recent = (st.recent || []).concat(['no answer (invalid)']).slice(-5);
         apiStatus.fail++; apiStatus.lastFail = Date.now(); apiStatus.lastError = rec.error; apiStatus.lastKind = 'invalid';
       } else {
         rec.action = parsed.action;
@@ -442,6 +517,8 @@ export function createApiBrain(id, getCfg) {
         stats.lastAction = parsed.action;
         stats.lastPlan = st.plan;
         stats.lastTarget = st.target;
+        const already = inStrikeRange(snap) && parsed.action === 'approach';
+        st.recent = (st.recent || []).concat([parsed.action + (already ? ' (already in range)' : '')]).slice(-5);
         stats.latencySum += rec.latencyMs;
         stats.latencyN += 1;
         if (parsed.target) stats.targets[parsed.target] = (stats.targets[parsed.target] || 0) + 1;
@@ -459,6 +536,7 @@ export function createApiBrain(id, getCfg) {
       else if (out.kind === 'key_rejected') stats.keyRejected += 1;
       else if (out.kind === 'rate_limit') stats.rateLimited += 1;
       stats.noAnswer += 1;
+      st.recent = (st.recent || []).concat(['no answer (' + (out.kind || 'error') + ')']).slice(-5);
       if (out.kind === 'key_rejected') {
         st.keyRejected = true;
         st.action = null;
@@ -479,7 +557,10 @@ export function createApiBrain(id, getCfg) {
     apiLog.push(rec);
     if (apiLog.length > LOG_MAX) apiLog.shift();
     bump();
-    emitDecision({ id, action: rec.action, plan: rec.plan, target: rec.target, error: rec.error, kind: rec.kind, latency: rec.latencyMs, provider: c.provider, model: c.model });
+    const ev = { id, action: rec.action, plan: rec.plan, target: rec.target, error: rec.error, kind: rec.kind, latency: rec.latencyMs, provider: c.provider, model: c.model };
+    if (!rec.action && st.action) ev.heldAction = st.action;
+    rememberSide(id, ev);
+    emitDecision(ev);
   }
 
   function think(snap) {
@@ -493,8 +574,16 @@ export function createApiBrain(id, getCfg) {
       const holding = (st.lastKind && st.lastKind !== 'ok') || !canCall || stats.calls >= MAX_CALLS && st.lastKind !== 'ok';
       if (holding) {
         stats.heldLastMs += dtMs;
-        if (!st.holding) { stats.heldLastCount += 1; st.holding = true; }
+        if (!st.holding) {
+          stats.heldLastCount += 1;
+          st.holding = true;
+          const ev = { id, action: st.action, held: true, heldAction: st.action, heldReason: st.lastKind || 'no_answer', kind: st.lastKind || 'no_answer' };
+          rememberSide(id, ev);
+          emitDecision(ev);
+        }
       } else st.holding = false;
+      // In-range approach is still the AI's choice (logged raw), but it does not walk in further.
+      if (st.action === 'approach' && inStrikeRange(snap)) return actionIntent('wait');
       const it = actionIntent(st.action);
       if (it.attack || it.dodge) {
         if (st.used) return guardIntent();
@@ -598,18 +687,41 @@ export function initApiBrainUI() {
   const hud = document.createElement('div');
   hud.id = 'aiHud';
   hud.style.cssText = 'position:fixed;left:50%;bottom:6px;transform:translateX(-50%);font:600 11px/1.3 system-ui,sans-serif;'
-    + 'padding:3px 8px;border-radius:6px;background:rgba(0,0,0,.55);color:#cfe;pointer-events:none;z-index:30;display:none;max-width:60vw;'
+    + 'padding:3px 10px;border-radius:6px;background:rgba(0,0,0,.55);color:#cfe;pointer-events:none;z-index:30;display:none;max-width:80vw;'
     + 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
   document.body.appendChild(hud);
+  const sides = document.createElement('div');
+  sides.id = 'aiSideHud';
+  sides.innerHTML = '<div data-side="p1"></div><div data-side="p2"></div>';
+  sides.style.cssText = 'position:fixed;top:58px;left:0;right:0;display:none;pointer-events:none;z-index:30;'
+    + 'font:700 12px/1.3 system-ui,sans-serif;color:#e8eef8;text-shadow:0 1px 2px #000;';
+  const s1 = sides.querySelector('[data-side="p1"]');
+  const s2 = sides.querySelector('[data-side="p2"]');
+  s1.style.cssText = 'position:absolute;left:16px;max-width:42vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+  s2.style.cssText = 'position:absolute;right:16px;max-width:42vw;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+  document.body.appendChild(sides);
   const show = () => {
     const txt = apiStatusText();
     const failing = apiStatus.lastFail > apiStatus.lastOk;
-    stat.textContent = (wantsApiBrain('p1') || wantsApiBrain('p2') ? txt : 'API brain not in use.') + ' Log: ' + apiLog.length + ' calls.';
-    hud.textContent = txt;
+    const p1On = !!(lastById.p1 || wantsApiBrain('p1'));
+    const p2On = !!(lastById.p2 || wantsApiBrain('p2'));
+    const any = p1On || p2On || apiStatus.ok || apiStatus.fail;
+    stat.textContent = (any ? txt : 'API brain not in use.') + ' Log: ' + apiLog.length + ' calls.';
     hud.style.color = failing ? '#ffb4a8' : '#cfe';
-    hud.style.display = (apiStatus.ok || apiStatus.fail) && (wantsApiBrain('p1') || wantsApiBrain('p2')) ? 'block' : 'none';
+    hud.style.display = any ? 'block' : 'none';
+    const left = p1On ? sideStatusLine('p1', 'P1') : '';
+    const right = p2On ? sideStatusLine('p2', 'P2') : '';
+    s1.textContent = left;
+    s2.textContent = right;
+    hud.textContent = [left, right].filter(Boolean).join('   ·   ') || txt;
+    sides.style.display = (left || right) ? 'block' : 'none';
+    if (lastById.p1 && lastById.p1.kind && lastById.p1.kind !== 'ok') s1.style.color = '#ffb4a8';
+    else s1.style.color = '#e8eef8';
+    if (lastById.p2 && lastById.p2.kind && lastById.p2.kind !== 'ok') s2.style.color = '#ffb4a8';
+    else s2.style.color = '#e8eef8';
   };
   onApiStatus(show);
+  onApiDecision(show);
   on.addEventListener('change', show);
   paint();
   show();
@@ -619,6 +731,6 @@ if (typeof window !== 'undefined') {
   window.RFApiBrain = {
     testApiKey, AI_PROVIDERS, AI_BUDGET, chatUrl, scrubSecret, corsNote,
     fighterApiCfg, apiStatsSnapshot, apiLabel, loadEntrantKey, saveEntrantKey, clearEntrantKey,
-    onApiDecision, wantsApiBrain,
+    onApiDecision, wantsApiBrain, rangeInfo, apiSideStatus,
   };
 }

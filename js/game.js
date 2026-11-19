@@ -13,10 +13,10 @@ import { CLIP_SPEEDS } from './clip-speeds.js';
 import { applyChrome, setChromeLow } from './chrome.js';
 import { initJointLimits, applyJointLimits } from './joints.js';
 import { setWiresLow } from './wires.js';
-import { createApiBrain, wantsApiBrain, initApiBrainUI, fighterApiCfg, apiLabel, apiStatsSnapshot } from './api-brain.js';
+import { createApiBrain, wantsApiBrain, initApiBrainUI, fighterApiCfg, apiLabel, apiStatsSnapshot, onApiDecision } from './api-brain.js';
 import { memoryKey, isLearningOn, promptNotes, rememberApiFights } from './api-learn.js';
 import { getSettings, isSettingsOpen, initSettings, updateFps, lastFps, cycleCameraMode, setCameraMode } from './settings.js';
-import { startFight as logStartFight, endFight as logEndFight, logFps, logGlitch, logStrike, logRound, logCpuIdle, stepFightQuality, logFall, logGetUp, logAnimSwitch, logInputPress, logInputAction, noteFrameWork, wallDist, setFightApiStats, setFightLearning } from './fight-log.js';
+import { startFight as logStartFight, endFight as logEndFight, abandonFight as logAbandonFight, logFps, logGlitch, logStrike, logRound, logCpuIdle, stepFightQuality, logFall, logGetUp, logAnimSwitch, logInputPress, logInputAction, noteFrameWork, wallDist, setFightApiStats, setFightLearning, logHeldRepeat, hasOpenFight } from './fight-log.js';
 import { broadcastMain, initBroadcast, updateBroadcast, xrPresenting } from './arena/broadcast.js';
 import { unlockAudio, playSfx, playHit, setBuzz, startCrowd } from './audio.js';
 import { announce, announceIntroSeconds } from './announcer.js';
@@ -2539,23 +2539,78 @@ function hookFightLogShell() {
     if (p2 && wantsApiBrain(p2.id, p2)) lab.p2 = apiLabel(fighterApiCfg(p2));
     return lab;
   };
-  S.on('roundBegin', (n) => {
-    if (n === 1) {
-      logStartFight({ p1, p2, mode: (S.state && S.state.mode) || 'fight', labels: labelsFor() });
-      setFightLearning(learningForSides());
-    }
-  });
-  S.on('roundEnd', (r) => logRound(r));
-  S.on('matchEnd', (w) => {
-    const rounds = S.match && S.match.rounds;
-    const last = rounds && rounds[rounds.length - 1];
-    const method = last ? last.method : (w == null ? 'Decision' : 'KO');
+  const apiStatsFor = () => {
     const apiStats = {};
     if (p1 && p1.brain && p1.brain.kind === 'api') apiStats.p1 = apiStatsSnapshot(p1.brain);
     if (p2 && p2.brain && p2.brain.kind === 'api') apiStats.p2 = apiStatsSnapshot(p2.brain);
-    const done = logEndFight({ winner: w == null ? 'draw' : (w === 0 ? 'p1' : 'p2'), method, p1, p2, labels: labelsFor(), apiStats: Object.keys(apiStats).length ? apiStats : null });
-    rememberApiFights(done, p1, p2);
+    return Object.keys(apiStats).length ? apiStats : null;
+  };
+  const winnerOf = (M, w) => {
+    if (w === 0 || w === 1) return w === 0 ? 'p1' : 'p2';
+    if (w == null && M) {
+      if (M.wins && M.wins[0] !== M.wins[1]) return M.wins[0] > M.wins[1] ? 'p1' : 'p2';
+      const d0 = M.total && M.total[0] && M.total[0].damage;
+      const d1 = M.total && M.total[1] && M.total[1].damage;
+      if (d0 != null && d1 != null && Math.abs(d0 - d1) >= 1) return d0 > d1 ? 'p1' : 'p2';
+    }
+    if (w == null) return 'draw';
+    return w === 0 ? 'p1' : 'p2';
+  };
+  const closeLoggedFight = (w, ended) => {
+    if (!hasOpenFight()) return null;
+    const M = S.match;
+    const rounds = M && M.rounds;
+    const last = rounds && rounds[rounds.length - 1];
+    const method = last ? last.method : (w == null ? 'Decision' : 'KO');
+    const done = logEndFight({
+      winner: winnerOf(M, w),
+      method,
+      p1, p2,
+      labels: labelsFor(),
+      apiStats: apiStatsFor(),
+      ended: ended || 'complete',
+    });
+    try { rememberApiFights(done, p1, p2); } catch (e) { console.warn('[fight-log]', e); }
+    return done;
+  };
+  const matchOver = (M) => {
+    if (!M || (M.cfg && M.cfg.mode === 'training')) return false;
+    const best = M.bestOf || 1;
+    const need = Math.ceil(best / 2);
+    return (M.wins && (M.wins[0] >= need || M.wins[1] >= need)) || M.round >= best;
+  };
+  S.on('roundBegin', (n) => {
+    if (n === 1) {
+      logStartFight({ p1, p2, mode: (S.state && S.state.mode) || 'fight', labels: labelsFor() });
+      try { setFightLearning(learningForSides()); } catch (e) { console.warn('[fight-log]', e); }
+    }
   });
+  S.on('roundEnd', (r) => {
+    logRound(r);
+    const M = S.match;
+    if (matchOver(M)) closeLoggedFight(M && M.winner, 'complete');
+  });
+  S.on('matchEnd', (w) => { closeLoggedFight(w, 'complete'); });
+  onApiDecision((rec) => {
+    if (rec && rec.held) logHeldRepeat(rec.id, { action: rec.heldAction || rec.action, reason: rec.heldReason || rec.kind || 'no_answer' });
+  });
+  if (typeof S.abortMatch === 'function' && !S.__fightLogAbortHooked) {
+    S.__fightLogAbortHooked = true;
+    const prev = S.abortMatch;
+    S.abortMatch = (...args) => {
+      try {
+        const M = S.match;
+        if (hasOpenFight()) {
+          if (M && M.phase === 'match-end') closeLoggedFight(M.winner, 'complete');
+          else {
+            const done = logAbandonFight('quit');
+            try { rememberApiFights(done, p1, p2); } catch (e) { console.warn('[fight-log]', e); }
+          }
+        }
+      } catch (e) { console.warn('[fight-log]', e); }
+      return prev.apply(S, args);
+    };
+  }
 }
 
 function learningForSides() {
