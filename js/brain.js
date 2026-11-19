@@ -296,6 +296,24 @@ export function createPacedBrain(getProfile) {
         if (s.mode === 'strike' && s.combo <= 0) endCombo(prof, aggr, self);
       }
     }
+
+    const sp = self.specials || {};
+    const rocketR = (snap.strikeRange.rocket || (snap.strikeRange.kick + SIZE)) / SIZE;
+    if (sp.rocket_punch && dist > punchR * 0.65 && dist < rocketR && Math.random() < (prof.special || 0.12) * 0.9) {
+      intent.attack = 'rocket_punch';
+      intent.block = false;
+      return intent;
+    }
+    if (sp.dash_back && (self.atWall || snap.tooClose || (opp.attacking && dist < punchR + 0.1)) && Math.random() < 0.42) {
+      intent.attack = 'dash_back';
+      intent.block = false;
+      return intent;
+    }
+    if (sp.dash_forward && dist > kickR + 0.35 && dist < kickR + 1.85 && !opp.attacking && Math.random() < (prof.aggression || 1) * 0.18) {
+      intent.attack = 'dash_forward';
+      intent.run = false;
+      return intent;
+    }
     return intent;
   }
 

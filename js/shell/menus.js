@@ -52,15 +52,82 @@
   const KEYS_SOLO = `
     <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows <span>move</span></li>
     <li><kbd>J</kbd> <span>punch</span> <kbd>K</kbd> <span>kick</span> <kbd>L</kbd> <span>block</span></li>
+    <li><kbd>Q</kbd> <span>rocket punch</span> <kbd>E</kbd> <span>dash forward</span> <kbd>X</kbd> <span>dash back</span></li>
     <li><kbd>I</kbd> <span>stomp / ground punch a downed robot</span></li>
     <li><kbd>U</kbd> <span>jump kick</span> <kbd>Y</kbd> <span>front flip</span></li>
     <li>Hold <kbd>Shift</kbd> <span>run forward / back</span></li>
     <li><kbd>V</kbd> <span>camera view: arena, fighting, 3rd person, 1st person, broadcast</span> <kbd>C</kbd> <span>broadcast on/off</span></li>
     <li><kbd>Esc</kbd> / <kbd>P</kbd> <span>pause</span></li>
     <li>Mouse drag <span>spin camera</span> · wheel <span>zoom</span> · double-click <span>reset view</span></li>`;
-  const KEYS_P1 = '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>F</kbd> punch · <kbd>G</kbd> kick · <kbd>H</kbd> block · <kbd>T</kbd> ground attack · hold <kbd>Left Shift</kbd> run';
-  const KEYS_P2 = '<kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> move · <kbd>.</kbd> punch · <kbd>/</kbd> kick · <kbd>Right Shift</kbd> block · <kbd>,</kbd> ground attack · hold <kbd>Right Ctrl</kbd> run';
-  const PAD = '<li><span>Stick / D-pad</span> move · <kbd>A</kbd> punch · <kbd>B</kbd> kick · <kbd>X</kbd>/shoulder block · <kbd>Y</kbd> ground attack · hold <kbd>LT</kbd>/<kbd>L3</kbd> run · <kbd>RB</kbd>+up front flip · <kbd>R3</kbd> jump kick · <kbd>Start</kbd> pause</li>';
+  const KEYS_P1 = '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>F</kbd> punch · <kbd>G</kbd> kick · <kbd>H</kbd> block · <kbd>Q</kbd> rocket punch · <kbd>E</kbd> dash forward · <kbd>X</kbd> dash back · <kbd>T</kbd> ground attack · hold <kbd>Left Shift</kbd> run';
+  const KEYS_P2 = '<kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> move · <kbd>.</kbd> punch · <kbd>/</kbd> kick · <kbd>Right Shift</kbd> block · <kbd>[</kbd> rocket punch · <kbd>]</kbd> dash forward · <kbd>;</kbd> dash back · <kbd>,</kbd> ground attack · hold <kbd>Right Ctrl</kbd> run';
+  const PAD = '<li><span>Left stick / D-pad</span> move · <span class="ps">✕</span> punch · <span class="ps">○</span> kick · <span class="ps">□</span> block · <span class="ps">△</span> ground · <span class="ps">L1</span> rocket punch · <span class="ps">R2</span> dash (stick back = back dash) · hold <span class="ps">L2</span>/<span class="ps">L3</span> run · <span class="ps">R1</span>+forward front flip · <span class="ps">R3</span> jump kick · <span class="ps">Options</span> pause</li>';
+
+
+const PAD_SVG = `<svg viewBox="0 0 760 390" class="ps-svg" role="img" aria-label="Controller diagram">
+  <defs>
+    <linearGradient id="psBody" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a3040"/>
+      <stop offset="1" stop-color="#161922"/>
+    </linearGradient>
+    <linearGradient id="psFace" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a4154"/>
+      <stop offset="1" stop-color="#232838"/>
+    </linearGradient>
+  </defs>
+  <!-- Body: original rounded gamepad silhouette, no logos -->
+  <path fill="url(#psBody)" stroke="#8ea0c8" stroke-width="2.2" d="M170 128 C 210 70, 300 58, 380 58 C 460 58, 550 70, 590 128 C 660 148, 720 210, 718 268 C 716 330, 650 348, 600 318 C 560 348, 470 358, 380 358 C 290 358, 200 348, 160 318 C 110 348, 44 330, 42 268 C 40 210, 100 148, 170 128 Z"/>
+  <rect x="300" y="92" width="160" height="10" rx="5" fill="#7ad7ff" opacity=".85"/>
+  <ellipse cx="380" cy="200" rx="86" ry="58" fill="url(#psFace)" stroke="#6f7d99" stroke-width="1.5"/>
+  <text x="380" y="196" text-anchor="middle" class="ps-lab muted">Touch pad</text>
+  <!-- Left stick -->
+  <circle cx="250" cy="230" r="36" fill="#12151c" stroke="#9aa8c4" stroke-width="2"/>
+  <circle cx="250" cy="230" r="16" fill="#2c3344"/>
+  <!-- Right stick -->
+  <circle cx="510" cy="230" r="36" fill="#12151c" stroke="#9aa8c4" stroke-width="2"/>
+  <circle cx="510" cy="230" r="16" fill="#2c3344"/>
+  <!-- D-pad -->
+  <g fill="#12151c" stroke="#9aa8c4" stroke-width="1.6">
+    <rect x="148" y="136" width="18" height="52" rx="4"/>
+    <rect x="131" y="153" width="52" height="18" rx="4"/>
+  </g>
+  <!-- Face buttons -->
+  <g font-size="13" font-weight="800" text-anchor="middle" dominant-baseline="middle">
+    <circle cx="596" cy="128" r="16" fill="#1a1d26" stroke="#5ad0a8" stroke-width="2"/><text fill="#8eecc8" x="596" y="128">△</text>
+    <circle cx="626" cy="158" r="16" fill="#1a1d26" stroke="#e07a7a" stroke-width="2"/><text fill="#f0a0a0" x="626" y="158">○</text>
+    <circle cx="566" cy="158" r="16" fill="#1a1d26" stroke="#d6a0e8" stroke-width="2"/><text fill="#e2b8f0" x="566" y="158">□</text>
+    <circle cx="596" cy="188" r="16" fill="#1a1d26" stroke="#8eb6f0" stroke-width="2"/><text fill="#b8d2ff" x="596" y="189">✕</text>
+  </g>
+  <!-- Shoulders -->
+  <rect x="168" y="64" width="86" height="18" rx="7" fill="#1c202b" stroke="#9aa8c4" stroke-width="1.5"/>
+  <rect x="168" y="44" width="86" height="16" rx="7" fill="#252a36" stroke="#9aa8c4" stroke-width="1.5"/>
+  <rect x="506" y="64" width="86" height="18" rx="7" fill="#1c202b" stroke="#9aa8c4" stroke-width="1.5"/>
+  <rect x="506" y="44" width="86" height="16" rx="7" fill="#252a36" stroke="#9aa8c4" stroke-width="1.5"/>
+  <text x="211" y="56" text-anchor="middle" class="ps-lab">L2</text>
+  <text x="211" y="77" text-anchor="middle" class="ps-lab">L1</text>
+  <text x="549" y="56" text-anchor="middle" class="ps-lab">R2</text>
+  <text x="549" y="77" text-anchor="middle" class="ps-lab">R1</text>
+  <!-- Options / Create -->
+  <rect x="430" y="118" width="22" height="10" rx="3" fill="#c5cee0"/>
+  <rect x="308" y="118" width="22" height="10" rx="3" fill="#c5cee0"/>
+  <!-- External labels -->
+  <g class="ps-call">
+    <text x="70" y="54">L2 Run</text>
+    <text x="70" y="86">L1 Rocket punch</text>
+    <text x="70" y="154">D-pad Move</text>
+    <text x="70" y="236">Left stick Move</text>
+    <text x="70" y="268">L3 (click) Run</text>
+    <text x="690" y="54" text-anchor="end">R2 Dash</text>
+    <text x="690" y="74" text-anchor="end">Stick back + R2: back dash</text>
+    <text x="690" y="96" text-anchor="end">R1 + forward Flip</text>
+    <text x="690" y="128" text-anchor="end">△ Ground</text>
+    <text x="690" y="158" text-anchor="end">○ Kick</text>
+    <text x="690" y="188" text-anchor="end">□ Block</text>
+    <text x="690" y="218" text-anchor="end">✕ Punch</text>
+    <text x="690" y="248" text-anchor="end">Right stick look / R3 jump kick</text>
+    <text x="380" y="28" text-anchor="middle">Options — Pause</text>
+  </g>
+</svg>`;
 
   function screen(name, html, cls) {
     const el = document.createElement('section');
@@ -99,10 +166,20 @@
       </div>
       <aside class="rfs-card rfs-controls" aria-label="Controls">
         <h3>Controls</h3>
-        <h4>Solo</h4><ul>${KEYS_SOLO}</ul>
-        <h4>Versus</h4><ul><li><em>P1</em> ${KEYS_P1}</li><li><em>P2</em> ${KEYS_P2}</li><li><kbd>V</kbd> camera view (arena, fighting, 3rd person, 1st person)</li><li>Gamepad 1 → P1, gamepad 2 → P2</li></ul>
-        <h4>Gamepad</h4><ul>${PAD}</ul>
-        <h4>Menus</h4><ul><li>Arrows / WASD / D-pad · <kbd>Enter</kbd> or <kbd>A</kbd> select · <kbd>Esc</kbd> or <kbd>B</kbd> back</li></ul>
+        <div class="rfs-ctrl-tabs" role="tablist">
+          <button type="button" class="rfs-f rfs-ctrl-tab is-on" role="tab" aria-selected="true" data-ctrl-tab="kb">Keyboard</button>
+          <button type="button" class="rfs-f rfs-ctrl-tab" role="tab" aria-selected="false" data-ctrl-tab="pad">Controller</button>
+        </div>
+        <div class="rfs-ctrl-pane is-on" data-ctrl-pane="kb">
+          <h4>Solo</h4><ul>${KEYS_SOLO}</ul>
+          <h4>Versus</h4><ul><li><em>P1</em> ${KEYS_P1}</li><li><em>P2</em> ${KEYS_P2}</li><li><kbd>V</kbd> camera view (arena, fighting, 3rd person, 1st person)</li><li>Gamepad 1 → P1, gamepad 2 → P2</li></ul>
+          <h4>Menus</h4><ul><li>Arrows / WASD / D-pad · <kbd>Enter</kbd> or <kbd>A</kbd> select · <kbd>Esc</kbd> or <kbd>B</kbd> back</li></ul>
+        </div>
+        <div class="rfs-ctrl-pane" data-ctrl-pane="pad">
+          <div class="ps-pad" aria-label="DualSense-style controller layout">${PAD_SVG}</div>
+          <ul class="ps-legend">${PAD}</ul>
+          <p class="rfs-note">Mapped to a DualSense in Chrome&rsquo;s standard gamepad layout. Gamepad 1 → P1, gamepad 2 → P2.</p>
+        </div>
       </aside>
     </div>`);
 
@@ -668,6 +745,36 @@
   };
 
   /* ---------- settings sheet integration (no edits to settings.js) ---------- */
+
+  function setCtrlTab(which, fromPad) {
+    S.$$('.rfs-ctrl-tab').forEach((b) => {
+      const on = b.dataset.ctrlTab === which;
+      b.classList.toggle('is-on', on);
+      b.setAttribute('aria-selected', String(on));
+    });
+    S.$$('.rfs-ctrl-pane').forEach((p) => p.classList.toggle('is-on', p.dataset.ctrlPane === which));
+    if (!fromPad) S._ctrlTabLock = which;
+  }
+  const HINT_KB = '<kbd>A</kbd>/<kbd>D</kbd> sidestep · <kbd>W</kbd>/<kbd>S</kbd> in/out · <kbd>J</kbd> punch · <kbd>K</kbd> kick · <kbd>L</kbd> block · <kbd>Q</kbd> rocket · <kbd>E</kbd> dash · <kbd>X</kbd> back dash · <kbd>I</kbd> ground · <kbd>V</kbd> camera · <kbd>Esc</kbd> pause';
+  const HINT_PS = '<span class="ps">LS</span>/<span class="ps">D-pad</span> move · <span class="ps">✕</span> punch · <span class="ps">○</span> kick · <span class="ps">□</span> block · <span class="ps">△</span> ground · <span class="ps">L1</span> rocket · <span class="ps">R2</span> dash · <span class="ps">L2</span> run · <span class="ps">R1</span>+fwd flip · <span class="ps">R3</span> jump kick · <span class="ps">Options</span> pause';
+  function paintControlsHint() {
+    const el = document.getElementById('controlsHint');
+    if (!el) return;
+    const pad = S.pads && S.pads()[0];
+    el.classList.toggle('ps-hint', !!pad);
+    el.innerHTML = pad ? HINT_PS : HINT_KB;
+  }
+  root.addEventListener('click', (e) => {
+    const tab = e.target.closest && e.target.closest('[data-ctrl-tab]');
+    if (!tab || !root.contains(tab)) return;
+    setCtrlTab(tab.dataset.ctrlTab);
+  });
+  S.on('pads', () => {
+    paintControlsHint();
+    if (S._ctrlTabLock) return;
+    setCtrlTab(S.pads && S.pads().length ? 'pad' : 'kb', true);
+  });
+
   function watchSettings() {
     const panel = document.getElementById('setp');
     if (!panel) return;
@@ -691,6 +798,7 @@
   S.on('ready', () => {
     watchSettings();
     S.toMenuState(sel.p1, sel.p2);
+    paintControlsHint();
     S.showScreen('title');
   });
 })();

@@ -253,7 +253,7 @@ function emptyQuality() {
     yawSnap: 0, visPop: 0, matPop: 0, shadowFlick: 0, boneJump: 0,
     spike: 0, noFade: 0, weight0: 0, footSlide: 0, camSnap: 0, camClip: 0,
     outOfCage: 0, throughCage: 0, belowMat: 0, wallStuck: 0, bodyDrift: 0,
-    debrisOut: 0, debrisUnder: 0, fall: 0, getup: 0, bellBlock: 0,
+    debrisOut: 0, debrisUnder: 0, fall: 0, getup: 0, bellBlock: 0, special: 0,
   };
 }
 
@@ -388,6 +388,14 @@ export function logStrike(side, clip, result, damage) {
   if (current.spam[side] === 8) {
     current.cpuFlags.push({ t: +((performance.now() - current._t0) / 1000).toFixed(2), kind: 'cpuSpam', side, clip, n: 8 });
   }
+}
+
+export function logSpecial(side, kind, result, damage) {
+  if (!current || (side !== 'p1' && side !== 'p2')) return;
+  if (result === 'use') { qpush('special', { id: side, kind, result: 'use' }); return; }
+  // Outcome is stored on the event list and in move stats; quality.special already counted the use.
+  if (current.qevents.length < 280) current.qevents.push({ t: +((performance.now() - (current._t0 || performance.now())) / 1000).toFixed(2), kind: 'special', id: side, move: kind, result, damage: damage || 0 });
+  logStrike(side, kind, result === 'land' || result === 'hit' ? 'land' : result === 'block' ? 'block' : 'miss', damage);
 }
 
 export function logCpuIdle(side, inRange, canThrow = true) {

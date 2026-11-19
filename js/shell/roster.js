@@ -121,9 +121,9 @@
   };
 
   /* ---------- input: versus + training dummy ---------- */
-  const P1K = { l: ['KeyA'], r: ['KeyD'], u: ['KeyW'], d: ['KeyS'], punch: ['KeyF'], kick: ['KeyG'], block: ['KeyH'], ground: ['KeyT'], run: ['ShiftLeft'] };
+  const P1K = { l: ['KeyA'], r: ['KeyD'], u: ['KeyW'], d: ['KeyS'], punch: ['KeyF'], kick: ['KeyG'], block: ['KeyH'], ground: ['KeyT'], run: ['ShiftLeft'], rocket: ['KeyQ'], dashFwd: ['KeyE'], dashBack: ['KeyX'] };
   const P2K = { l: ['ArrowLeft'], r: ['ArrowRight'], u: ['ArrowUp'], d: ['ArrowDown'],
-    punch: ['Period', 'Numpad1'], kick: ['Slash', 'Numpad2'], block: ['ShiftRight', 'Quote', 'Numpad3'], ground: ['Comma', 'Numpad4'], run: ['ControlRight', 'Numpad0'] };
+    punch: ['Period', 'Numpad1'], kick: ['Slash', 'Numpad2'], block: ['ShiftRight', 'Quote', 'Numpad3'], ground: ['Comma', 'Numpad4'], run: ['ControlRight', 'Numpad0'], rocket: ['BracketLeft', 'Numpad7'], dashFwd: ['BracketRight', 'Numpad8'], dashBack: ['Semicolon', 'Numpad9'] };
   S.KEYMAP = { p1: P1K, p2: P2K };
   const anyDown = (codes) => codes.some(S.keyDown);
   function readSide(map, pad) {
@@ -136,11 +136,17 @@
     inp.tapPunch = anyTap(map.punch);
     inp.tapKick = anyTap(map.kick);
     inp.tapGround = anyTap(map.ground || []);
+    inp.tapRocket = anyTap(map.rocket || []);
+    inp.tapDashFwd = anyTap(map.dashFwd || []);
+    inp.tapDashBack = anyTap(map.dashBack || []);
     inp.punch = inp.punch || anyDown(map.punch) || inp.tapPunch;
     inp.kick = inp.kick || anyDown(map.kick) || inp.tapKick;
     inp.block = inp.block || anyDown(map.block);
     inp.ground = inp.ground || anyDown(map.ground || []) || inp.tapGround;
     inp.run = inp.run || anyDown(map.run || []);
+    inp.rocket = inp.rocket || anyDown(map.rocket || []) || inp.tapRocket;
+    inp.dashFwd = inp.dashFwd || anyDown(map.dashFwd || []) || inp.tapDashFwd;
+    inp.dashBack = inp.dashBack || anyDown(map.dashBack || []) || inp.tapDashBack;
     inp.sidestep = Math.max(-1, Math.min(1, inp.sidestep));
     inp.inout = Math.max(-1, Math.min(1, inp.inout));
     return inp;
@@ -151,7 +157,7 @@
     if (S.state.padSwap) i = 1 - i;
     return pads[i] || null;
   };
-  const p2Held = { punch: false, kick: false, ground: false };
+  const p2Held = { punch: false, kick: false, ground: false, rocket: false, dashFwd: false, dashBack: false };
   const idle = () => ({ sidestep: 0, inout: 0, punch: false, kick: false, block: false });
   S.inputFor = (side) => {
     const m = S.match && S.match.cfg;
@@ -164,10 +170,16 @@
       const punch = inp.punch || inp.tapPunch;
       const kick = inp.kick || inp.tapKick;
       const ground = inp.ground || inp.tapGround;
-      const out = { ...inp, punch: punch && !p2Held.punch, kick: kick && !p2Held.kick, ground: ground && !p2Held.ground };
+      const rocket = inp.rocket || inp.tapRocket;
+      const dashFwd = inp.dashFwd || inp.tapDashFwd;
+      const dashBack = inp.dashBack || inp.tapDashBack;
+      const out = { ...inp, punch: punch && !p2Held.punch, kick: kick && !p2Held.kick, ground: ground && !p2Held.ground, rocket: rocket && !p2Held.rocket, dashFwd: dashFwd && !p2Held.dashFwd, dashBack: dashBack && !p2Held.dashBack };
       p2Held.punch = punch;
       p2Held.kick = kick;
       p2Held.ground = ground;
+      p2Held.rocket = rocket;
+      p2Held.dashFwd = dashFwd;
+      p2Held.dashBack = dashBack;
       return out;
     }
     if (m.mode === 'watch') return null; // both robots run on the CPU brain

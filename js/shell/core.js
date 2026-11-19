@@ -119,8 +119,15 @@
     inp.punch = b(0);
     inp.kick = b(1);
     inp.ground = b(3);
-    inp.block = b(2) || b(4) || b(5) || b(7);
+    inp.block = b(2);
     inp.run = b(10) || b(6);
+    inp.rocket = b(4);
+    if (b(7)) {
+      if (inp.inout < -0.25) inp.dashBack = true;
+      else inp.dashFwd = true;
+    }
+    inp.flipFront = b(5) && inp.inout > 0.5;
+    inp.jumpKick = b(11);
     return inp;
   };
   const padPrev = new Map();

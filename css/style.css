@@ -49,6 +49,10 @@ html, body { margin: 0; height: 100%; background: #07080c; color: #eef2f6; font-
 }
 .bar.blue > i { background: linear-gradient(90deg, #1a4ed8, #5ea0ff); transform-origin: left center; }
 .bar.red > i { background: linear-gradient(90deg, #ff6b6b, #c81e1e); transform-origin: right center; }
+.bar.energy { height: 7px; margin-top: 4px; border-radius: 99px; background: rgba(6,8,12,0.72); }
+.bar.energy > i { background: linear-gradient(90deg, #1f6b7a, #5ce1ff 55%, #ffe08a); transform-origin: left center; box-shadow: 0 0 10px rgba(92,225,255,.45); }
+.fighter-hud.right .bar.energy > i { transform-origin: right center; }
+
 .title {
   text-align: center;
   font-size: 12px;

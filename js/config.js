@@ -11,6 +11,29 @@ export const SIZE = 1.12 * WORLD_SCALE;
 // Root padding that keeps a fighter capsule inside the cage (chest sphere is 0.48*SIZE).
 export const CAGE_PAD = 0.48 * SIZE + 0.14;
 
+// Shared special-move energy (rocket punch + thruster dash). Costs are absolute points
+// on a 0–energyMax pool that refills after a short delay.
+export const SPECIAL = {
+  energyMax: 100,
+  regen: 18,
+  regenDelay: 0.45,
+  rocketCost: 55,
+  dashCost: 32,
+  rocket: {
+    damage: 12,
+    range: 3.2 * SIZE,
+    wind: 0.14,
+    fly: 0.16,
+    ret: 0.2,
+    radius: 0.24 * SIZE,
+  },
+  dash: {
+    dist: 1.65 * SIZE,
+    time: 0.22,
+    invuln: 0.12,
+  },
+};
+
 export const MODEL = {
   url: './models/RobotFighter.glb',
   source: "Robot character by assetfactory (Sketchfab Free Standard); animations from Mixamo",
