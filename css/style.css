@@ -10,7 +10,7 @@ html, body { margin: 0; height: 100%; background: #07080c; color: #eef2f6; font-
   grid-template-columns: 1fr auto 1fr;
   gap: 16px;
   align-items: center;
-  padding: 16px 28px 0;
+  padding: clamp(44px, 7.5vh, 76px) 28px 0;
 }
 .fighter-hud { display: flex; flex-direction: column; gap: 6px; }
 .fighter-hud.right { text-align: right; }
@@ -235,9 +235,10 @@ html, body { margin: 0; height: 100%; background: #07080c; color: #eef2f6; font-
   top: 50%;
   transform: translate(-50%, -50%);
   width: min(520px, 94vw);
-  max-height: min(86vh, 860px);
+  max-height: min(90vh, 860px);
   overflow: auto;
   overscroll-behavior: contain;
+  scroll-padding-top: 64px;
   z-index: 21;
   pointer-events: auto;
   display: flex;
@@ -273,6 +274,12 @@ html, body { margin: 0; height: 100%; background: #07080c; color: #eef2f6; font-
   border-bottom: 1px solid rgba(154,171,255,.28);
 }
 #setp .mtHead b { font: 600 17px/1.2 var(--ww-font); letter-spacing: .01em; }
+#setp .mcat h3, #setp label { scroll-margin-top: 64px; }
+#setp .set-log { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 2px; }
+#setp .set-log span { font: 600 13px/1.2 var(--ww-font); letter-spacing: .08em; text-transform: uppercase; color: var(--ww-text-2); margin-right: 4px; }
+#setp .set-log button { pointer-events: auto; appearance: none; cursor: pointer; border: 1px solid rgba(154,171,255,.35); background: rgba(154,171,255,.12); color: var(--ww-text); border-radius: 8px; padding: 7px 11px; font: 600 13px var(--ww-font); }
+#setp .set-log button#setLogDownload { background: rgba(154,171,255,.22); border-color: rgba(154,171,255,.55); }
+
 #setpX {
   min-height: 36px;
   min-width: 72px;

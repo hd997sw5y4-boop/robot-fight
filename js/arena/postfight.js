@@ -223,7 +223,8 @@ export function updatePostfight() {
   }
 
   if (st.phase === 'replay') {
-    st.t += pdt * CFG.slowMo;
+    // Cap the replay clock so a hitch can't skip a large chunk of the clip (stutter / jump).
+    st.t += Math.min(pdt, 1 / 30) * CFG.slowMo;
     if (st.t >= st.len) nextClip();
   }
   if (st.phase === 'replay') {
@@ -237,9 +238,23 @@ export function updatePostfight() {
     };
     const f = shotFraming(st.shot, a, b, st.t, st.seed, clip.victim);
     const cam = ctx.camera;
-    cam.position.copy(f.pos);
-    cam.lookAt(f.look);
-    if (Math.abs(cam.fov - f.fov) > 0.01) { cam.fov = f.fov; cam.updateProjectionMatrix(); }
+    if (st._repIdx !== st.idx) {
+      st._repIdx = st.idx;
+      st._repBlend = 0;
+      if (!st._repP) { st._repP = cam.position.clone(); st._repL = f.look.clone(); }
+    }
+    st._repBlend = Math.min(1, (st._repBlend || 0) + Math.max(dt, 1 / 120) / 0.22);
+    const k = st._repBlend * st._repBlend * (3 - 2 * st._repBlend);
+    if (!st._repP) st._repP = cam.position.clone();
+    if (!st._repL) st._repL = f.look.clone();
+    st._repP.lerp(f.pos, k);
+    st._repL.lerp(f.look, k);
+    cam.position.copy(st._repP);
+    cam.lookAt(st._repL);
+    if (Math.abs(cam.fov - f.fov) > 0.01) {
+      cam.fov += (f.fov - cam.fov) * k;
+      cam.updateProjectionMatrix();
+    }
     return;
   }
   if (match.over && !xrPresenting()) orbit(dt, fighters, match);

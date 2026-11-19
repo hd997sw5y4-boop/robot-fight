@@ -196,7 +196,7 @@ export const GFX_PRESETS = {
   // medium: Macs / Retina / integrated GPUs. Jumbotron at
   // 10 fps, medium crowd (stadium-config quality.medium); debris and HDRI as High.
   medium: { pixelCap: 1.5, shadows: true, shadowSize: 1024, exposure: 1.12, bloom: false, mirror: 512, minScale: 0.55 },
-  high: { pixelCap: 2, shadows: true, shadowSize: 2048, exposure: 1.15, bloom: false, mirror: 1024, minScale: 0.5 },
+  high: { pixelCap: 1.5, shadows: true, shadowSize: 1024, exposure: 1.15, bloom: false, mirror: 512, minScale: 0.5 },
   // phones/tablets (js/mobile.js): applied on top of low/high: pixel ratio and shadow caps.
   mobile: { pixelCap: 1.5, shadowSize: 1024 }, // Low on a phone uses 1.25
 };

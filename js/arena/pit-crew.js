@@ -504,7 +504,7 @@ async function loadAndBuild() {
       loadTex('./textures/pit-crew/wood_normal.jpg', false),
       loadTex('./textures/pit-crew/wood_rough.jpg', false),
       loadTex('./textures/metal_color.jpg', true),
-      loadTex('./textures/metal_normal.jpg', false),
+      loadTex('./textures/mat_metal_normal.jpg', false),
       loadTex('./textures/metal_rough.jpg', false),
     ]);
     const maps = {

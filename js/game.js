@@ -14,9 +14,9 @@ import { applyChrome, setChromeLow } from './chrome.js';
 import { initJointLimits, applyJointLimits } from './joints.js';
 import { setWiresLow } from './wires.js';
 import { createApiBrain, wantsApiBrain, initApiBrainUI } from './api-brain.js';
-import { getSettings, isSettingsOpen, initSettings, updateFps, cycleCameraMode, setCameraMode } from './settings.js';
+import { getSettings, isSettingsOpen, initSettings, updateFps, lastFps, cycleCameraMode, setCameraMode } from './settings.js';
+import { startFight as logStartFight, endFight as logEndFight, logFps, logGlitch, logStrike, logRound, logCpuIdle } from './fight-log.js';
 import { broadcastMain } from './arena/broadcast.js';
-let prevCamMode = null;
 import { unlockAudio, playSfx, playHit, setBuzz, startCrowd } from './audio.js';
 import { announce, announceIntroSeconds } from './announcer.js';
 import { buildArena as buildArenaVisual, addArenaLights, updateCageFade, addFloorReflection } from './arena.js';
@@ -69,6 +69,7 @@ import {
   damageFx,
 } from './damage.js';
 
+let prevCamMode = null;
 const canvas = document.getElementById('c');
 const keys = new Set();
 const tapped = new Set();
@@ -657,6 +658,7 @@ function makeFighter(gltf, color, side) {
   const mixer = new THREE.AnimationMixer(model);
   const actions = {};
   for (const clip of gltf.animations) {
+    pruneOrphanTracks(clip, model);
     const act = mixer.clipAction(clip);
     const loop = LOOP_CLIPS.includes(clip.name);
     act.loop = loop ? THREE.LoopRepeat : THREE.LoopOnce;
@@ -1098,6 +1100,11 @@ function cacheFeet(f) {
     if (n === 'RightForeArm') f.ikArms.R.lower = o;
     if (n === 'RightHand') f.ikArms.R.hand = o;
   });
+  for (const side of ['L', 'R']) {
+    const leg = f.ikLegs[side];
+    if (leg && leg.foot) leg.foot.userData.bindQ = leg.foot.quaternion.clone();
+    if (leg && leg.toe) leg.toe.userData.bindQ = leg.toe.quaternion.clone();
+  }
   // The foot/toe joints sit inside the mesh; the visible sole and toe tips are lower. Keep a
   // small sample of the skinned vertices driven by the foot/toe bones so grounding can put the
   // real sole on the mat.
@@ -1317,7 +1324,9 @@ function groundFeet(f, dt) {
   minY = onBody ? Math.min(lowestFootY(f) ?? Infinity, lowestBodyY(f) ?? Infinity) : lowestFootY(f);
   if (!Number.isFinite(minY)) minY = null;
   if (minY != null && minY < top - 0.0004) {
-    f.root.position.y += (top - minY);
+    const lift = top - minY;
+    f.root.position.y += lift;
+    if (lift > 0.03) logGlitch('sinking', { id: f.id, d: +lift.toFixed(3), state: f.state });
   }
 }
 
@@ -1452,7 +1461,8 @@ function setAnim(f, name, fade = 0.2) {
     || (MODEL.animations.victoryVariants || []).includes(clipName)
     || clipName === MODEL.animations.victory
     || ['KnockedOut', 'GettingUp', 'KnockedDown', 'StandingReactDeathBackward', 'StumbleBackwards', 'LivershotKnockdown'].includes(clipName);
-  const fadeT = Math.max(0.15, Math.min(0.4, fade));
+  const poppy = isPoppyClip(clipName);
+  const fadeT = Math.max(poppy ? 0.24 : 0.15, Math.min(poppy ? 0.42 : 0.4, fade));
   if (f.current === clipName && next.isRunning() && next.getEffectiveWeight() > 0.5) {
     // Don't hard-reset a playing clip — that pops mid-pose. Let it finish or keep looping.
     return next;
@@ -1460,7 +1470,8 @@ function setAnim(f, name, fade = 0.2) {
   const prev = f.actions[f.current];
   next.reset();
   next.enabled = true;
-  next.setEffectiveWeight(1);
+  // Start at weight 0 so the incoming pose blends in instead of popping on the first frame.
+  next.setEffectiveWeight(0);
   next.timeScale = 0.9 + Math.random() * 0.2;
   // No time warping: a warped cross-fade rescales both clips' playback by their length ratio
   // (and leaves the new clip at timeScale x 1/old), which overrode every strike's speed and
@@ -1963,7 +1974,9 @@ function tryAttack(f, kind, clipName, exact = false) {
   f.shield.visible = false;
   const st0 = STRIKE_T && STRIKE_T[clip];
   // Blend over the skipped lead-in slowly enough that no limb tip outruns ~6 m/s from the blend.
-  setAnim(f, clip, Math.max(0.18, Math.min(0.4, ((st0 && st0.gap0) || 0) / (6 * SIZE))));
+  let fadeAtk = Math.max(0.18, Math.min(0.4, ((st0 && st0.gap0) || 0) / (6 * SIZE)));
+  if (isPoppyClip(clip)) fadeAtk = Math.max(0.26, fadeAtk);
+  setAnim(f, clip, fadeAtk);
   setFighterMove(f, 0, 0); // no walking velocity carried into the strike
   playSfx('whoosh');
   // [announcer hook]
@@ -1990,7 +2003,7 @@ function tryAttack(f, kind, clipName, exact = false) {
     action.timeScale = base;
     f.strikeBase = base;
     f.strikeCap = cap;
-    if (st) action.time = st.start;
+    if (st) action.time = isPoppyClip(clip) ? Math.max(0, st.start - 0.1) : st.start;
     // Jump kicks (also when picked as a CPU special): airborne root, travel in the air only.
     const air = AIR_T && AIR_T[clip];
     if (air && air.air && (MODEL.animations.jumpKicks || []).includes(clip)) {
@@ -2105,7 +2118,8 @@ function endAttack(f, fade = 0.2) {
   f.state = 'idle';
   f.atkContact = false;
   endAir(f);
-  setAnim(f, idleClipFor(f), fade);
+  if (!f.hitThisAttack && f.attackClip) logStrike(f.id, f.attackClip, 'miss', 0);
+  setAnim(f, idleClipFor(f), isPoppyClip(f.attackClip) ? Math.max(fade, 0.28) : fade);
 }
 
 /* ---------- flips: back / front flip dodges and jump kicks ---------- */
@@ -2243,7 +2257,7 @@ const CAPS = [
   ['LeftArm', 'LeftForeArm', 0.09], ['LeftForeArm', 'LeftHand', 0.08], ['RightArm', 'RightForeArm', 0.09], ['RightForeArm', 'RightHand', 0.08],
   ['LeftUpLeg', 'LeftLeg', 0.12], ['LeftLeg', 'LeftFoot', 0.09], ['RightUpLeg', 'RightLeg', 0.12], ['RightLeg', 'RightFoot', 0.09],
 ];
-const TIP_SHELL = { punch: 0.095, kick: 0.1 }; // bone centre to fist / foot surface (base size)
+const TIP_SHELL = { punch: 0.12, kick: 0.125 }; // bone centre to fist / foot surface (base size)
 function bodyCaps(f) {
   if (f._caps) return f._caps;
   const by = {};
@@ -2359,6 +2373,165 @@ function armSelfClear(f) {
   }
 }
 
+const TORSO_PARTS = ['torso', 'head'];
+function strikeSideName(f) {
+  const bones = f.strikeBones && f.strikeBones[f.state];
+  if (!bones || !bones.length) return null;
+  const n = bones[0].name || '';
+  if (/Left/i.test(n)) return 'Left';
+  if (/Right/i.test(n)) return 'Right';
+  return null;
+}
+function swingOutOfCapsule(f, bone, pts, target, parts, margin, deepOnly) {
+  if (!bone || bone.scale.x < 0.01) return 0;
+  let moved = 0;
+  for (let pass = 0; pass < 2; pass++) {
+    bone.getWorldPosition(_sa);
+    let worst = null;
+    for (const b of pts) {
+      if (!b) continue;
+      b.getWorldPosition(_sp);
+      const pr = capsuleProbe(target, _sp, parts);
+      if (pr.point && pr.d < margin && (!worst || pr.d < worst.d)) worst = { d: pr.d, p: _sp.clone() };
+    }
+    if (!worst) break;
+    if (deepOnly && worst.d > -0.08 * SIZE) break;
+    const pr = capsuleProbe(target, worst.p, parts);
+    const n = worst.p.clone().sub(pr.point);
+    if (pr.d < 0 || n.lengthSq() < 1e-6) n.copy(worst.p).sub(target.root.position).setY(0);
+    if (n.lengthSq() < 1e-8) break;
+    n.normalize();
+    const lever = worst.p.clone().sub(_sa);
+    const len = Math.max(0.1, lever.length());
+    const axis = lever.cross(n);
+    if (axis.lengthSq() < 1e-8) break;
+    axis.normalize();
+    const ang = Math.min(0.45, (margin - worst.d) / len);
+    if (!bone.parent) break;
+    bone.parent.getWorldQuaternion(_sqp);
+    axis.applyQuaternion(_sqp.invert());
+    _sq.setFromAxisAngle(axis, ang);
+    bone.quaternion.premultiply(_sq);
+    bone.updateWorldMatrix(false, true);
+    moved = Math.max(moved, margin - worst.d);
+  }
+  return moved;
+}
+function limbPushout(f, other) {
+  if (!f || f.ghost) return;
+  if (!f._armBones) {
+    const by = {};
+    f.model.traverse((o) => { if (o.isBone || o.type === 'Bone') by[String(o.name).replace(/^mixamorig[:._]*/i, '')] = o; });
+    f._armBones = ['Left', 'Right'].map((s) => ({ side: s, arm: by[s + 'Arm'], pts: [by[s + 'ForeArm'], by[s + 'Hand']] })).filter((a) => a.arm && a.pts[0] && a.pts[1]);
+  }
+  const punching = (f.state === 'punch' || f.state === 'kick') && f.contactT < 0 && !f.hitThisAttack;
+  const strikeSide = punching ? strikeSideName(f) : null;
+  f.model.updateWorldMatrix(true, true);
+  if (other && !other.ghost) other.model.updateWorldMatrix(true, true);
+  const margin = 0.025 * SIZE;
+  let clipAmt = 0;
+  for (const a of f._armBones) {
+    const deepOnly = !!(punching && strikeSide && a.side === strikeSide);
+    if (other && !other.ghost) clipAmt = Math.max(clipAmt, swingOutOfCapsule(f, a.arm, a.pts, other, TORSO_PARTS, margin, deepOnly));
+    clipAmt = Math.max(clipAmt, swingOutOfCapsule(f, a.arm, a.pts, f, ['torso'], margin, deepOnly));
+  }
+  const head = f.flinchBones && f.flinchBones.Head;
+  const neck = f.flinchBones && f.flinchBones.Neck;
+  if (head && neck && other && !other.ghost) {
+    head.getWorldPosition(_sp);
+    const pr = capsuleProbe(other, _sp, TORSO_PARTS);
+    if (pr.point && pr.d < margin) {
+      neck.getWorldPosition(_sa);
+      const n = _sp.clone().sub(pr.point);
+      if (pr.d < 0 || n.lengthSq() < 1e-6) n.copy(_sp).sub(other.root.position).setY(0);
+      if (n.lengthSq() > 1e-8) {
+        n.normalize();
+        const lever = _sp.clone().sub(_sa);
+        const len = Math.max(0.08, lever.length());
+        const axis = lever.cross(n);
+        if (axis.lengthSq() > 1e-8 && neck.parent) {
+          axis.normalize();
+          neck.parent.getWorldQuaternion(_sqp);
+          axis.applyQuaternion(_sqp.invert());
+          _sq.setFromAxisAngle(axis, Math.min(0.4, (margin - pr.d) / len));
+          neck.quaternion.premultiply(_sq);
+          neck.updateWorldMatrix(false, true);
+          clipAmt = Math.max(clipAmt, margin - pr.d);
+        }
+      }
+    }
+  }
+  if (clipAmt > 0.04 * SIZE) logGlitch('clipping', { id: f.id, d: +clipAmt.toFixed(3), clip: f.current });
+}
+
+function clampRootMotion(f, dt) {
+  if (!f || !f.root) return;
+  const pos = f.root.position;
+  if (!f._prevRoot || f._rootWarp) {
+    f._prevRoot = pos.clone();
+    f._rootWarp = false;
+    return;
+  }
+  if (!(dt > 1e-4)) { f._prevRoot.set(pos.x, pos.y, pos.z); return; }
+  const dx = pos.x - f._prevRoot.x;
+  const dz = pos.z - f._prevRoot.z;
+  const speed = Math.hypot(dx, dz) / dt;
+  const air = f.airLock != null || f.state === 'dodge';
+  const cap = (air ? 11 : 6.8) * SIZE;
+  if (speed > cap) {
+    const s = cap / speed;
+    pos.x = f._prevRoot.x + dx * s;
+    pos.z = f._prevRoot.z + dz * s;
+    if (f.phys && f.phys.body) {
+      f.phys.body.position.x = pos.x;
+      f.phys.body.position.z = pos.z;
+      f.phys.body.velocity.x *= s;
+      f.phys.body.velocity.z *= s;
+    }
+    if (speed > 10) logGlitch('teleport', { id: f.id, v: +speed.toFixed(2), clip: f.current });
+  }
+  f._prevRoot.set(pos.x, pos.y, pos.z);
+}
+
+function hookFightLogShell() {
+  const S = window.RFShell;
+  if (!S || S.__fightLogHooked) return;
+  S.__fightLogHooked = true;
+  const labelsFor = () => {
+    const mode = (S.state && S.state.mode) || 'fight';
+    const lab = { p1: 'Player', p2: 'CPU' };
+    if (mode === 'watch') { lab.p1 = 'CPU'; lab.p2 = 'CPU'; }
+    else if (mode === 'versus') { lab.p1 = 'Player'; lab.p2 = 'Player'; }
+    else if (mode === 'training') { lab.p1 = 'Player'; lab.p2 = 'CPU'; }
+    if (p1 && wantsApiBrain(p1.id)) lab.p1 = 'API';
+    if (p2 && wantsApiBrain(p2.id)) lab.p2 = 'API';
+    return lab;
+  };
+  S.on('roundBegin', (n) => {
+    if (n === 1) logStartFight({ p1, p2, mode: (S.state && S.state.mode) || 'fight', labels: labelsFor() });
+  });
+  S.on('roundEnd', (r) => logRound(r));
+  S.on('matchEnd', (w) => {
+    const rounds = S.match && S.match.rounds;
+    const last = rounds && rounds[rounds.length - 1];
+    const method = last ? last.method : (w == null ? 'Decision' : 'KO');
+    logEndFight({ winner: w == null ? 'draw' : (w === 0 ? 'p1' : 'p2'), method, p1, p2, labels: labelsFor() });
+  });
+}
+
+function isPoppyClip(clip) {
+  if (!clip || /Flip|Dodge|GettingUp|Knocked/i.test(clip)) return false;
+  return /Uppercut|ElbowPunching|PunchCombo|LegSweep|Kick/i.test(clip);
+}
+
+function pruneOrphanTracks(clip, root) {
+  if (!clip || !clip.tracks || !root) return;
+  const names = new Set();
+  root.traverse((o) => { if (o.name) names.add(o.name); });
+  const kept = clip.tracks.filter((tr) => names.has(String(tr.name).split('.')[0]));
+  if (kept.length !== clip.tracks.length) clip.tracks = kept;
+}
+
 // Procedural flinch: a damped spring that snaps the spine/neck/head away from the blow and
 // back, layered on top of whatever clip is playing, so every connect visibly lands.
 const FLINCH_W = {
@@ -2421,6 +2594,7 @@ function applyHit(atk, def, spec, kind, strikeBone, contact) {
   const force = (closing + swing) * (blocked ? 0.45 : 1);
   const dmg = Math.max(1, Math.round(spec.damage * mul * surge * blockMul * loc * (0.5 + 0.55 * (force / 5))));
   def.health = Math.max(0, def.health - dmg);
+  logStrike(atk.id, atk.attackClip || kind || 'punch', blocked ? 'block' : 'land', dmg);
   atk.chainHit = !blocked;
   applyPartHit(def, hit.partId, dmg, hit.point, hit.dir, scene, { blocked, force, final: def.health <= 0 });
   applyStrikeWear(atk, kind || 'punch', strikeBone, blocked, force, scene, hit.dir);
@@ -3932,7 +4106,46 @@ function placeTitles() {
   document.documentElement.style.setProperty('--rf-title-scale', scale.toFixed(2));
 }
 
+const _camFromP = new THREE.Vector3();
+const _camFromL = new THREE.Vector3();
+const _camSaveP = new THREE.Vector3();
+const _camSaveL = new THREE.Vector3();
+const _camSaveD = new THREE.Vector3();
+const _camLookE = new THREE.Vector3();
+let _camFromFov = 50;
+let camEase = 0;
 function updateCamera(dt) {
+  const prevMode = camModeLive;
+  _camSaveP.copy(camera.position);
+  camera.getWorldDirection(_camSaveD);
+  _camSaveL.copy(camera.position).addScaledVector(_camSaveD, 6);
+  const saveFov = camera.fov;
+  updateCameraInner(dt);
+  if (prevMode !== camModeLive) {
+    camEase = 1;
+    _camFromP.copy(_camSaveP);
+    _camFromL.copy(_camSaveL);
+    _camFromFov = saveFov;
+  }
+  if (camEase <= 0) return;
+  const toP = camera.position.clone();
+  camera.getWorldDirection(_camSaveD);
+  const toL = camera.position.clone().addScaledVector(_camSaveD, 6);
+  const toFov = camera.fov;
+  camEase = Math.max(0, camEase - Math.max(dt || 0, 0.001) / 0.4);
+  const a = 1 - camEase;
+  const s = a * a * (3 - 2 * a);
+  camera.position.lerpVectors(_camFromP, toP, s);
+  _camLookE.lerpVectors(_camFromL, toL, s);
+  camera.lookAt(_camLookE);
+  if (Math.abs(toFov - _camFromFov) > 0.05) {
+    camera.fov = _camFromFov + (toFov - _camFromFov) * s;
+    camera.updateProjectionMatrix();
+  }
+}
+
+
+function updateCameraInner(dt) {
   if (postfightCamera()) { setFirstPersonHide(false); camModeLive = 'postfight'; return; } // [postfight hook]
   // [stadium-broadcast hook] crowd-watch seat (V-cycle 'crowd') and VR own the camera when active.
   if (updateCrowdCam(camera, dt)) { setFirstPersonHide(false); camModeLive = 'crowd'; return; }
@@ -3943,7 +4156,7 @@ function updateCamera(dt) {
     camModeLive = mode;
     camera.near = mode === 'first' ? 0.04 : 0.1;
     camera.updateProjectionMatrix();
-    dt = 0; // snap to the new view
+    // Mid-fight view changes ease in updateCamera (no snap).
   }
   setFirstPersonHide(mode === 'first');
   if (mode === 'broadcast' && broadcastMain(camera)) return;
@@ -4209,6 +4422,9 @@ function applyStumpLeg(f, dt) {
     } else { hip = 0.16; knee = 0.3; }
     rotateBoneWorldAxis(leg.thigh, _stAxis, -hip * w); // knee comes forward
     rotateBoneWorldAxis(leg.shin, _stAxis, knee * w);  // stump folds back
+    // Pin the torn foot/toe so the stump cannot whip (yaw spikes after a foot comes off).
+    if (leg.foot && leg.foot.userData.bindQ) leg.foot.quaternion.slerp(leg.foot.userData.bindQ, 0.55 * w);
+    if (leg.toe && leg.toe.userData.bindQ) leg.toe.quaternion.slerp(leg.toe.userData.bindQ, 0.65 * w);
   }
 }
 
@@ -4230,6 +4446,8 @@ function resetMatch(keepDebris = false) {
     f.hitThisAttack = false;
     f.shield.visible = false;
     f.root.position.set(f.startX, matTopY(), 0);
+    f._rootWarp = true;
+    f._prevRoot = null;
     f.root.scale.set(1, 1, 1);
     f.groundY = matTopY();
     f.kdCount = 0;
@@ -4288,8 +4506,13 @@ function resetMatch(keepDebris = false) {
 }
 
 function tick() {
+  const now = performance.now();
+  if (tick._wall == null) tick._wall = now;
+  const wallDt = Math.min(0.25, Math.max(0.0001, (now - tick._wall) / 1000));
+  tick._wall = now;
   const rawDt = Math.min(0.05, clock.getDelta());
-  updateFps(rawDt);
+  const fps = updateFps(wallDt);
+  logFps(fps);
   stepFov(rawDt);
   stepFlash(rawDt);
   let dt = isSettingsOpen() ? 0 : rawDt;
@@ -4337,16 +4560,26 @@ function tick() {
     if (window.__rfDiag) diagFootStage(f, 1);
     applyMalfunctions(f, dt);
     armSelfClear(f);
+    limbPushout(f, f === p1 ? p2 : p1);
     if (f.koTip) stepKoTip(f, dt);
     stepEyes(f, dt);
     if (window.__rfDiag) diagFootStage(f, 2);
+    const jc0 = f.jointStats && f.jointStats.clamped || 0;
     applyJointLimits(f);
+    if (f.jointStats && f.jointStats.clamped - jc0 >= 2) logGlitch('jointFlip', { id: f.id, n: f.jointStats.clamped - jc0, state: f.state, clip: f.current });
     if (window.__rfDiag) diagFootStage(f, 3);
     groundFeet(f, dt);
+    clampRootMotion(f, dt);
     if (window.__rfDiag) diagFootStage(f, 4);
     if (window.__rfDiag && (f.state === 'idle' || f.state === 'block')) logFloat(f);
     if (window.__rfDiag) logSlide(f, dt);
     stepFootSounds(f, dt);
+  }
+  if (canAct) {
+    const reach = (COMBAT.punch && COMBAT.punch.range) || 2.2 * SIZE;
+    const gap = p1.root.position.distanceTo(p2.root.position);
+    if (p1.isCpu) logCpuIdle('p1', gap < reach * 1.15);
+    if (p2.isCpu) logCpuIdle('p2', gap < reach * 1.15);
   }
   updateContactShadows(p1);
   updateContactShadows(p2);
@@ -4366,7 +4599,7 @@ function tick() {
   updatePitCrew(dt);
   updateCageFade(cagePanels, camera, rawDt);
   renderFrame();
-  stepDynamicRes(rawDt);
+  stepDynamicRes(wallDt);
 }
 
 function buzzFromFighters() {
@@ -4480,6 +4713,7 @@ function onLoad(gltf) {
     if (kind === 'cage' || kind === 'post') playSfx('cage', { vol, rate, id });
     else playSfx('bounce', { vol, rate, id, mass });
   });
+  hookFightLogShell();
   registerFightRuntime({
     startFight: startFightFromShell,
     endFight(reason) {

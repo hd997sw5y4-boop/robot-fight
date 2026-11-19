@@ -289,11 +289,11 @@ function frameShot(shot, a, b, t, seed, victim) {
     }
     case 'ringside': {
       // Raised off the apron and pulled back so the 25% larger robots' heads stay in frame.
-      const r = 7.6 + dist * 0.45;
+      const r = 8.8 + dist * 0.5;
       _tp.copy(_mid).addScaledVector(_side, r).addScaledVector(_dir, Math.sin(t * 0.25 + seed) * 1.2);
-      _tp.y = mt + 1.85 * SIZE;
-      _tl.set(_mid.x, mt + 1.8 * SIZE, _mid.z); // upper chest / neck, headroom above
-      fov = 40;
+      _tp.y = mt + 2.15 * SIZE;
+      _tl.set(_mid.x, mt + 1.55 * SIZE, _mid.z); // chest, with headroom so P1 is not cropped
+      fov = 38;
       break;
     }
     case 'overhead': {
@@ -309,10 +309,10 @@ function frameShot(shot, a, b, t, seed, victim) {
       const o = subjectIsP1 ? b : a;
       _b.subVectors(o, s).setY(0).normalize();
       // Pull back and sit near head height so heads are never cropped at the new scale.
-      _tp.copy(o).addScaledVector(_b, 2.2).addScaledVector(_side, 1.9 + Math.sin(t * 0.3) * 0.2);
-      _tp.y = mt + 2.15 * SIZE;
-      _tl.set(s.x, mt + 1.85 * SIZE, s.z); // chest-to-head, with headroom in a slightly wider fov
-      fov = 32;
+      _tp.copy(o).addScaledVector(_b, 3.05).addScaledVector(_side, 2.15 + Math.sin(t * 0.3) * 0.2);
+      _tp.y = mt + 2.4 * SIZE;
+      _tl.set(s.x, mt + 1.55 * SIZE, s.z); // chest-to-head, pulled back so P1 heads stay in frame
+      fov = 36;
     }
   }
   return fov;

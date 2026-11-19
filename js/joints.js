@@ -66,12 +66,12 @@ export function applyJointLimits(f) {
     _r.copy(j.rest).invert().multiply(b.quaternion);
     if (j.kind === 'hinge') {
       if (!j.axis) {
-        // Calibrate the bend axis from the first clearly bent standing pose.
-        if (f.state !== 'idle' && f.state !== 'walk') continue;
+        // Calibrate the bend axis from the first clearly bent pose (any state).
+        // Skipping attacks used to leave punches unclamped and elbows/knees inverted.
         const r = _r.clone();
         if (r.w < 0) r.set(-r.x, -r.y, -r.z, -r.w);
         const ang = 2 * Math.acos(Math.min(1, r.w));
-        if (ang < 20 * D) continue;
+        if (ang < 20 * D || ang > 150 * D) continue;
         j.axis = new THREE.Vector3(r.x, r.y, r.z).normalize();
       }
       const th = decompose(_r, j.axis);

@@ -18,7 +18,7 @@ export const STADIUM = {
   board: { y: 15.6, size: 5.8, height: 3.6 },
   tunnels: [Math.PI / 4, (3 * Math.PI) / 4, (5 * Math.PI) / 4, (7 * Math.PI) / 4],
   quality: {
-    high: { segs: 160, crowd: 0.78, crowdUpper: 0.62, seatDetail: true, diagonals: true, cones: 0, spots: 4, glare: false, normals: true },
+    high: { segs: 112, crowd: 0.40, crowdUpper: 0.24, seatDetail: false, diagonals: false, cones: 0, spots: 4, glare: false, normals: true },
     medium: { segs: 112, crowd: 0.56, crowdUpper: 0.38, seatDetail: true, diagonals: false, cones: 0, spots: 2, glare: false, normals: false },
     low: { segs: 72, crowd: 0.34, crowdUpper: 0.16, seatDetail: false, diagonals: false, cones: 0, spots: 0, glare: false, normals: false },
   },

@@ -532,6 +532,7 @@ function dentMesh(mesh, worldPoint, worldDir, amount, partCode, pm = null) {
   const col = mesh.geometry.attributes.color;
   const rest = mesh.userData.restPos;
   if (!pos || !rest) return;
+  if (!worldPoint || !worldDir || !Number.isFinite(amount) || !Number.isFinite(worldPoint.x) || !Number.isFinite(worldDir.x)) return;
   const vertPart = mesh.userData.vertPart;
   mesh.updateWorldMatrix(true, false);
   const localHit = mesh.worldToLocal(worldPoint.clone());
@@ -568,9 +569,17 @@ function dentMesh(mesh, worldPoint, worldDir, amount, partCode, pm = null) {
       col.setXYZ(i, col.getX(i) * dark, col.getY(i) * dark * 0.92, col.getZ(i) * dark * 0.78);
     }
   }
+  // Repair any non-finite vertex so computeBoundingSphere / computeVertexNormals never see NaN.
+  for (let i = 0; i < pos.count; i++) {
+    if (Number.isFinite(pos.getX(i)) && Number.isFinite(pos.getY(i)) && Number.isFinite(pos.getZ(i))) continue;
+    const rx = rest[i * 3], ry = rest[i * 3 + 1], rz = rest[i * 3 + 2];
+    if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz)) pos.setXYZ(i, rx, ry, rz);
+    else pos.setXYZ(i, 0, 0, 0);
+  }
   pos.needsUpdate = true;
   if (col) col.needsUpdate = true;
-  mesh.geometry.computeVertexNormals();
+  try { mesh.geometry.computeVertexNormals(); } catch (_) {}
+  if (mesh.geometry.boundingSphere) mesh.geometry.boundingSphere = null;
 }
 
 function dentPart(part, worldPoint, worldDir, amount) {

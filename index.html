@@ -178,7 +178,14 @@
           </select>
         </label>
         <label>Auto rematch (Bot vs Bot) <input type="checkbox" id="setAutoRematch"></label>
-        <p class="hint">Damage is how badly robots dent, lose armor, and break apart. Low is light wear. Medium adds more dents and the odd armor plate. Max bends and dents hard, sheds plates often, and limbs, hands, and the head come off sooner.</p>
+        <label>Loop CPU vs CPU fights <input type="checkbox" id="setLoopCpu"></label>
+        <div class="set-log">
+          <span>Fight log</span>
+          <button type="button" id="setLogDownload">Download fight log</button>
+          <button type="button" id="setLogCopy">Copy log</button>
+          <button type="button" id="setLogClear">Clear log</button>
+        </div>
+        <p class="hint">Damage is how badly robots dent, lose armor, and break apart. Low is light wear. Medium adds more dents and the odd armor plate. Max bends and dents hard, sheds plates often, and limbs, hands, and the head come off sooner. Loop CPU vs CPU auto-starts the next Bot vs Bot fight and keeps logging. Download fight log saves a JSON file of recent fights (old ones rotate out).</p>
       </section>
       <section class="mcat">
         <h3>AI API Brain</h3>

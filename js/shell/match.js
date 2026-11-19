@@ -84,7 +84,7 @@
     }
     const t = document.getElementById('rfsTimer');
     if (t) {
-      if (M.timeLeft == null) { t.textContent = M.cfg && M.cfg.mode === 'training' ? '∞' : ''; t.classList.remove('low'); }
+      if (M.timeLeft == null) { t.textContent = '∞'; t.classList.remove('low'); }
       else {
         const s = Math.max(0, Math.ceil(M.timeLeft));
         t.textContent = String(s);
@@ -161,7 +161,7 @@
       skipIntro: training,
     });
     M.lastHp = S.fighters().map((f) => f.health);
-    M.timeLeft = training ? null : S.roundLength();
+    M.timeLeft = training || !S.roundLength() ? null : S.roundLength();
     paintHud();
     if (training) { S.paintTraining(); return; }
     const last = M.wins[0] === winsNeeded() - 1 && M.wins[1] === winsNeeded() - 1;
@@ -181,11 +181,11 @@
     announce();
   }
 
-  // Round length: the Settings "Round time" if set, otherwise 90 seconds.
+  // Round length: Settings "Round time". 0 / Off means no timer (null).
   S.roundLength = () => {
     const sel = document.getElementById('setRound');
     const r = sel ? +sel.value : 0;
-    return r > 0 ? r : 90;
+    return r > 0 ? r : 0;
   };
 
   function endRound(winner, method) {

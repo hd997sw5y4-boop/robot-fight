@@ -70,6 +70,7 @@
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="versus"><b>Versus</b><small>Two players, one keyboard or two gamepads</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="training"><b>Training</b><small>Practice on a dummy, no timer</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="watch"><b>Bot vs Bot</b><small>Sit back and watch two CPUs fight</small></button>
+          <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="watch" data-loop="1"><b>CPU vs CPU</b><small>Back-to-back CPU fights, looping, with a fight log</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="settings"><b>Settings</b><small>Graphics, sound, CPU difficulty, round time</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="credits"><b>Credits</b></button>
         </nav>
@@ -204,7 +205,13 @@
     cancelAutoRematch();
     if (act === 'cancelAuto') return;
     if (act === 'start') S.showScreen('main');
-    else if (act === 'mode') openSelect(b.dataset.mode);
+    else if (act === 'mode') {
+      if (b.dataset.loop === '1' && window.RFSetLoopCpu) window.RFSetLoopCpu(true);
+      else if (b.dataset.loop === '1') {
+        try { localStorage.setItem('rf_loop_cpu', '1'); localStorage.setItem('rf_autorematch', '1'); } catch (_) {}
+      }
+      openSelect(b.dataset.mode);
+    }
     else if (act === 'settings') S.openSettings();
     else if (act === 'credits') S.showScreen('credits');
     else if (act === 'back') back();
@@ -465,7 +472,10 @@
   const AUTO_SECS = 6;
   let autoTimer = null;
   function autoRematchOn() {
-    try { return localStorage.getItem('rf_autorematch') === '1'; } catch (_) { return false; }
+    try { return localStorage.getItem('rf_autorematch') === '1' || localStorage.getItem('rf_loop_cpu') === '1'; } catch (_) { return false; }
+  }
+  function loopCpuOn() {
+    try { return localStorage.getItem('rf_loop_cpu') === '1'; } catch (_) { return false; }
   }
   function cancelAutoRematch() {
     if (autoTimer) clearInterval(autoTimer);
@@ -479,9 +489,10 @@
     if (!box) return;
     const p = document.createElement('p');
     p.className = 'rfs-auto rfs-sub';
-    p.innerHTML = 'Next match in <b>' + AUTO_SECS + '</b>s <button type="button" class="rfs-f rfs-btn rfs-small" data-act="cancelAuto">Cancel</button>';
+    const secs = loopCpuOn() ? 2 : AUTO_SECS;
+    p.innerHTML = 'Next match in <b>' + secs + '</b>s <button type="button" class="rfs-f rfs-btn rfs-small" data-act="cancelAuto">Cancel</button>';
     box.appendChild(p);
-    let left = AUTO_SECS;
+    let left = secs;
     autoTimer = setInterval(() => {
       if (S.state.paused || document.hidden) return; // hold while paused or in another tab
       left -= 1;
@@ -598,8 +609,7 @@
       const n = k.nextSibling;
       if (k.textContent === 'Esc' && n && n.nodeType === 3) n.textContent = n.textContent.replace('settings', 'pause');
     });
-    const off = S.$('#setRound option[value="0"]');
-    if (off) off.textContent = 'Default (90 seconds)';
+    // Round time option 0 stays labelled "Off" (a real no-timer fight, not a 90s default).
   }
 
   // Wheel over the menus should scroll/ignore, not zoom the game camera.

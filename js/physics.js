@@ -281,7 +281,12 @@ function syncDebris(dt) {
         d.still = 0;
       }
     }
-    d.mesh.position.set(d.body.position.x, d.body.position.y, d.body.position.z);
+    const floor = matY() + 0.02;
+    if (d.body.position.y < floor) {
+      d.body.position.y = floor;
+      if (d.body.velocity.y < 0) d.body.velocity.y = 0;
+    }
+    d.mesh.position.set(d.body.position.x, Math.max(d.body.position.y, floor), d.body.position.z);
     d.mesh.quaternion.set(d.body.quaternion.x, d.body.quaternion.y, d.body.quaternion.z, d.body.quaternion.w);
   }
 }

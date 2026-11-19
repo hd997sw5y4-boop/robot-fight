@@ -33,6 +33,16 @@ body.rfs-versus #bottom { display: none; }
 .rfs-screen[data-screen="title"], .rfs-screen[data-screen="main"] {
   background: linear-gradient(90deg, rgba(6,8,14,.78) 0%, rgba(6,8,14,.35) 45%, rgba(6,8,14,0) 70%);
 }
+.rfs-screen[data-screen="main"] { overflow: auto; align-items: flex-start; }
+.rfs-screen[data-screen="main"] .rfs-mainwrap { padding-bottom: 28px; min-height: min(100%, 640px); }
+.rfs-controls { max-height: calc(100vh - 48px); overflow: auto; overscroll-behavior: contain; }
+@media (max-height: 760px) {
+  .rfs-screen[data-screen="main"] { padding-top: 16px; padding-bottom: 16px; }
+  .rfs-col { gap: 14px; }
+  .rfs-brand b { font-size: clamp(28px, 5.4vw, 56px) !important; }
+  .rfs-controls { font-size: 12px; }
+}
+
 .rfs-screen[data-screen="title"] { background: radial-gradient(ellipse at 50% 55%, rgba(6,8,14,.15), rgba(6,8,14,.75)); }
 .rfs-screen.on > * { animation: rfs-rise .42s var(--ww-ease) both; }
 @keyframes rfs-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }

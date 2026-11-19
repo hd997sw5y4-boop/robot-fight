@@ -25,6 +25,7 @@ const KEYS = {
   autoRematch: 'rf_autorematch',
   match: 'rf_match',
   damage: 'rf_damage',
+  loopCpu: 'rf_loop_cpu',
 };
 
 // Camera views, in the order the V key cycles them. 'arena' is the original orbit camera.
@@ -69,6 +70,7 @@ const defaults = {
   autoRematch: false, // Bot vs Bot: start the next match by itself after the results
   match: 3, // best-of 1 / 3 / 5
   damage: 'medium', // low / medium / max: scales the existing dent / detach / debris system
+  loopCpu: false, // CPU vs CPU back-to-back loop
 };
 
 function read() {
@@ -107,6 +109,8 @@ function read() {
     if (mt === '1' || mt === '3' || mt === '5') s.match = +mt;
     const dmg = localStorage.getItem(KEYS.damage);
     if (dmg === 'low' || dmg === 'medium' || dmg === 'max') s.damage = dmg;
+    const loop = localStorage.getItem(KEYS.loopCpu);
+    if (loop != null) s.loopCpu = loop === '1';
   } catch (_) {}
   return s;
 }
@@ -130,6 +134,7 @@ function write(s) {
     localStorage.setItem(KEYS.autoRematch, s.autoRematch ? '1' : '0');
     localStorage.setItem(KEYS.match, String(s.match));
     localStorage.setItem(KEYS.damage, s.damage);
+    localStorage.setItem(KEYS.loopCpu, s.loopCpu ? '1' : '0');
   } catch (_) {}
 }
 
@@ -198,6 +203,8 @@ function paint() {
   if (matchEl) matchEl.value = String(settings.match);
   const dmgEl = $('setDamage');
   if (dmgEl) dmgEl.value = settings.damage === 'low' || settings.damage === 'max' ? settings.damage : 'medium';
+  const loopEl = $('setLoopCpu');
+  if (loopEl) loopEl.checked = !!settings.loopCpu;
   applyChrome();
 }
 
@@ -341,6 +348,12 @@ export function initSettings(nextHooks) {
     settings.autoRematch = e.target.checked;
     persist();
   });
+  document.getElementById('setLoopCpu')?.addEventListener('change', (e) => {
+    settings.loopCpu = e.target.checked;
+    if (settings.loopCpu) settings.autoRematch = true;
+    persist();
+    paint();
+  });
   document.getElementById('setControls')?.addEventListener('change', (e) => {
     settings.controls = e.target.checked;
     persist();
@@ -359,6 +372,19 @@ export function initSettings(nextHooks) {
   document.getElementById('setCam')?.addEventListener('change', (e) => {
     setCameraMode(e.target.value);
   });
+  const bindLog = async (id, fn) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('click', async () => {
+      try {
+        const log = await import('./fight-log.js');
+        await fn(log);
+      } catch (e) { console.warn('Fight log', e); }
+    });
+  };
+  bindLog('setLogDownload', (log) => { log.downloadLog(); });
+  bindLog('setLogCopy', async (log) => { const ok = await log.copyLog(); const b = document.getElementById('setLogCopy'); if (b) { const t0 = b.textContent; b.textContent = ok ? 'Copied' : 'Copy failed'; setTimeout(() => { b.textContent = t0; }, 1200); } });
+  bindLog('setLogClear', (log) => { log.clearLog(); const b = document.getElementById('setLogClear'); if (b) { const t0 = b.textContent; b.textContent = 'Cleared'; setTimeout(() => { b.textContent = t0; }, 1200); } });
 }
 
 function clampFov(v) {
@@ -412,13 +438,34 @@ function bindLight() {
 }
 
 export function updateFps(dt) {
-  if (!settings.fps) return;
-  updateFps._acc = (updateFps._acc || 0) + dt;
+  // Wall-clock FPS. Callers must pass the real frame interval (not the 50 ms sim cap),
+  // otherwise a 400 ms frame still reads as "20 FPS".
+  const now = performance.now();
+  if (updateFps._wall == null) updateFps._wall = now;
+  const wallDt = (dt != null && dt > 0 && dt < 0.25) ? dt : Math.max(0.001, (now - updateFps._wall) / 1000);
+  updateFps._wall = now;
+  updateFps._last = 1 / wallDt;
+  if (!settings.fps) return updateFps._last;
+  updateFps._acc = (updateFps._acc || 0) + wallDt;
   updateFps._n = (updateFps._n || 0) + 1;
   if (updateFps._acc >= 0.5) {
     const el = document.getElementById('fps');
-    if (el) el.textContent = Math.round(updateFps._n / updateFps._acc) + ' FPS';
+    const fps = updateFps._n / updateFps._acc;
+    if (el) el.textContent = Math.round(fps) + ' FPS';
+    updateFps._shown = fps;
     updateFps._acc = 0;
     updateFps._n = 0;
   }
+  return updateFps._last;
 }
+
+export function lastFps() { return updateFps._last || 0; }
+
+
+export function setLoopCpu(on) {
+  settings.loopCpu = !!on;
+  if (settings.loopCpu) settings.autoRematch = true;
+  persist();
+  paint();
+}
+if (typeof window !== 'undefined') window.RFSetLoopCpu = setLoopCpu;
