@@ -93,6 +93,10 @@ shellCall('onReady', {
   get match() { return match; },
   get p1() { return p1; },
   get p2() { return p2; },
+  showSelectPreview,
+  hideSelectPreview,
+  previewSelectFighter,
+  renderRosterPortraits,
 });
 
 // Phones start on Low (no shadows, no floor mirror, light crowd, pixel ratio <= 1.5); the
@@ -557,8 +561,11 @@ function calibrateFighterJoints(f) {
 let fighterGltf = null;
 let arenaLoaded = false;
 let fightersStaged = false;
+let previewMode = null;
+let selectPads = null;
 
-function stageFighters() {
+function stageFighters(opts) {
+  opts = opts || {};
   if (!fighterGltf) return;
   if (!p1 || !p2) {
     p1 = makeFighter(fighterGltf, MODEL.colors.p1, 'p1');
@@ -570,9 +577,14 @@ function stageFighters() {
     if (p1.mixer) p1.mixer.timeScale = 1;
     if (p2.mixer) p2.mixer.timeScale = 1;
     scene.add(p1.root, p2.root);
-    if (!p1.phys) attachFighter(p1);
-    if (!p2.phys) attachFighter(p2);
+    if (opts.physics !== false) {
+      if (!p1.phys) attachFighter(p1);
+      if (!p2.phys) attachFighter(p2);
+    }
     fightersStaged = true;
+  } else if (opts.physics !== false) {
+    if (p1 && !p1.phys) attachFighter(p1);
+    if (p2 && !p2.phys) attachFighter(p2);
   }
   p1.root.visible = true;
   p2.root.visible = true;
@@ -599,6 +611,250 @@ function unstageFighters() {
   match.phase = 'idle';
   match.over = false;
   match.camLock = false;
+}
+
+
+function applyStatProfile(f) {
+  if (!f) return;
+  const id = (f.config && f.config.profile) || f.id;
+  f.stats = getFighterStats(id);
+  f.stat = f.stats.mul;
+  const tough = (f.stat && f.stat.toughness) || 1;
+  const retune = (bag, specs) => {
+    if (!bag || !specs) return;
+    for (const [pid, part] of Object.entries(bag)) {
+      const spec = specs[pid];
+      if (!spec || part == null || spec.hp == null) continue;
+      const max = Math.round(spec.hp * tough);
+      const ratio = part.max > 0 ? part.hp / part.max : 1;
+      part.max = max;
+      if (previewMode || match.phase !== 'fight') part.hp = max;
+      else part.hp = Math.max(0, Math.min(max, Math.round(max * ratio)));
+    }
+  };
+  retune(f.parts, DAMAGE.parts);
+  retune(f.subs, DAMAGE.sub);
+}
+
+function makeSelectPad(color, x) {
+  const g = new THREE.Group();
+  const low = gfxKey === 'low';
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.72 * SIZE, 1.02 * SIZE, low ? 24 : 48),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.92, side: THREE.DoubleSide, depthWrite: false }),
+  );
+  ring.rotation.x = -Math.PI / 2;
+  g.add(ring);
+  const disc = new THREE.Mesh(
+    new THREE.CircleGeometry(0.72 * SIZE, low ? 20 : 32),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }),
+  );
+  disc.rotation.x = -Math.PI / 2;
+  disc.position.y = 0.002;
+  g.add(disc);
+  g.position.set(x, matTopY() + 0.018, 0);
+  g.userData.selectPad = true;
+  return g;
+}
+
+function ensureSelectPads() {
+  if (selectPads) return selectPads;
+  const a = p1 && p1.startX != null ? p1.startX : -2.15 * SIZE;
+  const b = p2 && p2.startX != null ? p2.startX : 2.15 * SIZE;
+  selectPads = [makeSelectPad(0x3d8bff, a), makeSelectPad(0xff4040, b)];
+  for (const p of selectPads) scene.add(p);
+  return selectPads;
+}
+
+function removeSelectPads() {
+  if (!selectPads) return;
+  for (const p of selectPads) {
+    if (p.parent) p.parent.remove(p);
+    p.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) o.material.dispose();
+    });
+  }
+  selectPads = null;
+}
+
+function paintPreviewFighter(f, cfg) {
+  if (!f || !cfg) return;
+  applyFighterConfig(f, {
+    ...f.config,
+    name: cfg.name || (f.config && f.config.name),
+    profile: cfg.profile || cfg.id,
+    color: cfg.color != null ? cfg.color : f.config.color,
+  });
+  const shell = window.RFShell;
+  if (shell && typeof shell.paint === 'function' && cfg.primary) {
+    shell.paint(f, cfg.primary, cfg.accent || cfg.primary);
+  }
+}
+
+function poseSelectIdle(f, seed) {
+  if (!f) return;
+  f.state = 'idle';
+  f.stateT = 0;
+  if (f.mixer) { f.mixer.timeScale = 1; f.mixer.stopAllAction(); }
+  f.current = null;
+  const clip = (typeof idleClipFor === 'function') ? idleClipFor(f) : (MODEL.animations.idle || 'FightingIdle');
+  setAnim(f, clip, 0.01);
+  const act = f.actions[f.current];
+  if (act) {
+    const dur = act.getClip().duration;
+    act.stopFading();
+    act.setEffectiveWeight(1);
+    act.play();
+    act.time = ((seed || 0) * 0.73) % Math.max(0.1, dur);
+  }
+  if (f.mixer) f.mixer.update(0);
+  if (typeof poseAfterMixer === 'function') poseAfterMixer(f);
+}
+
+function showSelectPreview(cfg) {
+  cfg = cfg || {};
+  if (!fighterGltf) return false;
+  previewMode = 'select';
+  match.phase = 'idle';
+  match.over = false;
+  match.camLock = true;
+  const banner = document.getElementById('banner');
+  if (banner) banner.classList.remove('show');
+  stageFighters({ physics: false });
+  if (!p1 || !p2) return false;
+  ensureSelectPads();
+  for (const f of [p1, p2]) {
+    f.root.visible = true;
+    f.root.position.set(f.startX, matTopY(), 0);
+    f.root.scale.set(1, 1, 1);
+    f.groundY = matTopY();
+    if (f.shield) f.shield.visible = false;
+  }
+  if (cfg.p1) paintPreviewFighter(p1, cfg.p1);
+  if (cfg.p2) paintPreviewFighter(p2, cfg.p2);
+  poseSelectIdle(p1, 0.2);
+  poseSelectIdle(p2, 1.1);
+  faceEachOther(p1, p2, 0, true);
+  return true;
+}
+
+function hideSelectPreview(opts) {
+  opts = opts || {};
+  removeSelectPads();
+  const was = previewMode;
+  previewMode = null;
+  if (was && !opts.keepStaged) unstageFighters();
+  else if (!opts.keepStaged) match.camLock = false;
+}
+
+function previewSelectFighter(side, cfg) {
+  const f = side === 'p2' ? p2 : p1;
+  if (!f || !previewMode) {
+    if (!showSelectPreview(side === 'p2' ? { p2: cfg } : { p1: cfg })) return;
+  }
+  const target = side === 'p2' ? p2 : p1;
+  paintPreviewFighter(target, cfg || {});
+  if (p1 && p2) faceEachOther(p1, p2, 0, true);
+}
+
+function stepSelectPreview(dt) {
+  if (p1 && p1.mixer) { p1.mixer.update(dt); if (typeof poseAfterMixer === 'function') poseAfterMixer(p1); }
+  if (p2 && p2.mixer) { p2.mixer.update(dt); if (typeof poseAfterMixer === 'function') poseAfterMixer(p2); }
+  if (selectPads) {
+    const spin = dt * 0.45;
+    selectPads[0].rotation.y += spin;
+    selectPads[1].rotation.y -= spin;
+  }
+}
+
+function renderRosterPortraits(list, size) {
+  const out = {};
+  if (!fighterGltf || !Array.isArray(list) || !list.length) return out;
+  const low = gfxKey === 'low';
+  size = Math.max(96, Math.min(256, size || (low ? 128 : 192)));
+  let created = false;
+  if (!p1) {
+    stageFighters({ physics: false });
+    created = true;
+    if (p1 && p1.root && p1.root.parent) p1.root.parent.remove(p1.root);
+    if (p2 && p2.root && p2.root.parent) p2.root.parent.remove(p2.root);
+    fightersStaged = false;
+  }
+  const src = p1;
+  if (!src || !src.root) return out;
+  const studio = new THREE.Scene();
+  studio.background = new THREE.Color(0x0b0f18);
+  studio.add(new THREE.HemisphereLight(0xc8d6ff, 0x1a1410, 1.15));
+  const key = new THREE.DirectionalLight(0xfff4e8, 1.35);
+  key.position.set(2.2, 4.2, 3.4);
+  studio.add(key);
+  const fill = new THREE.DirectionalLight(0x8cb0ff, 0.45);
+  fill.position.set(-3.0, 1.6, -1.2);
+  studio.add(fill);
+  const cam = new THREE.PerspectiveCamera(28, 1, 0.1, 20);
+  const savedPos = src.root.position.clone();
+  const savedRot = src.root.rotation.clone();
+  const savedParent = src.root.parent;
+  const savedVis = src.root.visible;
+  if (savedParent) savedParent.remove(src.root);
+  studio.add(src.root);
+  src.root.visible = true;
+  src.root.position.set(0, 0, 0);
+  src.root.rotation.set(0, Math.PI * 0.18, 0);
+  poseSelectIdle(src, 0.35);
+  src.root.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(src.root);
+  const mid = box.getCenter(new THREE.Vector3());
+  const headY = box.min.y + (box.max.y - box.min.y) * 0.72;
+  cam.position.set(mid.x + 0.55 * SIZE, headY + 0.12 * SIZE, mid.z + 2.35 * SIZE);
+  cam.lookAt(mid.x, headY - 0.02 * SIZE, mid.z);
+  const rt = new THREE.WebGLRenderTarget(size, size, { type: THREE.UnsignedByteType });
+  rt.texture.colorSpace = THREE.SRGBColorSpace;
+  const prev = renderer.getRenderTarget();
+  const prevClear = new THREE.Color();
+  const prevAlpha = renderer.getClearAlpha();
+  renderer.getClearColor(prevClear);
+  const canvas2 = document.createElement('canvas');
+  canvas2.width = canvas2.height = size;
+  const ctx = canvas2.getContext('2d');
+  const buf = new Uint8Array(size * size * 4);
+  const pixels = new Uint8ClampedArray(size * size * 4);
+  try {
+    for (const item of list) {
+      if (!item || !item.id) continue;
+      paintPreviewFighter(src, item);
+      src.root.updateMatrixWorld(true);
+      renderer.setRenderTarget(rt);
+      renderer.setClearColor(0x0b0f18, 1);
+      renderer.clear();
+      renderer.render(studio, cam);
+      renderer.readRenderTargetPixels(rt, 0, 0, size, size, buf);
+      // WebGL origin is bottom-left; flip for a canvas image.
+      for (let y = 0; y < size; y++) {
+        const srcOff = (size - 1 - y) * size * 4;
+        const dstOff = y * size * 4;
+        pixels.set(buf.subarray(srcOff, srcOff + size * 4), dstOff);
+      }
+      ctx.putImageData(new ImageData(pixels, size, size), 0, 0);
+      out[item.id] = canvas2.toDataURL('image/png');
+    }
+  } catch (err) {
+    console.warn('[portraits]', err);
+  }
+  renderer.setRenderTarget(prev);
+  renderer.setClearColor(prevClear, prevAlpha);
+  rt.dispose();
+  studio.remove(src.root);
+  if (savedParent) savedParent.add(src.root);
+  src.root.position.copy(savedPos);
+  src.root.rotation.copy(savedRot);
+  src.root.visible = savedVis;
+  key.dispose?.();
+  if (created) {
+    // leave unstaged; fighters exist in memory for the upcoming select preview
+  }
+  return out;
 }
 
 function setReplayPresentation(on) {
@@ -802,6 +1058,8 @@ function applyFighterConfig(f, cfg) {
     f.config.apiBrain = a;
   } else if (f.config.apiBrain) delete f.config.apiBrain;
   if (f.config.color != null) retintFighter(f, f.config.color);
+  if (cfg && (cfg.profile || cfg.profileId)) f.config.profile = cfg.profile || cfg.profileId;
+  applyStatProfile(f);
   const el = document.getElementById(f.id === 'p1' ? 'n1' : 'n2');
   if (el) el.textContent = f.config.name;
 }
@@ -4960,7 +5218,7 @@ function tick() {
   stepFlash(rawDt);
   let dt = isSettingsOpen() ? 0 : rawDt;
   if (match.over && match.overlayAt && performance.now() >= match.overlayAt) showKoOverlay();
-  const live = !!(p1 && p2 && fightersStaged);
+  const live = !!(p1 && p2 && fightersStaged && !previewMode);
   if (live && !bellRung && (shellRoundOver() || match.over)) ringBell('round');
   let canAct = false;
   if (live) {
@@ -5045,6 +5303,11 @@ function tick() {
     if (isCatastrophic(p1) && p1.state !== 'ko') ko(p1, p2, { reason: p1.parts.head && p1.parts.head.detached ? 'head' : 'legs' });
     else if (isCatastrophic(p2) && p2.state !== 'ko') ko(p2, p1, { reason: p2.parts.head && p2.parts.head.detached ? 'head' : 'legs' });
   }
+  } else if (previewMode === 'select' && p1 && p2) {
+    tapped.clear();
+    shellCall('clearTapped');
+    stepSelectPreview(dt);
+    setWireObstacles([]);
   } else {
     tapped.clear();
     shellCall('clearTapped');
@@ -5113,6 +5376,7 @@ function buzzFromFighters() {
 
 function startFightFromShell(opts) {
   opts = opts || {};
+  hideSelectPreview({ keepStaged: true });
   stageFighters();
   if (opts.p1) applyFighterConfig(p1, opts.p1);
   if (opts.p2) applyFighterConfig(p2, opts.p2);
@@ -5220,6 +5484,10 @@ function onLoad(gltf) {
       applyFighterConfig(f, cfg);
       return f.config;
     },
+    showSelectPreview,
+    hideSelectPreview,
+    previewSelectFighter,
+    renderRosterPortraits,
   });
   applyGfx(gfxKey);
   resize();

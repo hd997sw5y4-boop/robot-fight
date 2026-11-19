@@ -102,7 +102,13 @@
 
   /* ---------- talking to the fight through api.js ---------- */
   function fighterCfg(p, side, cpuAi) {
-    const cfg = { name: p.label, color: S.hex(p.paint.primary), control: cpuAi ? 'cpu' : (side === 'p1' || M.cfg.mode === 'versus' ? 'player' : 'cpu') };
+    const cfg = {
+      name: p.name || p.label,
+      color: S.hex(p.paint.primary),
+      control: cpuAi ? 'cpu' : (side === 'p1' || M.cfg.mode === 'versus' ? 'player' : 'cpu'),
+    };
+    if (p.profile) cfg.profile = p.profile;
+    if (p.skin) cfg.skin = p.skin;
     if (cpuAi) cfg.ai = cpuAi;
     if (p.apiBrain) {
       const a = { provider: p.apiBrain.provider, base: p.apiBrain.base, model: p.apiBrain.model, entrantId: p.apiBrain.entrantId };

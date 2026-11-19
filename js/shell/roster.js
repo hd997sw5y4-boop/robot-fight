@@ -18,27 +18,41 @@
 
   /* Six CPU opponents, easiest first. `prof` feeds the game's own AI knobs (think window,
      reaction-block chance, punch/kick/special/block mix) via api.js fighter config. */
+  // Seven fighters share the current robot model. Paint and `skin` (reserved for later
+  // mesh swaps) stay data-driven. `profile` is a js/config.js FIGHTER_PROFILES id and
+  // actually drives damage, speed, armor, reach, and recovery in a fight.
   S.ROSTER = [
-    { id: 'sprocket', name: 'Sprocket', title: 'The Rookie', style: 'Balanced', primary: '#22c3e6', accent: '#dde8f5',
-      blurb: 'Fresh off the line. Swings wide and learns slowly.',
+    { id: 'sprocket', name: 'Sprocket', title: 'The Rookie', style: 'Balanced', profile: 'sprocket',
+      skin: null, primary: '#22c3e6', accent: '#dde8f5',
+      blurb: 'Fresh off the line. Even stats, no sharp edge.',
       prof: { think: [0.5, 0.7], react: 0.14, punch: 0.36, kick: 0.12, special: 0.04, block: 0.12 } },
-    { id: 'hexwren', name: 'Hex Wren', title: 'The Ghost Step', style: 'Evasive', primary: '#3fd6a6', accent: '#3a2340',
+    { id: 'hexwren', name: 'Hex Wren', title: 'The Ghost Step', style: 'Evasive', profile: 'hexwren',
+      skin: null, primary: '#3fd6a6', accent: '#3a2340',
       blurb: 'Circles, slips, and pokes when you overreach.',
       prof: { think: [0.34, 0.45], react: 0.32, punch: 0.34, kick: 0.2, special: 0.1, block: 0.1 } },
-    { id: 'bulwark', name: 'Bulwark-9', title: 'The Wall', style: 'Tank', primary: '#5d6b4a', accent: '#b08a6a',
+    { id: 'aeropike', name: 'Aero Pike', title: 'The Long Point', style: 'Striker', profile: 'aeropike',
+      skin: null, primary: '#2f74ff', accent: '#dfe6ff',
+      blurb: 'Darts in on a long reach, pokes, and is gone before you can plant a heavy shot.',
+      prof: { think: [0.22, 0.3], react: 0.28, punch: 0.5, kick: 0.22, special: 0.16, block: 0.1 } },
+    { id: 'bulwark', name: 'Bulwark-9', title: 'The Wall', style: 'Tank', profile: 'bulwark',
+      skin: null, primary: '#5d6b4a', accent: '#b08a6a',
       blurb: 'Walks forward behind a raised guard and hits heavy.',
       prof: { think: [0.3, 0.38], react: 0.5, punch: 0.28, kick: 0.32, special: 0.22, block: 0.32 } },
-    { id: 'voltfang', name: 'Volt Fang', title: 'The Rusher', style: 'Aggressive', primary: '#ff7a2f', accent: '#1b1e26',
+    { id: 'voltfang', name: 'Volt Fang', title: 'The Rusher', style: 'Rusher', profile: 'voltfang',
+      skin: null, primary: '#ff7a2f', accent: '#1b1e26',
       blurb: 'Never backs up. Throws hands until something breaks.',
       prof: { think: [0.16, 0.2], react: 0.2, punch: 0.62, kick: 0.26, special: 0.26, block: 0.04 } },
-    { id: 'mirrorjack', name: 'Mirrorjack', title: 'The Counter', style: 'Counter-puncher', primary: '#dde8f5', accent: '#8b5cf6',
+    { id: 'mirrorjack', name: 'Mirrorjack', title: 'The Counter', style: 'Counter', profile: 'mirrorjack',
+      skin: null, primary: '#dde8f5', accent: '#8b5cf6',
       blurb: 'Waits for your swing, blocks it, and answers instantly.',
       prof: { think: [0.13, 0.16], react: 0.74, punch: 0.36, kick: 0.2, special: 0.3, block: 0.2 } },
-    { id: 'overseer', name: 'Overseer Prime', title: 'Final Boss', style: 'Boss', primary: '#1b1e26', accent: '#e23b3b',
+    { id: 'overseer', name: 'Overseer Prime', title: 'Final Boss', style: 'Boss', profile: 'overseer',
+      skin: null, primary: '#1b1e26', accent: '#e23b3b',
       blurb: 'Reads everything. Goes berserk when its armor cracks.',
       prof: { think: [0.08, 0.12], react: 0.7, punch: 0.56, kick: 0.3, special: 0.45, block: 0.2 } },
   ];
   S.opponent = (id) => S.ROSTER.find((o) => o.id === id) || S.ROSTER[0];
+  S.fighterOf = (id) => (id === 'random' ? null : (S.ROSTER.find((o) => o.id === id) || null));
 
   /* ---------- paint ---------- */
   // The API's setFighterConfig({ color }) tints the whole robot; on top of that the shell paints
@@ -79,7 +93,7 @@
     normal: { think: 1,    react: 1,    atk: 1,    aggr: 1 },
     hard:   { think: 0.42, react: 1.45, atk: 1.28, aggr: 1.4, reactFloor: 0.55, thinkCap: 0.16, aggrFloor: 1.25, recoverMul: 0.6, ground: 0.7 },
   };
-  const AGGR = { Balanced: 0.8, Evasive: 0.7, Tank: 0.9, Aggressive: 1.45, 'Counter-puncher': 0.85, Boss: 1.3 };
+  const AGGR = { Balanced: 0.8, Evasive: 0.7, Tank: 0.9, Aggressive: 1.45, Rusher: 1.45, 'Counter-puncher': 0.85, Counter: 0.85, Boss: 1.3, Striker: 1.15 };
   S.aiFor = (opp, mode) => {
     const p = opp.prof;
     const cpu = (S.api && S.fight && S.cpuSetting && S.cpuSetting()) || 'normal';

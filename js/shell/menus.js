@@ -6,16 +6,37 @@
   const esc = S.esc;
   const MENU_SCREENS = ['title', 'main', 'select', 'ladder', 'results', 'ending', 'pause', 'credits', 'tourney', 'tourney-results'];
   const ORBIT_SCREENS = ['title', 'main', 'credits'];
+  const SELECT_SCREEN = 'select';
 
   /* ---------- persisted choices ---------- */
   const preset = (id) => S.PRESETS.find((p) => p.id === id) || S.PRESETS[0];
   const fromPreset = (id) => { const p = preset(id); return { preset: p.id, primary: p.primary, accent: p.accent }; };
+  function asFighterId(saved, fallback) {
+    if (typeof saved === 'string' && S.fighterOf && S.fighterOf(saved)) return saved;
+    if (saved === 'random') return 'random';
+    if (saved && typeof saved === 'object') {
+      const map = { cobalt: 'aeropike', crimson: 'voltfang', graphite: 'bulwark', mint: 'hexwren', violet: 'mirrorjack', ember: 'voltfang', arctic: 'sprocket', rose: 'overseer' };
+      if (saved.preset && map[saved.preset] && S.fighterOf(map[saved.preset])) return map[saved.preset];
+    }
+    return fallback;
+  }
   const sel = {
     p1: Object.assign(fromPreset('cobalt'), S.load('p1', {})),
     p2: Object.assign(fromPreset('crimson'), S.load('p2', {})),
-    opp: S.load('opp', 'random'),
+    p1Id: asFighterId(S.load('p1Id', null) || S.load('p1', {}), 'aeropike'),
+    p2Id: asFighterId(S.load('p2Id', null), 'sprocket'),
+    opp: S.load('opp', 'sprocket'),
     dummyBlock: !!S.load('dummyBlock', false),
   };
+  if (sel.opp && sel.opp !== 'random' && !(S.fighterOf && S.fighterOf(sel.opp))) sel.opp = 'sprocket';
+  if (!sel.p2Id || (sel.p2Id !== 'random' && !(S.fighterOf && S.fighterOf(sel.p2Id)))) sel.p2Id = (sel.opp && sel.opp !== 'random') ? sel.opp : 'sprocket';
+  function syncSelPaint() {
+    const a = S.fighterOf && S.fighterOf(sel.p1Id);
+    if (a) sel.p1 = { preset: a.id, primary: a.primary, accent: a.accent };
+    const b = S.fighterOf && S.fighterOf(sel.p2Id === 'random' ? null : sel.p2Id);
+    if (b) sel.p2 = { preset: b.id, primary: b.primary, accent: b.accent };
+  }
+  syncSelPaint();
   const paintName = (pt) => {
     const p = S.PRESETS.find((x) => x.primary === pt.primary && x.accent === pt.accent);
     return p ? p.name : 'Custom';
@@ -55,7 +76,7 @@
   screen('title', `
     <div class="rfs-title">
       ${brand}
-      <p class="rfs-tag">Six steel brawlers. One octagon. Parts fly.</p>
+      <p class="rfs-tag">Seven steel brawlers. One octagon. Parts fly.</p>
       <button type="button" class="rfs-f rfs-press" data-act="start">Press <kbd>Enter</kbd> · <kbd>A</kbd> · or click to start</button>
     </div>
     <div class="rfs-foot">© Window Workshop Games</div>`, 'rfs-center');
@@ -66,7 +87,7 @@
         ${brand}
         <nav class="rfs-menu" aria-label="Main menu">
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="fight"><b>Fight</b><small>Quick match vs a CPU robot</small></button>
-          <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="arcade"><b>Arcade</b><small>Climb the six-robot ladder</small></button>
+          <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="arcade"><b>Arcade</b><small>Climb the seven-robot ladder</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="versus"><b>Versus</b><small>Two players, one keyboard or two gamepads</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="training"><b>Training</b><small>Practice on a dummy, no timer</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="watch"><b>Bot vs Bot</b><small>Sit back and watch two CPUs fight</small></button>
@@ -256,7 +277,7 @@
   }
   const MODE_INFO = {
     fight: ['Fight', 'Quick match · best of 3'],
-    arcade: ['Arcade', 'Six opponents · rising difficulty'],
+    arcade: ['Arcade', 'Seven opponents · rising difficulty'],
     versus: ['Versus', 'Local two-player · best of 3'],
     training: ['Training', 'Dummy · no timer'],
     watch: ['Bot vs Bot', 'Watch two CPUs · best of 3'],
@@ -278,7 +299,7 @@
     else if (mode === 'fight' || mode === 'watch') {
       right = `<section class="rfs-card rfs-panel rfs-opps"><header><small>Opponent</small><b>Choose a CPU</b></header>
         <div class="rfs-opplist">
-          <button type="button" class="rfs-f rfs-opp" data-act="opp" data-opp="random"><i style="--a:#9aabff;--b:#4a505c"></i><span><b>Random</b><small>Any of the six</small></span></button>
+          <button type="button" class="rfs-f rfs-opp" data-act="opp" data-opp="random"><i style="--a:#9aabff;--b:#4a505c"></i><span><b>Random</b><small>Any of the seven</small></span></button>
           ${S.ROSTER.map((o) => `<button type="button" class="rfs-f rfs-opp" data-act="opp" data-opp="${o.id}"><i style="--a:${o.primary};--b:${o.accent}"></i><span><b>${esc(o.name)}</b><small>${esc(o.style)} · ${esc(o.title)}</small></span></button>`).join('')}
         </div>
         <p class="rfs-note">CPU difficulty: <b class="rfs-cpu"></b> (change in Settings)</p></section>`;
@@ -287,7 +308,7 @@
         <div class="rfs-seg"><button type="button" class="rfs-f" data-act="dummy" data-v="idle">Stand idle</button><button type="button" class="rfs-f" data-act="dummy" data-v="block">Hold block</button></div>
         <p class="rfs-note">No timer. Press <kbd>R</kbd> to reset damage and health, <kbd>B</kbd> to toggle blocking, <kbd>Esc</kbd> for the menu.</p></section>`;
     } else {
-      right = `<section class="rfs-card rfs-panel"><header><small>Arcade ladder</small><b>Six opponents</b></header>
+      right = `<section class="rfs-card rfs-panel"><header><small>Arcade ladder</small><b>Seven opponents</b></header>
         <ol class="rfs-mini">${S.ROSTER.map((o) => `<li><i style="--a:${o.primary};--b:${o.accent}"></i>${esc(o.name)} <small>${esc(o.style)}</small></li>`).join('')}</ol>
         <p class="rfs-note">Lose a fight and you can continue from the same rung.</p></section>`;
     }
@@ -335,26 +356,52 @@
     paintSelect();
     previewSelect();
   }
+  function cfgFromFighter(id, fallbackName) {
+    const o = (id && id !== 'random' && S.fighterOf && S.fighterOf(id)) || null;
+    if (!o) {
+      return { name: fallbackName || 'Random', primary: '#4a505c', accent: '#9aabff', profile: 'sprocket', color: S.hex('#4a505c') };
+    }
+    return { id: o.id, name: o.name, primary: o.primary, accent: o.accent, profile: o.profile || o.id, skin: o.skin, color: S.hex(o.primary) };
+  }
   function previewOpponent() {
     if ((S.state.mode !== 'fight' && S.state.mode !== 'watch') || !S.api) return;
-    const o = sel.opp === 'random' ? { primary: '#4a505c', accent: '#9aabff' } : S.opponent(sel.opp);
-    S.paint(S.api.p2, o.primary, o.accent);
+    const id = sel.opp === 'random' ? 'random' : sel.opp;
+    if (S.api.previewSelectFighter) S.api.previewSelectFighter('p2', cfgFromFighter(id, 'Random'));
+    else if (S.api.p2) {
+      const o = cfgFromFighter(id, 'Random');
+      S.paint(S.api.p2, o.primary, o.accent);
+    }
   }
   function previewSelect() {
     if (!S.api) return;
     const m = S.state.mode;
-    S.paint(S.api.p1, sel.p1.primary, sel.p1.accent);
-    if (m === 'versus') S.paint(S.api.p2, sel.p2.primary, sel.p2.accent);
-    else if (m === 'fight' || m === 'watch') previewOpponent();
-    else if (m === 'training') S.paint(S.api.p2, '#4a505c', '#9aabff');
-    else S.paint(S.api.p2, S.ROSTER[0].primary, S.ROSTER[0].accent);
+    const left = cfgFromFighter(sel.p1Id, 'Blue');
+    let right;
+    if (m === 'versus') right = cfgFromFighter(sel.p2Id, 'Red');
+    else if (m === 'fight' || m === 'watch') right = cfgFromFighter(sel.opp, 'Random');
+    else if (m === 'training') right = { name: 'Dummy', primary: '#4a505c', accent: '#9aabff', profile: 'sprocket', color: S.hex('#4a505c') };
+    else right = cfgFromFighter((S.arcade && S.ROSTER[S.arcade.idx] && S.ROSTER[S.arcade.idx].id) || S.ROSTER[0].id);
+    if (S.api.showSelectPreview) S.api.showSelectPreview({ p1: left, p2: right });
+    else {
+      if (S.api.p1) S.paint(S.api.p1, left.primary, left.accent);
+      if (S.api.p2) S.paint(S.api.p2, right.primary, right.accent);
+    }
   }
 
-  const p1Cfg = (versus) => ({
-    name: 'Player 1', label: (versus ? 'P1 · ' : 'You · ') + paintName(sel.p1),
-    paint: { primary: sel.p1.primary, accent: sel.p1.accent },
-  });
-  const oppCfg = (o) => ({ name: o.name, label: o.name + ' · CPU', paint: { primary: o.primary, accent: o.accent } });
+  const sideCfg = (id, labelPrefix, extra) => {
+    const o = cfgFromFighter(id);
+    const name = o.name || 'Fighter';
+    return Object.assign({
+      name,
+      label: (labelPrefix ? labelPrefix + ' · ' : '') + name,
+      paint: { primary: o.primary, accent: o.accent },
+      profile: o.profile,
+      skin: o.skin,
+      color: o.color,
+    }, extra || {});
+  };
+  const p1Cfg = (versus) => sideCfg(sel.p1Id, versus ? 'P1' : (S.state.mode === 'watch' ? 'CPU' : 'You'));
+  const oppCfg = (o) => sideCfg(o.id, 'CPU');
 
   function startFromSelect() {
     const mode = S.state.mode;
@@ -369,16 +416,17 @@
       S.startMatch({ mode, p1: p1Cfg(false), p2: oppCfg(o), opp: o });
     } else if (mode === 'watch') {
       const o = sel.opp === 'random' ? S.ROSTER[Math.floor(Math.random() * S.ROSTER.length)] : S.opponent(sel.opp);
-      S.startMatch({ mode, p1: { name: 'Blue CPU', label: 'CPU · ' + paintName(sel.p1), paint: { primary: sel.p1.primary, accent: sel.p1.accent } }, p2: oppCfg(o), opp: o });
+      S.startMatch({ mode, p1: sideCfg(sel.p1Id, 'CPU'), p2: oppCfg(o), opp: o });
     } else if (mode === 'versus') {
-      S.startMatch({ mode, p1: p1Cfg(true), p2: { name: 'Player 2', label: 'P2 · ' + paintName(sel.p2), paint: { primary: sel.p2.primary, accent: sel.p2.accent } } });
+      const right = sel.p2Id === 'random' ? S.ROSTER[Math.floor(Math.random() * S.ROSTER.length)] : (S.fighterOf(sel.p2Id) || S.ROSTER[0]);
+      S.startMatch({ mode, p1: p1Cfg(true), p2: sideCfg(right.id, 'P2') });
     } else {
       S.startMatch({ mode, p1: p1Cfg(false), p2: { name: 'Dummy', label: 'Training dummy', paint: { primary: '#4a505c', accent: '#9aabff' } }, dummyBlock: sel.dummyBlock });
     }
   }
 
   // [fighter-select hook] shared choices + start, used by js/shell/fighter-select.js.
-  S.selectHooks = { sel, MODE_INFO, modeInfo, fromPreset, paintName, setPaint, previewSelect, start: startFromSelect };
+  S.selectHooks = { sel, MODE_INFO, modeInfo, fromPreset, paintName, setPaint, previewSelect, cfgFromFighter, syncSelPaint, start: startFromSelect };
 
   /* ---------- arcade ---------- */
   function renderLadder() {
@@ -390,7 +438,7 @@
         const st = i < a.idx ? 'beaten' : i === a.idx ? 'next' : 'locked';
         return `<li class="${st}"><i style="--a:${r.primary};--b:${r.accent}"></i>
           <span><b>${esc(r.name)}</b><small>${esc(r.title)} · ${esc(r.style)}</small></span>
-          <em class="rfs-diff" aria-label="Difficulty ${i + 1} of 6">${'<u></u>'.repeat(i + 1)}${'<u class="off"></u>'.repeat(5 - i)}</em>
+          <em class="rfs-diff" aria-label="Difficulty ${i + 1} of ${S.ROSTER.length}">${'<u></u>'.repeat(i + 1)}${'<u class="off"></u>'.repeat(Math.max(0, S.ROSTER.length - 1 - i))}</em>
           <strong>${st === 'beaten' ? 'Beaten' : st === 'next' ? 'Next' : ''}</strong></li>`;
       }).join('')}</ol>
       <p class="rfs-blurb"><b>${esc(o.name)}:</b> ${esc(o.blurb)}</p>
@@ -517,7 +565,7 @@
     const cfg = { p1: p1Cfg(false), p2: { name: 'Ladder', paint: { primary: '#1b1e26', accent: '#e23b3b' } } };
     S.$('.rfs-ending', endingEl).innerHTML = `
       <header class="rfs-selhead"><small>Arcade complete</small><b>Octagon Champion</b></header>
-      <p class="rfs-sub">Overseer Prime is scrap. All six robots fell to your ${esc(paintName(sel.p1))} brawler${a.continues ? ` after ${a.continues} continue${a.continues > 1 ? 's' : ''}` : ' without a single continue'}.</p>
+      <p class="rfs-sub">Overseer Prime is scrap. All seven robots fell to your ${esc(paintName(sel.p1))} brawler${a.continues ? ` after ${a.continues} continue${a.continues > 1 ? 's' : ''}` : ' without a single continue'}.</p>
       ${statsTable(a.total, cfg, null)}
       <p class="rfs-note">Thanks for playing — Window Workshop Games</p>
       <div class="rfs-row"><button type="button" class="rfs-f rfs-btn rfs-small" data-act="credits">Credits</button><button type="button" class="rfs-f rfs-btn rfs-go" data-act="menu" data-autofocus>Main menu</button></div>`;
@@ -587,20 +635,35 @@
   let orbitA = 0.35;
   S.on('frame', (dt, raw) => {
     const api = S.api;
-    if (!ORBIT_SCREENS.includes(S.state.screen) || S.match.cfg || !api.camera || !api.match) return;
+    const onSelect = S.state.screen === SELECT_SCREEN && !S.match.cfg;
+    if ((!ORBIT_SCREENS.includes(S.state.screen) && !onSelect) || !api.camera || !api.match) return;
+    if (S.match.cfg && !onSelect) return;
     api.match.camLock = true;
-    orbitA += raw * 0.07;
-    // Slow high orbit of the empty cage (robots are not in the scene on the menu).
+    orbitA += raw * (onSelect ? 0.055 : 0.07);
     const mt = (api.ARENA && api.ARENA.matTop) || 0.9;
-    const r = 10.4;
-    const y = mt + 5.4 + Math.sin(orbitA * 0.7) * 0.28;
-    api.camera.position.set(Math.sin(orbitA) * r, y, Math.cos(orbitA) * r);
-    api.camera.lookAt(0, mt + 1.35, 0);
+    if (onSelect) {
+      // High enough to frame both robots and the glowing pads, not a low leg shot.
+      const r = 8.8;
+      const y = mt + 3.55 + Math.sin(orbitA * 0.7) * 0.2;
+      api.camera.position.set(Math.sin(orbitA) * r, y, Math.cos(orbitA) * r);
+      api.camera.lookAt(0, mt + 1.05, 0);
+    } else {
+      // Slow high orbit of the empty cage (robots are not in the scene on the menu).
+      const r = 10.4;
+      const y = mt + 5.4 + Math.sin(orbitA * 0.7) * 0.28;
+      api.camera.position.set(Math.sin(orbitA) * r, y, Math.cos(orbitA) * r);
+      api.camera.lookAt(0, mt + 1.35, 0);
+    }
   });
-  // Leaving the orbit screens hands the camera back to the game.
+  // Leaving the orbit / select screens hands the camera back to the game, and
+  // leaving select unstages the preview robots so the main menu stays empty.
   const baseShow = S.showScreen;
   S.showScreen = (name) => {
-    if (S.api && !ORBIT_SCREENS.includes(name)) S.api.match.camLock = false;
+    const was = S.state.screen;
+    if (S.api && was === SELECT_SCREEN && name !== SELECT_SCREEN && name !== 'fight' && name !== 'ladder') {
+      try { if (S.api.hideSelectPreview) S.api.hideSelectPreview(); } catch (e) { console.warn('[select]', e); }
+    }
+    if (S.api && !ORBIT_SCREENS.includes(name) && name !== SELECT_SCREEN) S.api.match.camLock = false;
     baseShow(name);
   };
 
