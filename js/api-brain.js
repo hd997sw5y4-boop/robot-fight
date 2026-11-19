@@ -13,6 +13,8 @@
  * entrant's chosen endpoint as Authorization: Bearer.
  */
 
+import { memoryKey, isLearningOn, promptNotes, defaultLearningOn, setDefaultLearningOn, clearMemory } from './api-learn.js';
+
 export const AI_ACTIONS = ['approach', 'retreat', 'circle_left', 'circle_right', 'punch', 'kick', 'jump_kick', 'flip_front', 'block', 'ground', 'wait'];
 export const AI_TARGETS = ['head', 'torso', 'armL', 'armR', 'legL', 'legR'];
 
@@ -100,9 +102,10 @@ export function fighterApiCfg(f) {
   if (custom && (custom.entrantId || custom.base || custom.model)) {
     const r = resolveProvider(custom);
     const key = custom.entrantId ? loadEntrantKey(custom.entrantId) : '';
-    return { ...r, key, on: true };
+    const name = (f.config && f.config.name) || '';
+    return { ...r, key, on: true, name };
   }
-  return aiConfig();
+  return { ...aiConfig(), name: (f && f.config && f.config.name) || (f && f.id) || '' };
 }
 
 export function wantsApiBrain(id, f) {
@@ -397,8 +400,11 @@ export function createApiBrain(id, getCfg) {
     stats.calls += 1;
     const state = compact(snap);
     const rec = { t: new Date().toISOString(), robot: id, provider: c.provider, model: c.model, state, reply: null, action: null, plan: null, target: null, latencyMs: 0, error: null, kind: null };
+    const learnKey = memoryKey(c.name || id, c.provider, c.model);
+    const notes = isLearningOn(learnKey) ? promptNotes(learnKey) : '';
+    const sys = notes ? (SYSTEM + '\n\nYour notes from past fights: ' + notes) : SYSTEM;
     const out = await requestCompletion(c, {
-      messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: JSON.stringify(state) }],
+      messages: [{ role: 'system', content: sys }, { role: 'user', content: JSON.stringify(state) }],
     });
     rec.latencyMs = out.latency || 0;
     rec.kind = out.ok ? 'ok' : out.kind;
@@ -552,6 +558,19 @@ export function initApiBrainUI() {
   clear.addEventListener('click', () => { ls.del(K.key); if (testOut) testOut.textContent = ''; paint(); });
   b1.addEventListener('change', () => { ls.set(K.p1, b1.value); });
   b2.addEventListener('change', () => { ls.set(K.p2, b2.value); });
+  const learn = $('aiLearn');
+  if (learn) {
+    learn.checked = defaultLearningOn();
+    learn.addEventListener('change', () => setDefaultLearningOn(learn.checked));
+  }
+  const resetMem = $('aiResetMem');
+  if (resetMem) {
+    resetMem.addEventListener('click', () => {
+      if (!confirm('Clear all AI fight notes stored in this browser?')) return;
+      clearMemory();
+      if (testOut) testOut.textContent = 'AI memory cleared.';
+    });
+  }
   for (const el of [base, model, key]) el.addEventListener('keydown', (e) => e.stopPropagation());
   if (testBtn) {
     testBtn.addEventListener('click', async () => {

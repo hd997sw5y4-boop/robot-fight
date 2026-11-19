@@ -14,8 +14,9 @@ import { applyChrome, setChromeLow } from './chrome.js';
 import { initJointLimits, applyJointLimits } from './joints.js';
 import { setWiresLow } from './wires.js';
 import { createApiBrain, wantsApiBrain, initApiBrainUI, fighterApiCfg, apiLabel, apiStatsSnapshot } from './api-brain.js';
+import { memoryKey, isLearningOn, promptNotes, rememberApiFights } from './api-learn.js';
 import { getSettings, isSettingsOpen, initSettings, updateFps, lastFps, cycleCameraMode, setCameraMode } from './settings.js';
-import { startFight as logStartFight, endFight as logEndFight, logFps, logGlitch, logStrike, logRound, logCpuIdle, stepFightQuality, logFall, logGetUp, logAnimSwitch, logInputPress, logInputAction, noteFrameWork, wallDist, setFightApiStats } from './fight-log.js';
+import { startFight as logStartFight, endFight as logEndFight, logFps, logGlitch, logStrike, logRound, logCpuIdle, stepFightQuality, logFall, logGetUp, logAnimSwitch, logInputPress, logInputAction, noteFrameWork, wallDist, setFightApiStats, setFightLearning } from './fight-log.js';
 import { broadcastMain, initBroadcast, updateBroadcast, xrPresenting } from './arena/broadcast.js';
 import { unlockAudio, playSfx, playHit, setBuzz, startCrowd } from './audio.js';
 import { announce, announceIntroSeconds } from './announcer.js';
@@ -2539,7 +2540,10 @@ function hookFightLogShell() {
     return lab;
   };
   S.on('roundBegin', (n) => {
-    if (n === 1) logStartFight({ p1, p2, mode: (S.state && S.state.mode) || 'fight', labels: labelsFor() });
+    if (n === 1) {
+      logStartFight({ p1, p2, mode: (S.state && S.state.mode) || 'fight', labels: labelsFor() });
+      setFightLearning(learningForSides());
+    }
   });
   S.on('roundEnd', (r) => logRound(r));
   S.on('matchEnd', (w) => {
@@ -2549,8 +2553,23 @@ function hookFightLogShell() {
     const apiStats = {};
     if (p1 && p1.brain && p1.brain.kind === 'api') apiStats.p1 = apiStatsSnapshot(p1.brain);
     if (p2 && p2.brain && p2.brain.kind === 'api') apiStats.p2 = apiStatsSnapshot(p2.brain);
-    logEndFight({ winner: w == null ? 'draw' : (w === 0 ? 'p1' : 'p2'), method, p1, p2, labels: labelsFor(), apiStats: Object.keys(apiStats).length ? apiStats : null });
+    const done = logEndFight({ winner: w == null ? 'draw' : (w === 0 ? 'p1' : 'p2'), method, p1, p2, labels: labelsFor(), apiStats: Object.keys(apiStats).length ? apiStats : null });
+    rememberApiFights(done, p1, p2);
   });
+}
+
+function learningForSides() {
+  const one = (f, fallback) => {
+    if (!f) return null;
+    const api = wantsApiBrain(f.id, f) || (f.brain && f.brain.kind === 'api') || (f.config && f.config.apiBrain);
+    if (!api) return null;
+    const c = fighterApiCfg(f);
+    const name = (f.config && f.config.name) || f.id || fallback;
+    const memKey = memoryKey(name, c.provider, c.model);
+    const on = isLearningOn(memKey);
+    return { on, memKey, note: on ? promptNotes(memKey) : '' };
+  };
+  return { p1: one(p1, 'P1'), p2: one(p2, 'P2') };
 }
 
 function isPoppyClip(clip) {

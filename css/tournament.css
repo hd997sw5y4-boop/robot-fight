@@ -72,3 +72,12 @@
 .rft-bar2 { position: absolute; left: 16px; bottom: 16px; display: flex; gap: 8px; pointer-events: auto; }
 .rft-bar2 button { pointer-events: auto; }
 body.rfs-menu .rft-hud, body.rfs-dimmed .rft-hud { display: none; }
+
+.rft-learn {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+}
+.rft-learn input { width: auto; }

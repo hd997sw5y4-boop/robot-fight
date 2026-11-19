@@ -3,6 +3,7 @@ import {
   testApiKey, AI_PROVIDERS, corsNote, saveEntrantKey, loadEntrantKey, clearEntrantKey,
   onApiDecision, apiStatsSnapshot,
 } from '../api-brain.js';
+import { memoryKey, isLearningOn, setLearningOn, clearMemory } from '../api-learn.js';
 
 const STORE = 'rf_ai_tourney_v1';
 const ELO0 = 1500;
@@ -27,16 +28,17 @@ function loadSetup() {
         provider: AI_PROVIDERS[e.provider] ? e.provider : 'xai',
         base: e.base || '',
         model: e.model || '',
+        learn: e.learn !== false,
       }));
     }
   } catch (_) {}
   return [
-    { id: uid(), name: 'Grok', color: PRESET_COLORS[0], provider: 'xai', base: '', model: '' },
-    { id: uid(), name: 'GPT', color: PRESET_COLORS[1], provider: 'openai', base: '', model: '' },
+    { id: uid(), name: 'Grok', color: PRESET_COLORS[0], provider: 'xai', base: '', model: '', learn: true },
+    { id: uid(), name: 'GPT', color: PRESET_COLORS[1], provider: 'openai', base: '', model: '', learn: true },
   ];
 }
 function saveSetup(list) {
-  const entrants = list.map((e) => ({ id: e.id, name: e.name, color: e.color, provider: e.provider, base: e.base || '', model: e.model || '' }));
+  const entrants = list.map((e) => ({ id: e.id, name: e.name, color: e.color, provider: e.provider, base: e.base || '', model: e.model || '', learn: e.learn !== false }));
   lsSet(STORE, JSON.stringify({ entrants }));
 }
 
@@ -114,6 +116,7 @@ function boot() {
         <div class="rft-grid">${entrants.map((e, i) => cardHtml(e, i)).join('')}</div>
         <div class="rft-actions">
           <button type="button" class="rfs-f rfs-btn rfs-small" data-rft="add" ${canAdd ? '' : 'disabled'}><b>Add entrant</b></button>
+          <button type="button" class="rfs-f rfs-btn rfs-small" data-rft="resetmem"><b>Reset AI memory</b></button>
           <button type="button" class="rfs-f rfs-btn rfs-small" data-rft="back"><b>Back</b></button>
           <button type="button" class="rfs-f rfs-btn rfs-go" data-rft="start" data-autofocus ${canStart ? '' : 'disabled'}><b>Start tournament</b></button>
         </div>
@@ -122,6 +125,12 @@ function boot() {
     setupEl.querySelectorAll('[data-rft="add"]').forEach((b) => { b.onclick = addEntrant; });
     setupEl.querySelectorAll('[data-rft="back"]').forEach((b) => { b.onclick = () => S.showScreen('main'); });
     setupEl.querySelectorAll('[data-rft="start"]').forEach((b) => { b.onclick = startTourney; });
+    setupEl.querySelectorAll('[data-rft="resetmem"]').forEach((b) => {
+      b.onclick = () => {
+        if (!confirm('Clear all AI fight notes stored in this browser?')) return;
+        clearMemory();
+      };
+    });
     setupEl.querySelectorAll('[data-eid]').forEach(bindCard);
   }
 
@@ -143,6 +152,7 @@ function boot() {
         <button type="button" class="rfs-f rfs-btn rfs-small" data-rft="test">Test key</button>
         <button type="button" class="rfs-f rfs-btn rfs-small" data-rft="clearkey">Clear key</button>
       </div>
+      <label class="rft-learn"><input type="checkbox" data-f="learn" ${e.learn !== false ? 'checked' : ''}> Learn from fights</label>
       <p class="rft-status" data-rft="status">${hasKey ? 'Key saved in this browser only.' : 'No key saved.'}</p>
     </article>`;
   }
@@ -159,6 +169,13 @@ function boot() {
         if (f === 'key') {
           const v = el.value.trim();
           if (v && v !== '••••••••') saveEntrantKey(id, v);
+          return;
+        }
+        if (f === 'learn') {
+          e.learn = !!el.checked;
+          const r = resolved(e);
+          setLearningOn(memoryKey(e.name, e.provider, r.model), e.learn);
+          saveSetup(entrants);
           return;
         }
         e[f] = el.value;
@@ -203,13 +220,17 @@ function boot() {
   function addEntrant() {
     if (entrants.length >= 8) return;
     const n = entrants.length + 1;
-    entrants.push({ id: uid(), name: 'Entrant ' + n, color: PRESET_COLORS[n % PRESET_COLORS.length], provider: 'xai', base: '', model: '' });
+    entrants.push({ id: uid(), name: 'Entrant ' + n, color: PRESET_COLORS[n % PRESET_COLORS.length], provider: 'xai', base: '', model: '', learn: true });
     saveSetup(entrants);
     paintSetup();
   }
 
   function startTourney() {
     saveSetup(entrants);
+    for (const e of entrants) {
+      const r = resolved(e);
+      setLearningOn(memoryKey(e.name, e.provider, r.model), e.learn !== false);
+    }
     const ready = entrants.map(resolved);
     const missing = ready.filter((e) => !e.key || !e.base || !e.model);
     if (missing.length) {

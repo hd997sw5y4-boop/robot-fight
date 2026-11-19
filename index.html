@@ -207,8 +207,10 @@
         <label>P2 brain
           <select id="aiBrainP2"><option value="cpu">CPU</option><option value="api">API</option></select>
         </label>
+        <label>Learn from fights <input type="checkbox" id="aiLearn" checked></label>
+        <button type="button" id="aiResetMem">Reset AI memory</button>
         <p class="hint" id="aiNote"></p>
-        <p class="hint">The key stays in this browser (localStorage) and is sent only to the endpoint above. About two requests a second per API robot; on any error or slow reply the built-in CPU brain takes over.</p>
+        <p class="hint">The key stays in this browser (localStorage) and is sent only to the endpoint above. About two requests a second per API robot; on a timeout, error or invalid reply the last valid action is kept, and a rejected key holds guard. When Learn from fights is on, a short note from recent API fights is sent with the prompt so that robot can improve.</p>
       </section>
       <section class="mcat">
         <h3>Controls</h3>

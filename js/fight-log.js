@@ -202,6 +202,7 @@ export function startFight({ p1, p2, mode, labels } = {}) {
     cpuFlags: [],
     rounds: [],
     apiStats: null,
+    learning: null,
     winner: null,
     method: null,
     endedAt: null,
@@ -331,6 +332,10 @@ export function logRound(round) {
 
 export function setFightApiStats(stats) {
   if (current) current.apiStats = sanitizeLog(stats);
+}
+
+export function setFightLearning(data) {
+  if (current) current.learning = sanitizeLog(data);
 }
 
 function r2(v) { return v == null || !Number.isFinite(+v) ? 0 : +(+v).toFixed(2); }
@@ -495,6 +500,10 @@ function buildSummary(fight) {
     inputLatencyMs: avgLag,
     cpuStuck: (fight.cpuFlags || []).filter((f) => f.kind === 'cpuStuck').length,
     api: fight.apiStats || undefined,
+    learning: fight.learning ? {
+      p1: fight.learning.p1 ? { on: !!fight.learning.p1.on, note: fight.learning.p1.note || '' } : null,
+      p2: fight.learning.p2 ? { on: !!fight.learning.p2.on, note: fight.learning.p2.note || '' } : null,
+    } : undefined,
   };
 }
 
@@ -568,5 +577,5 @@ export function clearLog() {
 }
 
 if (typeof window !== 'undefined') {
-  window.RFFightLog = { startFight, endFight, logFps, logGlitch, logStrike, logRound, getLog, downloadLog, copyLog, clearLog, sanitizeLog, noteFrameWork };
+  window.RFFightLog = { startFight, endFight, logFps, logGlitch, logStrike, logRound, getLog, downloadLog, copyLog, clearLog, sanitizeLog, noteFrameWork, setFightLearning };
 }
