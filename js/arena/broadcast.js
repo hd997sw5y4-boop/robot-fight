@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { SIZE, ARENA } from '../config.js';
 import { isSettingsOpen } from '../settings.js';
+import { snapshotWires, applyWires, restoreWires } from '../wires.js';
 
 const CFG = {
   recordHz: 30,
@@ -102,6 +103,7 @@ const rec = {
     const cap = this.tracks[0].cap;
     this.times = new Float64Array(cap);
     this.debris = new Array(cap).fill(null);
+    this.wires = new Array(cap).fill(null);
     this.head = 0;
     this.count = 0;
   },
@@ -116,9 +118,12 @@ const rec = {
       if (this.baseline.has(o) || o.isLight || !o.visible || list.length >= 48 * 8) continue;
       if (o.name === 'stadiumArena' || o.name === 'crowdWatchRig' || this.tracks.some((t) => t.f.root === o)) continue;
       if (!(o.isGroup || o.isMesh) || o.isInstancedMesh) continue;
+      if (o.userData && o.userData.wire) continue;
+      if (o.name === 'stumpWire') continue;
       list.push(o, o.position.x, o.position.y, o.position.z, o.quaternion.x, o.quaternion.y, o.quaternion.z, o.quaternion.w);
     }
     this.debris[slot] = list;
+    this.wires[slot] = snapshotWires();
     this.head = (slot + 1) % cap;
     this.count = Math.min(cap, this.count + 1);
   },
@@ -434,7 +439,7 @@ function captureClips() {
     });
     const clip = {
       type: p.type, victim: p.victim, score: p.score, at: p.at,
-      times: idx.map((s) => rec.times[s]), debris: idx.map((s) => rec.debris[s] || []), tracks,
+      times: idx.map((s) => rec.times[s]), debris: idx.map((s) => rec.debris[s] || []), wires: idx.map((s) => rec.wires[s] || []), tracks,
     };
     // One clip per moment; a KO supersedes the hit that caused it (same instant).
     let dup = false;
@@ -456,6 +461,18 @@ export function clearMoments() { moments.length = 0; pendingClips.length = 0; }
 export function setFeedHold(on) { feedHold = !!on; }
 /** Flush pending captures now (used when the match ends before a clip's aftermath elapsed). */
 export function flushMoments() { for (const p of pendingClips) p.captureAt = Math.min(p.captureAt, now); captureClips(); }
+
+
+function keepDuringReplay(o) {
+  if (!o) return true;
+  if (o.isLight) return true;
+  if (rec.baseline && rec.baseline.has(o)) return true;
+  const n = o.name || '';
+  if (/arena|octagon|cage|mat|floor|fence|platform|void|spot|light|reflection|rim/i.test(n)) return true;
+  if (o.userData && o.userData.wire) return true;
+  if (n === 'stumpWire') return true;
+  return false;
+}
 
 const clipSaved = { active: false, hidden: [], debris: new Map() };
 /** Pose the fighters (and torn-off parts) as they were at clip time t (seconds from clip start).
@@ -482,12 +499,15 @@ export function applyClipPose(clip, t) {
   }
   clipSaved.hidden.length = 0;
   for (const o of ctx.scene.children) {
-    if (rec.baseline && rec.baseline.has(o)) continue;
-    if (known.has(o) || o.isLight || !o.visible || !(o.isGroup || o.isMesh) || o.isInstancedMesh) continue;
-    if (o.name === 'stadiumArena' || o.name === 'crowdWatchRig' || clip.tracks.some((x) => x.tr.f.root === o)) continue;
+    if (keepDuringReplay(o) || known.has(o) || !o.visible) continue;
+    if (!(o.isGroup || o.isMesh) || o.isInstancedMesh) continue;
+    if (clip.tracks.some((x) => x.tr.f.root === o)) continue;
     o.visible = false;
     clipSaved.hidden.push(o);
   }
+  const wa = (clip.wires && clip.wires[a]) || [];
+  const wb = (clip.wires && clip.wires[b]) || wa;
+  applyWires(wa, wb, k);
   clipSaved.active = true;
   const r = clip.tracks.map(({ tr }) => tr.f.root.position.clone());
   return r;
@@ -497,6 +517,7 @@ export function restoreClipPose(clip) {
   if (!clipSaved.active) return;
   for (const { tr } of clip.tracks) tr.restore();
   for (const [o, [p, q]] of clipSaved.debris) { o.position.copy(p); o.quaternion.copy(q); }
+  restoreWires();
   for (const o of clipSaved.hidden) o.visible = true;
   clipSaved.debris.clear();
   clipSaved.hidden.length = 0;

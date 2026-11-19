@@ -119,14 +119,8 @@
     }
     return st;
   }
-  // Menu backdrop: a fresh, timer-less fight where both robots just idle (inputs are held at zero).
-  S.toMenuState = (paintA, paintB) => {
-    if (!S.fight || !S.api) return;
-    S.fight.startFight({ p1: { name: 'BLUE' }, p2: { name: 'RED' }, round: 1, roundTime: 0, skipIntro: true });
-    const [a, b] = S.fighters();
-    if (paintA) S.paint(a, paintA.primary, paintA.accent);
-    if (paintB) S.paint(b, paintB.primary, paintB.accent);
-  };
+  // Menu backdrop: the empty cage with a slow orbit. Robots spawn only when a fight starts.
+  S.toMenuState = () => {};
 
   /* ---------- match flow ---------- */
   S.startMatch = (cfg) => {

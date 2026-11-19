@@ -590,9 +590,12 @@
     if (!ORBIT_SCREENS.includes(S.state.screen) || S.match.cfg || !api.camera || !api.match) return;
     api.match.camLock = true;
     orbitA += raw * 0.07;
-    const r = 5.3; // inside the ring so posts and rails never block the robots
-    api.camera.position.set(Math.sin(orbitA) * r, 2.2 + Math.sin(orbitA * 0.7) * 0.2, Math.cos(orbitA) * r);
-    api.camera.lookAt(0, 1.15, 0);
+    // Slow high orbit of the empty cage (robots are not in the scene on the menu).
+    const mt = (api.ARENA && api.ARENA.matTop) || 0.9;
+    const r = 10.4;
+    const y = mt + 5.4 + Math.sin(orbitA * 0.7) * 0.28;
+    api.camera.position.set(Math.sin(orbitA) * r, y, Math.cos(orbitA) * r);
+    api.camera.lookAt(0, mt + 1.35, 0);
   });
   // Leaving the orbit screens hands the camera back to the game.
   const baseShow = S.showScreen;

@@ -9,7 +9,9 @@ import * as THREE from 'three';
 const D = Math.PI / 180;
 // Hinges: the bend axis is measured from the fighting idle (knees and elbows are bent there).
 const HINGES = {
-  LeftLeg: { min: -10, max: 150, side: 25 }, RightLeg: { min: -10, max: 150, side: 25 },
+  // Knees cannot hyperextend: axis is calibrated from idle in the flex direction, so 0 is
+  // straight and negative would be backward. Elbows keep a little play.
+  LeftLeg: { min: 0, max: 140, side: 18 }, RightLeg: { min: 0, max: 140, side: 18 },
   LeftForeArm: { min: -10, max: 150, side: 30 }, RightForeArm: { min: -10, max: 150, side: 30 },
 };
 // Twist about the bone's own axis (+Y in a Mixamo rig) and total swing.
@@ -64,21 +66,11 @@ function twistQ(a, ang) { return _t.setFromAxisAngle(a, ang); }
 
 export function applyJointLimits(f) {
   if (!f.joints) return;
-  const standing = f.state === 'idle' || f.state === 'walk' || f.state === 'block';
   for (const j of f.joints) {
     const b = j.bone;
     _r.copy(j.rest).invert().multiply(b.quaternion);
     if (j.kind === 'hinge') {
-      if (!j.axis) {
-        // Calibrate only from a standing pose. Measuring mid-punch or mid-knockdown
-        // locked a bad hinge axis and then fought every later clip, including idle.
-        if (!standing) continue;
-        const r = _rCal.copy(_r);
-        if (r.w < 0) r.set(-r.x, -r.y, -r.z, -r.w);
-        const ang = 2 * Math.acos(Math.min(1, r.w));
-        if (ang < 20 * D || ang > 90 * D) continue;
-        j.axis = new THREE.Vector3(r.x, r.y, r.z).normalize();
-      }
+      if (!j.axis) continue; // Axis is set once from bind→idle at load.
       const th = decompose(_r, j.axis);
       let changed = clampSwing(j.lim.side);
       const lo = j.lim.min * D;
@@ -105,5 +97,21 @@ export function applyJointLimits(f) {
     }
     b.quaternion.copy(j.rest).multiply(_r);
     f.jointStats.clamped++;
+  }
+}
+
+// Measure each hinge axis from the current pose (FightingIdle, already applied by the
+// caller) relative to the bind rest stored in initJointLimits. Call once at load so
+// knockdowns and other non-standing poses are limited from the first frame.
+export function calibrateHingeAxes(f) {
+  if (!f || !f.joints) return;
+  for (const j of f.joints) {
+    if (j.kind !== 'hinge' || j.axis) continue;
+    _r.copy(j.rest).invert().multiply(j.bone.quaternion);
+    const r = _rCal.copy(_r);
+    if (r.w < 0) r.set(-r.x, -r.y, -r.z, -r.w);
+    const ang = 2 * Math.acos(Math.min(1, r.w));
+    if (ang < 12 * D || ang > 120 * D) continue;
+    j.axis = new THREE.Vector3(r.x, r.y, r.z).normalize();
   }
 }

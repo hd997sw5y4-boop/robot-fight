@@ -130,6 +130,37 @@
       <footer><i class="fp-tbar"><i></i></i><span><kbd>Enter</kbd> or click to skip</span></footer>
     </div>`;
   }
+  // Head / upper-chest world point for a hero bust shot. Never uses a fraction of height
+  // as a world Y (that framed the legs once SIZE/matTop grew past the old 1.8 m fallback).
+  function aimPoint(f) {
+    const THREE = S.api && S.api.THREE;
+    if (!f || !f.root || !THREE) return null;
+    const v = new THREE.Vector3();
+    let head = null, chest = null, bboxTop = null;
+    f.root.updateMatrixWorld(true);
+    f.root.traverse((o) => {
+      if (!o.isBone) return;
+      const k = String(o.name || '');
+      o.getWorldPosition(v);
+      if (/HeadTop_End/i.test(k) || /(^|[:._])Head$/.test(k)) {
+        if (!head || /HeadTop_End/i.test(k)) head = v.clone();
+      } else if (/Spine2|Neck/i.test(k)) {
+        if (!chest) chest = v.clone();
+      }
+    });
+    try {
+      const box = new THREE.Box3().setFromObject(f.model || f.root);
+      if (box.max.y > box.min.y) {
+        bboxTop = new THREE.Vector3(
+          (box.min.x + box.max.x) * 0.5,
+          box.min.y + (box.max.y - box.min.y) * 0.84,
+          (box.min.z + box.max.z) * 0.5,
+        );
+      }
+    } catch (_) { /* ignore */ }
+    if (head && chest) return head.clone().lerp(chest, 0.28);
+    return head || chest || bboxTop || f.root.position.clone().setY(f.root.position.y + 2.0);
+  }
   function camShots() {
     const api = S.api;
     const [a, b] = S.fighters();
@@ -144,18 +175,23 @@
     const n = new V(-d.z, 0, d.x);
     const toCam = api.camera.position.clone().sub(mid).setY(0);
     if (toCam.dot(n) < 0) n.negate();
-    // Framed on the robot's measured height (falls back to the game's 1.8 m reference).
-    const h = heightOf(a) || 1.8;
-    const close = (p, toward) => ({
-      from: p.clone().addScaledVector(toward, 1.15 * h).addScaledVector(n, 0.7 * h).setY(0.78 * h),
-      to: p.clone().addScaledVector(toward, 1.0 * h).addScaledVector(n, 1.05 * h).setY(0.72 * h),
-      look: p.clone().setY(0.62 * h),
+    const lookA = aimPoint(a);
+    const lookB = aimPoint(b);
+    const close = (look, toward) => ({
+      from: look.clone().addScaledVector(toward, 1.15).addScaledVector(n, 2.35).setY(look.y + 0.06),
+      to: look.clone().addScaledVector(toward, 0.95).addScaledVector(n, 2.6).setY(look.y + 0.04),
+      look: look.clone(),
     });
-    const wide = Math.max(2.1 * h, pa.distanceTo(pb) * 1.4);
+    const lookWide = lookA.clone().add(lookB).multiplyScalar(0.5);
+    const wide = Math.max(7.4, pa.distanceTo(pb) * 1.55);
     return [
-      { t0: 0, t1: 1.7, ...close(pa, d) },
-      { t0: 1.7, t1: 3.4, ...close(pb, d.clone().negate()) },
-      { t0: 3.4, t1: TAPE_SECS, from: mid.clone().addScaledVector(n, wide * 1.15).setY(0.95 * h), to: mid.clone().addScaledVector(n, wide).setY(0.8 * h), look: mid.clone().setY(0.5 * h) },
+      { t0: 0, t1: 1.7, ...close(lookA, d) },
+      { t0: 1.7, t1: 3.25, ...close(lookB, d.clone().negate()) },
+      { t0: 3.25, t1: TAPE_SECS,
+        from: lookWide.clone().addScaledVector(n, wide * 1.08).setY(lookWide.y + 1.15),
+        to: lookWide.clone().addScaledVector(n, wide).setY(lookWide.y + 0.85),
+        look: lookWide.clone(),
+      },
     ];
   }
   const ease = (x) => 1 - Math.pow(1 - Math.max(0, Math.min(1, x)), 3);
@@ -168,7 +204,7 @@
     const pos = shot.from.clone().lerp(shot.to, k);
     const cam = api.camera;
     if (!tape.look) { cam.position.copy(pos); tape.look = shot.look.clone(); } // first frame: cut in
-    const a = dt > 0 ? 1 - Math.pow(0.0005, dt) : 0; // then glide between shots
+    const a = dt > 0 ? 1 - Math.pow(0.00008, dt) : 0; // ease between hero shots and into the two-shot
     cam.position.lerp(pos, a);
     tape.look.lerp(shot.look, a);
     cam.lookAt(tape.look);

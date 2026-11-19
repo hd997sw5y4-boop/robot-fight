@@ -253,7 +253,7 @@ function emptyQuality() {
     yawSnap: 0, visPop: 0, matPop: 0, shadowFlick: 0, boneJump: 0,
     spike: 0, noFade: 0, weight0: 0, footSlide: 0, camSnap: 0, camClip: 0,
     outOfCage: 0, throughCage: 0, belowMat: 0, wallStuck: 0, bodyDrift: 0,
-    debrisOut: 0, debrisUnder: 0, fall: 0, getup: 0,
+    debrisOut: 0, debrisUnder: 0, fall: 0, getup: 0, bellBlock: 0,
   };
 }
 
@@ -610,6 +610,11 @@ export function abandonFight(ended) {
   if (!current) return null;
   if (!current.method) current.method = ended || 'quit';
   return commitOpenFight(ended || 'quit');
+}
+
+export function logBellBlock(side, action) {
+  if (!current) return;
+  qpush('bellBlock', { id: side, action: String(action || '').slice(0, 24) });
 }
 
 export function logHeldRepeat(side, info) {

@@ -8,6 +8,8 @@ export const WORLD_SCALE = 1.10;
 export const CAM_SIZE = 1.12;
 // Robot size: every robot-relative distance (reach, spacing, capsules, wires) scales by this.
 export const SIZE = 1.12 * WORLD_SCALE;
+// Root padding that keeps a fighter capsule inside the cage (chest sphere is 0.48*SIZE).
+export const CAGE_PAD = 0.48 * SIZE + 0.14;
 
 export const MODEL = {
   url: './models/RobotFighter.glb',

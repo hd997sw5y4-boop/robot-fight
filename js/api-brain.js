@@ -35,6 +35,8 @@ export const SYSTEM = 'You control one heavy humanoid robot in a 3D fighting gam
   + AI_TARGETS.join(', ') + '>"} and nothing else. inRange.punch / inRange.kick are true when that strike can land now. '
   + 'legal is the only set of actions that work at this distance — do not pick approach when it is omitted. '
   + 'If the message says you are IN RANGE, attack, block or reposition; do not close the gap. '
+  + 'If it says you are TOO CLOSE, retreat or circle is available — it is your choice, not a requirement. '
+  + 'If you are AT THE CAGE, escape lists the directions that leave the wall; retreat peels along or off the fence, it does not walk through it. '
   + 'ground only works when opp.groundable is true; flip_front and jump_kick need self.canFlip.';
 
 const K = {
@@ -155,12 +157,20 @@ function compact(s) {
     canPunch: x.canPunch, canKick: x.canKick, groundable: x.groundable, canFlip: x.canFlip, heavy: x.heavy,
   });
   const info = rangeInfo(s);
+  const self = side(s.self) || {};
+  if (s.self) {
+    self.atWall = !!s.self.atWall;
+    self.edge = r2(s.self.edge || 0);
+  }
   return {
     dist: info.dist,
     strikeRange: info.strikeRange,
     inRange: info.inRange,
+    tooClose: !!s.tooClose,
+    atWall: !!(s.self && s.self.atWall),
+    escape: s.escape || null,
     legal: info.legal,
-    self: side(s.self),
+    self,
     opp: side(s.opp),
   };
 }
@@ -178,6 +188,12 @@ function userPrompt(state, snap, recent) {
     lines.push('You are IN RANGE (' + bits + '): attack, block or reposition.');
   } else {
     lines.push('You are out of range. Close the gap before you strike.');
+  }
+  if (snap && snap.tooClose) lines.push('You are TOO CLOSE: retreat and circle are available if you want space.');
+  if (snap && snap.self && snap.self.atWall) {
+    const esc = snap.escape || {};
+    const dirs = ['offWall', 'retreat', 'circle_left', 'circle_right'].filter((k) => esc[k]);
+    lines.push('You are AT THE CAGE. You can step off toward the center and circle along the wall. Escape: ' + (dirs.join(', ') || 'offWall') + '.');
   }
   lines.push('Allowed actions: ' + info.legal.join(', ') + '.');
   if (recent && recent.length) lines.push('Your last actions: ' + recent.join('; ') + '.');
@@ -349,7 +365,7 @@ export async function requestCompletion(cfg, opts = {}) {
   }
   const timeout = opts.timeout || AI_BUDGET.timeout;
   const ctl = opts.signal || new AbortController();
-  const timer = opts.signal ? null : setTimeout(() => ctl.abort(), timeout);
+  const timer = setTimeout(() => { try { ctl.abort(); } catch (_) {} }, timeout);
   const t0 = performance.now();
   const messages = opts.messages || [{ role: 'user', content: opts.prompt || 'Reply with OK.' }];
   const effort = opts.effort !== undefined ? opts.effort : effortFor({ ...r, provider: r.provider });
@@ -455,7 +471,7 @@ function guardIntent() {
 }
 
 export function createApiBrain(id, getCfg) {
-  const st = { action: null, plan: '', target: '', at: 0, used: false, inflight: false, lastReq: 0, backoff: 0, lastKind: '', cfg: null, keyRejected: false, holding: false, recent: [] };
+  const st = { action: null, plan: '', target: '', at: 0, used: false, inflight: false, lastReq: 0, backoff: 0, lastKind: '', cfg: null, keyRejected: false, holding: false, recent: [], frozen: false, gen: 0, ctl: null };
   const stats = emptyStats();
   const INTERVAL = AI_BUDGET.interval;
   const MAX_CALLS = AI_BUDGET.maxCalls;
@@ -466,10 +482,13 @@ export function createApiBrain(id, getCfg) {
   }
 
   async function ask(snap) {
+    if (st.frozen) return;
     const c = cfgNow();
     st.cfg = { provider: c.provider, base: c.base, model: c.model };
     st.inflight = true;
     st.lastReq = performance.now();
+    st.ctl = new AbortController();
+    const gen = st.gen;
     stats.calls += 1;
     const state = compact(snap);
     const rec = { t: new Date().toISOString(), robot: id, provider: c.provider, model: c.model, state, reply: null, action: null, plan: null, target: null, latencyMs: 0, error: null, kind: null };
@@ -478,7 +497,9 @@ export function createApiBrain(id, getCfg) {
     const sys = notes ? (SYSTEM + '\n\nYour notes from past fights: ' + notes) : SYSTEM;
     const out = await requestCompletion(c, {
       messages: [{ role: 'system', content: sys }, { role: 'user', content: userPrompt(state, snap, st.recent) }],
+      signal: st.ctl,
     });
+    if (gen !== st.gen || st.frozen) { st.inflight = false; st.ctl = null; return; }
     rec.latencyMs = out.latency || 0;
     rec.kind = out.ok ? 'ok' : out.kind;
     if (out.ok) {
@@ -563,9 +584,26 @@ export function createApiBrain(id, getCfg) {
     emitDecision(ev);
   }
 
+  function freeze() {
+    st.frozen = true;
+    st.gen += 1;
+    st.action = null;
+    st.used = false;
+    st.holding = false;
+    st.inflight = false;
+    if (st.ctl) { try { st.ctl.abort(); } catch (_) {} st.ctl = null; }
+  }
+  function thaw() {
+    st.frozen = false;
+    st.action = null;
+    st.used = false;
+    st.holding = false;
+  }
+
   function think(snap) {
     const now = performance.now();
     const dtMs = (snap.dt || 0) * 1000;
+    if (st.frozen) return actionIntent('wait');
     if (st.keyRejected) return guardIntent();
     const c = cfgNow();
     const canCall = !!(c && c.key && c.base && c.model);
@@ -597,7 +635,7 @@ export function createApiBrain(id, getCfg) {
     return guardIntent();
   }
 
-  return { kind: 'api', think, state: st, stats: st, apiStats: stats };
+  return { kind: 'api', think, freeze, thaw, state: st, stats: st, apiStats: stats };
 }
 
 /* ---------- settings section ---------- */

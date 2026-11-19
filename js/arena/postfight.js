@@ -110,6 +110,7 @@ function startReplays() {
   if (!st.clips.length) { finish(); return; }
   st.phase = 'replay';
   setFeedHold(true);
+  if (ctx.setReplayPresentation) ctx.setReplayPresentation(true);
   nextClip();
   ui.el.classList.add('on');
 }
@@ -119,6 +120,7 @@ function nextClip() {
   if (st.idx >= st.clips.length) { finish(); return; }
   const c = st.clips[st.idx];
   st.t = 0;
+  st._repOrigin = wall();
   st.len = c.times[c.times.length - 1] - c.times[0];
   // A different angle every clip (and never the same twice in a row).
   const name = SHOT_ORDER[(st.idx + (st.clips.length > 1 ? 0 : 1)) % SHOT_ORDER.length];
@@ -135,6 +137,7 @@ function finish() {
   if (st.posed) { restoreClipPose(st.posed); st.posed = null; }
   ui.el.classList.remove('on');
   setFeedHold(false);
+  if (ctx && ctx.setReplayPresentation) ctx.setReplayPresentation(false);
   // Back to the orbit, blending from the replay camera.
   if (st.cam.on) restartBlend(1.2);
   const r = st.release;
@@ -147,6 +150,7 @@ function abort() {
   if (st.posed) { restoreClipPose(st.posed); st.posed = null; }
   ui.el.classList.remove('on');
   setFeedHold(false);
+  if (ctx && ctx.setReplayPresentation) ctx.setReplayPresentation(false);
   st.release = null;
   st.phase = 'idle';
 }
@@ -223,8 +227,13 @@ export function updatePostfight() {
   }
 
   if (st.phase === 'replay') {
-    // Cap the replay clock so a hitch can't skip a large chunk of the clip (stutter / jump).
-    st.t += Math.min(pdt, 1 / 30) * CFG.slowMo;
+    // Wall-clock 0.5x: clip time is elapsed wall time * slowMo, so a hitch does not change rate.
+    // Paused time is excluded by freezing the origin.
+    if (pdt === 0) st._repOrigin = (st._repOrigin || t) + dt;
+    else {
+      if (st._repOrigin == null) st._repOrigin = t;
+      st.t = Math.max(0, (t - st._repOrigin) * CFG.slowMo);
+    }
     if (st.t >= st.len) nextClip();
   }
   if (st.phase === 'replay') {
@@ -241,14 +250,18 @@ export function updatePostfight() {
     if (st._repIdx !== st.idx) {
       st._repIdx = st.idx;
       st._repBlend = 0;
-      if (!st._repP) { st._repP = cam.position.clone(); st._repL = f.look.clone(); }
+      st._repP = cam.position.clone();
+      st._repL = f.look.clone();
+      if (st._repLook) st._repL.copy(st._repLook);
     }
-    st._repBlend = Math.min(1, (st._repBlend || 0) + Math.max(dt, 1 / 120) / 0.22);
+    // One angle per clip: ease into it, then hold (the shot itself may drift slowly).
+    st._repBlend = Math.min(1, (st._repBlend || 0) + Math.max(dt, 0) / 0.7);
     const k = st._repBlend * st._repBlend * (3 - 2 * st._repBlend);
     if (!st._repP) st._repP = cam.position.clone();
     if (!st._repL) st._repL = f.look.clone();
     st._repP.lerp(f.pos, k);
     st._repL.lerp(f.look, k);
+    st._repLook = st._repL.clone();
     cam.position.copy(st._repP);
     cam.lookAt(st._repL);
     if (Math.abs(cam.fov - f.fov) > 0.01) {

@@ -3,7 +3,7 @@
    (see game.js knockDown / ko); there is no ragdoll. */
 import * as CANNON from 'cannon-es';
 import * as THREE from 'three';
-import { ARENA, SIZE, WORLD_SCALE } from './config.js';
+import { ARENA, SIZE, WORLD_SCALE, CAGE_PAD } from './config.js';
 
 const G = { ARENA: 1, FIGHTER: 2, DEBRIS: 8, DOWN: 16 };
 
@@ -127,6 +127,13 @@ export function attachFighter(f) {
   });
 }
 
+export function detachFighter(f) {
+  if (!f || !f.phys || !f.phys.body) return;
+  try { world.removeBody(f.phys.body); } catch (_) {}
+  fighters.delete(f);
+  f.phys = null;
+}
+
 /** Down / KO / get-up / jump-ghost: still hit the cage and floor, but not the other robot. */
 export function setFighterDowned(f, downed) {
   const body = f && f.phys && f.phys.body;
@@ -141,7 +148,7 @@ export function setFighterDowned(f, downed) {
   body.collisionResponse = true;
 }
 
-export function clampBodyToCage(x, z, pad = 0.45) {
+export function clampBodyToCage(x, z, pad = CAGE_PAD) {
   const a = (ARENA.apothem || 6.1) - pad;
   let nx = Math.max(-a, Math.min(a, x));
   let nz = Math.max(-a, Math.min(a, z));
@@ -151,9 +158,41 @@ export function clampBodyToCage(x, z, pad = 0.45) {
   return [nx, nz];
 }
 
+function wallOutward(x, z) {
+  const a = ARENA.apothem || 6.1;
+  const ax = a - Math.abs(x);
+  const az = a - Math.abs(z);
+  const diag = a * Math.SQRT2 - (Math.abs(x) + Math.abs(z));
+  if (ax <= az && ax <= diag) return [x >= 0 ? 1 : -1, 0];
+  if (az <= diag) return [0, z >= 0 ? 1 : -1];
+  const nx = x >= 0 ? 1 : -1, nz = z >= 0 ? 1 : -1;
+  const len = Math.hypot(nx, nz) || 1;
+  return [nx / len, nz / len];
+}
+
+function wallDist(x, z) {
+  const a = ARENA.apothem || 6.1;
+  return Math.min(a - Math.abs(x), a - Math.abs(z), a * Math.SQRT2 - (Math.abs(x) + Math.abs(z)));
+}
+
+/** Strip velocity that would push a body into the cage so it can slide along or step off. */
+export function cageSlideVelocity(x, z, vx, vz, pad = CAGE_PAD) {
+  const w = wallDist(x, z);
+  if (w > pad + 0.2) return [vx, vz];
+  const [nx, nz] = wallOutward(x, z);
+  const outward = vx * nx + vz * nz;
+  if (outward <= 0) return [vx, vz];
+  const keep = w > 0.04 ? 0 : 1; // on the face, fully drop outward; slightly inside still drop
+  return [vx - nx * outward * (w <= pad ? 1 : keep), vz - nz * outward * (w <= pad ? 1 : keep)];
+}
+
 export function setFighterMove(f, vx, vz) {
   const body = f.phys && f.phys.body;
   if (!body) return;
+  const px = (f.root && f.root.position.x) || body.position.x;
+  const pz = (f.root && f.root.position.z) || body.position.z;
+  const slid = cageSlideVelocity(px, pz, vx, vz);
+  vx = slid[0]; vz = slid[1];
   body.velocity.x = vx;
   body.velocity.z = vz;
   // Keep the capsule standing on the mat.

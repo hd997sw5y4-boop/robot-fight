@@ -113,7 +113,7 @@ export function createPacedBrain(getProfile) {
     s.lastSelfState = self.state;
     if (wasAttacking && !nowAttacking && s.mode === 'strike') {
       s.combo -= 1;
-      if (s.combo <= 0 || self.state === 'hit') endCombo(prof, aggr, self);
+      if (s.combo <= 0 || self.state === 'hit' || snap.tooClose) endCombo(prof, aggr, self);
     }
 
     // Whiff / blocked-strike punish: the opponent's attack just ended within reach and we were
@@ -192,7 +192,7 @@ export function createPacedBrain(getProfile) {
     }
 
     // Pinned against the cage: slide out along it rather than backing further in.
-    const cornered = self.edge > 0.8;
+    const cornered = !!(self.atWall || self.edge > 0.8);
 
     switch (s.mode) {
       case 'read': {
@@ -283,6 +283,19 @@ export function createPacedBrain(getProfile) {
     }
     // Never walk into the other robot.
     if (dist < punchR - 0.3 && intent.move > 0) intent.move = 0;
+    // Natural back-off after a strike or when clinched — footwork, not a root shove.
+    // Against the cage, circle and step off toward the centre instead of backing into the wall.
+    const tooClose = !!(snap.tooClose || dist < punchR - 0.15);
+    const atWall = !!(self.atWall || cornered);
+    if (tooClose && !opp.down && !nowAttacking) {
+      if (atWall) {
+        if (!intent.strafe) intent.strafe = s.circleDir;
+        if (intent.move < 0) intent.move = 0.35; // step off the fence, not into it
+      } else {
+        intent.move = Math.min(intent.move, -0.85);
+        if (s.mode === 'strike' && s.combo <= 0) endCombo(prof, aggr, self);
+      }
+    }
     return intent;
   }
 
@@ -305,8 +318,8 @@ export function createPacedBrain(getProfile) {
       return;
     }
     if (r < (prof.block || 0.12)) setMode('guard', rand(0.25, 0.45));
-    else if (r < 0.32) setMode('reset', rand(0.18, 0.35));
-    else if (r < 0.82) setMode('circle', rand(0.7, 1.3) / Math.sqrt(aggr));
+    else if (r < 0.48) setMode('reset', rand(0.28, 0.5));
+    else if (r < 0.88) setMode('circle', rand(0.7, 1.3) / Math.sqrt(aggr));
     else startApproach(prof, self); // straight back in
     s.readNext = r < 0.16;
   }
