@@ -3,8 +3,10 @@
  * Optional "AI API Brain" (Settings > AI API Brain, and AI Tournament). Plugs into the
  * brain seam: think(snapshot) -> intent. A few times a second (throttled) it sends a
  * compact state JSON to an OpenAI-compatible chat-completions endpoint (xAI Grok, OpenAI,
- * or any base URL) and asks for ONE action. The reply steers the robot until the next one;
- * on invalid JSON the built-in CPU brain drives; on timeout the last plan is kept.
+ * or any base URL) and asks for ONE action. The reply steers the robot until the next one.
+ * On timeout, error, invalid JSON or a rate limit the last valid action is kept; if there
+ * is none yet, the robot holds a neutral guard. A rejected key (401/403) stops further
+ * calls and holds guard. The CPU brain is never used for an API side.
  *
  * API keys stay only in this browser's localStorage. They are never written to the fight
  * log or exports, never put in a URL, never console.logged, and are sent only to that
@@ -353,7 +355,7 @@ function actionIntent(a) {
 }
 
 function emptyStats() {
-  return { calls: 0, errors: 0, timeouts: 0, invalid: 0, keyRejected: 0, rateLimited: 0, fallbackMs: 0, latencySum: 0, latencyN: 0, lastAction: '', lastPlan: '', lastTarget: '', lastError: '', lastKind: '', lastLatency: 0, targets: {}, styles: {} };
+  return { calls: 0, errors: 0, timeouts: 0, invalid: 0, keyRejected: 0, rateLimited: 0, heldLastMs: 0, heldLastCount: 0, noAnswer: 0, latencySum: 0, latencyN: 0, lastAction: '', lastPlan: '', lastTarget: '', lastError: '', lastKind: '', lastLatency: 0, targets: {}, styles: {} };
 }
 
 export function apiStatsSnapshot(brain) {
@@ -366,15 +368,20 @@ export function apiStatsSnapshot(brain) {
     keyRejected: s.keyRejected,
     rateLimited: s.rateLimited,
     avgLatency: s.latencyN ? Math.round(s.latencySum / s.latencyN) : null,
-    fallbackMs: Math.round(s.fallbackMs || 0),
+    heldLastMs: Math.round(s.heldLastMs || 0),
+    heldLastCount: s.heldLastCount || 0,
+    noAnswer: s.noAnswer || 0,
   };
 }
 
-export function createApiBrain(fallback, id, getCfg) {
-  const st = { action: null, plan: '', target: '', at: 0, used: false, inflight: false, lastReq: 0, backoff: 0, lastKind: '', cfg: null };
+function guardIntent() {
+  return actionIntent('block');
+}
+
+export function createApiBrain(id, getCfg) {
+  const st = { action: null, plan: '', target: '', at: 0, used: false, inflight: false, lastReq: 0, backoff: 0, lastKind: '', cfg: null, keyRejected: false, holding: false };
   const stats = emptyStats();
   const INTERVAL = AI_BUDGET.interval;
-  const FRESH = AI_BUDGET.fresh;
   const MAX_CALLS = AI_BUDGET.maxCalls;
 
   function cfgNow() {
@@ -406,7 +413,7 @@ export function createApiBrain(fallback, id, getCfg) {
         stats.invalid += 1;
         stats.errors += 1;
         st.lastKind = 'invalid';
-        st.action = null;
+        stats.noAnswer += 1;
         apiStatus.fail++; apiStatus.lastFail = Date.now(); apiStatus.lastError = rec.error; apiStatus.lastKind = 'invalid';
       } else if (!parsed) {
         rec.kind = 'invalid';
@@ -414,7 +421,7 @@ export function createApiBrain(fallback, id, getCfg) {
         stats.invalid += 1;
         stats.errors += 1;
         st.lastKind = 'invalid';
-        st.action = null;
+        stats.noAnswer += 1;
         apiStatus.fail++; apiStatus.lastFail = Date.now(); apiStatus.lastError = rec.error; apiStatus.lastKind = 'invalid';
       } else {
         rec.action = parsed.action;
@@ -445,13 +452,17 @@ export function createApiBrain(fallback, id, getCfg) {
       else if (out.kind === 'invalid') stats.invalid += 1;
       else if (out.kind === 'key_rejected') stats.keyRejected += 1;
       else if (out.kind === 'rate_limit') stats.rateLimited += 1;
-      const wait = out.kind === 'key_rejected' ? 20000
-        : out.kind === 'rate_limit' ? Math.max(2000, out.retryAfter || 4000)
-        : Math.min(15000, 1500 * Math.max(1, stats.errors));
-      st.backoff = performance.now() + wait;
-      // Timeouts keep the last plan; invalid / rejected fall back to the CPU.
-      if (out.kind !== 'timeout') st.action = (out.kind === 'timeout') ? st.action : (out.kind === 'rate_limit' ? st.action : null);
-      if (out.kind === 'invalid') st.action = null;
+      stats.noAnswer += 1;
+      if (out.kind === 'key_rejected') {
+        st.keyRejected = true;
+        st.action = null;
+        st.holding = false;
+        st.backoff = Infinity;
+      } else {
+        const wait = out.kind === 'rate_limit' ? Math.max(2000, out.retryAfter || 4000)
+          : Math.min(15000, 1500 * Math.max(1, stats.errors));
+        st.backoff = performance.now() + wait;
+      }
       apiStatus.fail++; apiStatus.lastFail = Date.now(); apiStatus.lastError = out.error; apiStatus.lastKind = out.kind;
     }
     st.inflight = false;
@@ -466,31 +477,32 @@ export function createApiBrain(fallback, id, getCfg) {
   }
 
   function think(snap) {
-    const cpu = fallback.think(snap);
     const now = performance.now();
+    const dtMs = (snap.dt || 0) * 1000;
+    if (st.keyRejected) return guardIntent();
     const c = cfgNow();
-    if (!(c && c.key && c.base && c.model)) {
-      stats.fallbackMs += (snap.dt || 0) * 1000;
-      return cpu;
+    const canCall = !!(c && c.key && c.base && c.model);
+    if (canCall && !st.inflight && stats.calls < MAX_CALLS && now - st.lastReq > INTERVAL && now > st.backoff) ask(snap);
+    if (st.action) {
+      const holding = (st.lastKind && st.lastKind !== 'ok') || !canCall || stats.calls >= MAX_CALLS && st.lastKind !== 'ok';
+      if (holding) {
+        stats.heldLastMs += dtMs;
+        if (!st.holding) { stats.heldLastCount += 1; st.holding = true; }
+      } else st.holding = false;
+      const it = actionIntent(st.action);
+      if (it.attack || it.dodge) {
+        if (st.used) return guardIntent();
+        if ((it.dodge || it.attack === 'jump') && !(snap.self && snap.self.canFlip)) return guardIntent();
+        if (it.attack === 'ground' && !(snap.opp && snap.opp.groundable)) return guardIntent();
+        st.used = true;
+      }
+      return it;
     }
-    if (!st.inflight && stats.calls < MAX_CALLS && now - st.lastReq > INTERVAL && now > st.backoff) ask(snap);
-    const keepLast = st.lastKind === 'timeout' || st.inflight;
-    const fresh = st.action && (keepLast || now - st.at <= FRESH);
-    if (!fresh) {
-      stats.fallbackMs += (snap.dt || 0) * 1000;
-      return cpu;
-    }
-    const it = actionIntent(st.action);
-    if (it.attack || it.dodge) {
-      if (st.used) return { ...cpu, attack: null, dodge: null };
-      if ((it.dodge || it.attack === 'jump') && !(snap.self && snap.self.canFlip)) return cpu;
-      if (it.attack === 'ground' && !(snap.opp && snap.opp.groundable)) return cpu;
-      st.used = true;
-    }
-    return it;
+    st.holding = false;
+    return guardIntent();
   }
 
-  return { kind: 'api', think, state: fallback.state, fallback, stats: st, apiStats: stats };
+  return { kind: 'api', think, state: st, stats: st, apiStats: stats };
 }
 
 /* ---------- settings section ---------- */
@@ -529,7 +541,7 @@ export function initApiBrainUI() {
     model.placeholder = AI_PROVIDERS[c.provider].model || 'model name';
     key.value = c.key ? '••••••••' : '';
     b1.value = c.brain.p1; b2.value = c.brain.p2;
-    const saved = c.key ? 'Key saved in this browser only. ' : 'No key saved. The CPU brain fights until you add one. ';
+    const saved = c.key ? 'Key saved in this browser only. ' : 'No key saved. An API side holds guard until you add one. ';
     note.textContent = saved + corsNote(c.provider);
   };
   on.addEventListener('change', () => { ls.set(K.on, on.checked ? '1' : '0'); paint(); });

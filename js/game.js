@@ -1960,6 +1960,11 @@ function faceEachOther(a, b, dt = 0, snap = false) {
   faceToward(b, a, dt, snap);
 }
 
+/** Built-in paced CPU brain only: never treat an API or Player side as CPU-driven. */
+function usesCpuBrain(f) {
+  return !!(f && f.isCpu && !(f.brain && f.brain.kind === 'api') && !wantsApiBrain(f.id, f));
+}
+
 function tryAttack(f, kind, clipName, exact = false) {
   if (f.state === 'ko' || f.state === 'hit' || f.state === 'punch' || f.state === 'kick' || f.state === 'ground') return false;
   if (f.cooldown > 0) return false;
@@ -1971,7 +1976,7 @@ function tryAttack(f, kind, clipName, exact = false) {
   const clip = exact && clipName ? clipName : fitStrikeClip(f, kind, clipName
     || (kind === 'punch' ? pickPunch(f) : pickKick(f, true))
     || MODEL.animations[kind], other);
-  if (f.isCpu && other && STRIKE_T) {
+  if (usesCpuBrain(f) && other && STRIKE_T) {
     const tip = strikeTip(clip);
     const gap = f.root.position.distanceTo(other.root.position);
     const close = Math.min((kind === 'kick' ? COMBAT.kickLunge : COMBAT.punchLunge) || 0, 0.36 * SIZE);
@@ -3401,12 +3406,16 @@ function updateAI(cpu, player, dt) {
     cpu.isCpu = !shellAi;
     if (shellAi) return shellAi;
   }
-  cpu.isCpu = true;
-  if (!cpu.brain) cpu.brain = createPacedBrain(() => aiProfile(cpu));
-  // Settings > AI API Brain: wrap the CPU brain (it stays the fallback) or unwrap it.
   const api = wantsApiBrain(cpu.id, cpu);
-  if (api && cpu.brain.kind !== 'api') cpu.brain = createApiBrain(cpu.brain, cpu.id, () => fighterApiCfg(cpu));
-  else if (!api && cpu.brain.kind === 'api') cpu.brain = cpu.brain.fallback;
+  if (api) {
+    cpu.isCpu = true;
+    if (!cpu.brain || cpu.brain.kind !== 'api') cpu.brain = createApiBrain(cpu.id, () => fighterApiCfg(cpu));
+    cpu._ai = cpu.brain.state || cpu._ai;
+    return intentToInput(cpu, player, cpu.brain.think(brainSnapshot(cpu, player, dt)));
+  }
+  // CPU modes only (vs CPU, CPU vs CPU). Never built for an API or Player side.
+  cpu.isCpu = true;
+  if (!cpu.brain || cpu.brain.kind === 'api') cpu.brain = createPacedBrain(() => aiProfile(cpu));
   cpu._ai = cpu.brain.state || cpu._ai; // per-fighter think state (Bot vs Bot runs two)
   const intent = cpu.brain.think(brainSnapshot(cpu, player, dt));
   return intentToInput(cpu, player, intent);
@@ -3594,7 +3603,7 @@ function stepFighter(f, other, inp, dt) {
   const otherDown = DOWN_STATES.has(other.state);
   const sep = otherDown ? (COMBAT.separateDown || 0.75) : (COMBAT.separate || 1.05);
   if (gap < sep + 0.05 && inout > 0) inout = 0;
-  if (f.isCpu && gap < sep && !otherDown) inout = Math.min(inout, -Math.min(1, 0.35 + (sep - gap) / 0.15));
+  if (usesCpuBrain(f) && gap < sep && !otherDown) inout = Math.min(inout, -Math.min(1, 0.35 + (sep - gap) / 0.15));
   // Guarding: no sideways skating in the full-body block clip; stepping back is walked out
   // with the backward-walk layer.
   if (f.blocking) {
@@ -4683,8 +4692,8 @@ function tick() {
     const reach = (COMBAT.kick && COMBAT.kick.reach) || (COMBAT.punch && COMBAT.punch.reach) || 1.7 * SIZE;
     const gap = p1.root.position.distanceTo(p2.root.position);
     const canThrow = (f) => !DOWN_STATES.has(f.state) && f.state !== 'hit' && f.state !== 'punch' && f.state !== 'kick' && f.state !== 'ground';
-    if (p1.isCpu) logCpuIdle('p1', gap < reach * 1.25, canThrow(p1));
-    if (p2.isCpu) logCpuIdle('p2', gap < reach * 1.25, canThrow(p2));
+    if (usesCpuBrain(p1)) logCpuIdle('p1', gap < reach * 1.25, canThrow(p1));
+    if (usesCpuBrain(p2)) logCpuIdle('p2', gap < reach * 1.25, canThrow(p2));
   }
   updateContactShadows(p1);
   updateContactShadows(p2);

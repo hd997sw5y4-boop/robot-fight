@@ -90,7 +90,7 @@ function boot() {
   let nextTimer = null;
 
   function blankStanding(e) {
-    return { id: e.id, name: e.name, color: e.color, provider: e.provider, model: resolved(e).model, w: 0, l: 0, d: 0, elo: ELO0, lat: [], errors: 0, targets: {}, styles: {}, parts: 0, bestCombo: 0, fallbackMs: 0, calls: 0 };
+    return { id: e.id, name: e.name, color: e.color, provider: e.provider, model: resolved(e).model, w: 0, l: 0, d: 0, elo: ELO0, lat: [], errors: 0, targets: {}, styles: {}, parts: 0, bestCombo: 0, heldLastMs: 0, heldLastCount: 0, noAnswer: 0, calls: 0 };
   }
 
   S.openTournament = () => {
@@ -286,7 +286,9 @@ function boot() {
     const snap = apiStatsSnapshot(f.brain);
     st.calls += snap.calls || 0;
     st.errors += (snap.errors || 0);
-    st.fallbackMs += snap.fallbackMs || 0;
+    st.heldLastMs += snap.heldLastMs || 0;
+    st.heldLastCount += snap.heldLastCount || 0;
+    st.noAnswer += snap.noAnswer || 0;
     if (snap.avgLatency) st.lat.push(snap.avgLatency);
     const raw = f.brain.apiStats;
     if (raw && raw.targets) for (const [k, n] of Object.entries(raw.targets)) st.targets[k] = (st.targets[k] || 0) + n;
@@ -388,14 +390,18 @@ function boot() {
     unsubDec = onApiDecision((rec) => {
       const name = rec.id === 'p1' ? a.name : b.name;
       const line = rec.error
-        ? `${name} ${rec.kind === 'timeout' ? 'timeout → kept last plan' : (rec.kind || 'error')}`
+        ? `${name} ${rec.kind === 'key_rejected' ? 'Key rejected' : (rec.kind === 'timeout' ? 'timeout → held last action' : (rec.kind || 'error'))}`
         : `${name} ${rec.action || ''}${rec.target ? ' → ' + rec.target : ''}`;
       decisions.unshift(line);
       if (decisions.length > 8) decisions.pop();
       const log = hud && hud.querySelector('[data-dlog]');
       if (log) log.innerHTML = decisions.map((d) => `<div>${esc(d)}</div>`).join('');
       const bub = hud && hud.querySelector(`[data-bub="${rec.id}"]`);
-      if (bub && rec.action) {
+      if (bub && rec.kind === 'key_rejected') {
+        bub.querySelector('[data-plan]').textContent = 'Key rejected';
+        const tags = bub.querySelector('.rft-tags');
+        tags.innerHTML = '<span>Key rejected</span>';
+      } else if (bub && rec.action) {
         bub.querySelector('[data-plan]').textContent = rec.plan || rec.action;
         const tags = bub.querySelector('.rft-tags');
         tags.innerHTML = `<span>${esc(rec.action)}</span>` + (rec.target ? `<span>target: ${esc(rec.target)}</span>` : '');
@@ -413,8 +419,12 @@ function boot() {
       const el = hud.querySelector(`.rft-meta[data-side="${i}"]`);
       if (!el || !f || !f.brain) continue;
       const s = apiStatsSnapshot(f.brain);
+      if (s.keyRejected || (f.brain.apiStats && f.brain.apiStats.keyRejected) || (f.brain.state && f.brain.state.keyRejected)) {
+        el.textContent = 'Key rejected';
+        continue;
+      }
       const avg = s.avgLatency != null ? (s.avgLatency / 1000).toFixed(1) + 's' : '–';
-      el.textContent = `avg reply ${avg}  ·  ${s.errors || 0} errors` + (s.timeouts ? `  ·  ${s.timeouts} timeout` : '');
+      el.textContent = `avg reply ${avg}  ·  ${s.errors || 0} errors` + (s.timeouts ? `  ·  ${s.timeouts} timeout` : '') + (s.heldLastCount ? `  ·  held last ${s.heldLastCount}` : '') + (s.noAnswer ? `  ·  ${s.noAnswer} no-answer` : '');
     }
   }
   function showBetween(msg) {
