@@ -34,17 +34,14 @@ The part-to-bone map lives in `js/config.js` (`DAMAGE.bind`) so a later Mixamo-r
 - **Sound effects:** CC0 and royalty-free clips (no credit required). Sources and licenses are listed in `CREDITS/LICENSES.md`.
 - **Physics:** [cannon-es](https://github.com/pmndrs/cannon-es) (MIT), vendored from the official package. Fighter capsules, cage/posts, ragdoll knockdowns and KOs, and detached parts that bounce then settle.
 
-## Arenas
+## Arena
 
-- **Stadium** (default): an original indoor stadium around the same fight mat, in `js/arena/stadium.js` with its config/flag in `js/arena/stadium-config.js` (`STADIUM.enabled`, `STADIUM.defaultArena`). Two tiered bowls with instanced seats and crowd, roof truss, ring spot cans with fake light cones, flood banks, a center-hung four-sided scoreboard, end-wall screens and LED ribbon boards. Low graphics uses fewer crowd/seat instances, a simpler truss, fewer cones and no extra lights. Only the existing mat spotlight casts shadows.
-- **Industrial**: the original chrome mat under the Poly Haven Industrial Pipe and Valve HDRI.
+The fight takes place on the raised octagon mat inside the cage (`js/arena.js`). The surround is a dark, spotlit void — there is no stadium bowl, seats, crowd, truss, jumbotron or LED boards. HDRI (Settings, on by default) feeds robot and mat reflections only; it is not used as a backdrop.
 
-- **Crowd watch** (`js/arena/crowdcam.js`): camera view `crowd` in the V-key cycle and Settings → Camera view — a seat in the lower bowl; drag to look, double-click to recenter. On headsets that support `immersive-vr` an **Enter VR** button seats you there (seated `local` reference space, meters; no camera motion is applied in VR).
-- **Broadcast feed** (`js/arena/broadcast.js`): the hanging scoreboard and end-wall screens show a 384×216 live feed (16 fps, 8 fps in VR, no extra shadow pass) that auto-cuts between wide, ringside low, overhead and close-ups. Big hits, knockdowns, torn-off parts and the KO get a slow-motion instant replay from a different angle with a REPLAY tag (a ring buffer of fighter node transforms, read-only state polling). Off on Low graphics (static screen art).
+- **Broadcast** (`js/arena/broadcast.js`): the C-key / Settings camera view is a TV director that auto-cuts between wide, ringside, overhead and close-ups. The same recorder feeds post-fight replays. There is no jumbotron screen feed.
 - **Post-fight** (`js/arena/postfight.js`): after the match-ending KO the results wait ~4 s while the camera blends smoothly from the current view into a slow orbit of the winner over the fallen robot; then the 3-4 biggest moments (KO blow, knockdowns, torn parts, big hits, from the broadcast recorder) replay full-screen in slow motion from different angles with a REPLAY tag. Skip button or Space / Enter / Esc. Then the results box opens, compact at the bottom-right. In VR the camera never moves and the replays are skipped (only the results wait). Auto Rematch counts down after the replays.
-- **Music** (`js/arena/music.js`): two CC0 loops, quieter in fights, ducked under the announcer, through the game's own audio master bus. Settings → Sound → Music (saved as `rf_music`). Starts after the first click or key press.
 
-Pick one in Settings → Display → Arena (saved in `localStorage` as `rf_arena`). Switching disposes the stadium's geometry, textures, lights and environment map. The mat, ring colliders and grounding are the same in both. Hooks in `js/game.js` are marked `[stadium-arena hook]`.
+High graphics renders at native DPR (cap 2) with canvas MSAA, no bloom/FXAA, and dynamic resolution disabled, so it stays the sharpest preset.
 
 The octagon cage/fence is turned off for now (`ARENA.cage` in `js/config.js`); an invisible ring collider still keeps fighters and loose parts on the mat.
 

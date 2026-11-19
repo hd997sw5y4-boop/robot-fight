@@ -2,7 +2,6 @@
 /* Octagon MMA cage, painted metal mat (ambientCG Metal001 + decals), lights, and fade. */
 import * as THREE from 'three';
 import { ARENA, SIZE } from './config.js';
-import { STADIUM } from './arena/stadium-config.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // Woven chain-link: diagonal wires with a bright top edge and a dark underside,
@@ -36,7 +35,7 @@ function chainlinkTexture() {
   }
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.anisotropy = 8;
+  t.anisotropy = 16;
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
@@ -96,7 +95,7 @@ function matDecalTexture(a) {
   }
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
+  tex.anisotropy = 16;
   return { tex, size: N / k };
 }
 
@@ -126,7 +125,7 @@ function logoTexture() {
   g.fillText('GAMES', 512, 624);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 8;
+  t.anisotropy = 16;
   return t;
 }
 
@@ -146,7 +145,7 @@ function loadMatMetalMaps() {
   const wrap = (url, srgb) => {
     const t = loader.load(url);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.anisotropy = 8;
+    t.anisotropy = 16;
     t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
     return t;
   };
@@ -443,10 +442,9 @@ export function buildArena(scene, { tiled, metalColor, metalRough }) {
   return { group, fixturePos, fencePanels, fenceTop: H };
 }
 
-// Raised-stage skirt and steps (0.8–1 m apron). Steps sit on the ±Z flats so they do not
-// meet the pit-crew bays on ±X or the tunnel mouths on the diagonals.
+// Raised-stage skirt and steps (0.8-1 m apron). Steps sit on the +/-Z flats.
 function addOctagonPlatform(scene, r, matTop) {
-  const floorY = STADIUM && STADIUM.floorY != null ? STADIUM.floorY : 0;
+  const floorY = ARENA.floorY != null ? ARENA.floorY : 0;
   const h = matTop - floorY;
   if (h < 0.05) return;
   const apron = new THREE.Group();
@@ -507,42 +505,56 @@ export function updateCageFade(panels, camera, dt) {
 }
 
 export function addArenaLights(scene, fixturePos) {
-  const hemi = new THREE.HemisphereLight(0xc5d6ee, 0x1a120c, 0.62);
+  const hemi = new THREE.HemisphereLight(0x9eb4d0, 0x08060a, 0.22);
   scene.add(hemi);
   const spots = [];
   for (const p of fixturePos) {
-    const s = new THREE.SpotLight(0xfff1d0, 9, 20, Math.PI / 6.2, 0.55, 1.15);
+    const s = new THREE.SpotLight(0xfff1d0, 14, 22, Math.PI / 7, 0.48, 1.05);
     s.position.copy(p);
-    s.target.position.set(0, (ARENA.matTop || 0) + 0.4, 0);
+    s.target.position.set(0, (ARENA.matTop || 0) + 0.35, 0);
     s.userData.industrialOverhead = true;
-    s.userData.wantsShadow = spots.length === 0;
-    s.castShadow = spots.length === 0;
+    s.userData.wantsShadow = spots.length < 2;
+    s.castShadow = spots.length < 2;
     s.shadow.mapSize.set(2048, 2048);
-    s.shadow.bias = -0.0003;
-    s.shadow.camera.near = 1;
-    s.shadow.camera.far = 22;
+    s.shadow.bias = -0.00025;
+    s.shadow.normalBias = 0.02;
+    s.shadow.camera.near = 2;
+    s.shadow.camera.far = 16;
+    s.shadow.radius = 2;
     s.userData.baseIntensity = s.intensity;
     scene.add(s, s.target);
     spots.push(s);
   }
   hemi.userData.baseIntensity = hemi.intensity;
-  const fill = new THREE.DirectionalLight(0x8ea4c4, 0.52);
-  fill.position.set(-6, 6, 8);
+  const fill = new THREE.DirectionalLight(0x8ea4c4, 0.22);
+  fill.position.set(-6, 8, 8);
   fill.userData.baseIntensity = fill.intensity;
+  fill.userData.wantsShadow = true;
+  fill.castShadow = true;
+  fill.shadow.mapSize.set(2048, 2048);
+  fill.shadow.bias = -0.0004;
+  fill.shadow.normalBias = 0.03;
+  fill.shadow.camera.left = -9;
+  fill.shadow.camera.right = 9;
+  fill.shadow.camera.top = 9;
+  fill.shadow.camera.bottom = -9;
+  fill.shadow.camera.near = 1;
+  fill.shadow.camera.far = 28;
+  fill.shadow.radius = 2;
   scene.add(fill);
-  const fill2 = new THREE.DirectionalLight(0x6d7c92, 0.28);
+  const fill2 = new THREE.DirectionalLight(0x6d7c92, 0.1);
   fill2.position.set(5, 4, 3);
   fill2.userData.baseIntensity = fill2.intensity;
   scene.add(fill2);
-  const rim = new THREE.DirectionalLight(0xcfe2ff, 0.55);
+  const rim = new THREE.DirectionalLight(0xcfe2ff, 0.72);
   rim.position.set(0, 4.2, -11);
   rim.userData.baseIntensity = rim.intensity;
   scene.add(rim);
-  const rimL = new THREE.DirectionalLight(0xb7d4ff, 0.4);
+  const rimL = new THREE.DirectionalLight(0xb7d4ff, 0.48);
   rimL.position.set(-8, 3.6, -8);
   rimL.userData.baseIntensity = rimL.intensity;
   scene.add(rimL);
-  const rimR = new THREE.DirectionalLight(0xffe1c2, 0.32);
+  const rimR = new THREE.DirectionalLight(0xffe1c2, 0.4);
   rimR.position.set(8, 3.4, -7);
   rimR.userData.baseIntensity = rimR.intensity;
   scene.add(rimR);

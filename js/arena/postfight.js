@@ -15,7 +15,7 @@ import { SIZE } from '../config.js';
 import {
   getMoments, clearMoments, flushMoments, setFeedHold, applyClipPose, restoreClipPose, shotFraming,
 } from './broadcast.js';
-import { xrPresenting } from './crowdcam.js';
+import { xrPresenting } from './broadcast.js';
 
 const CFG = {
   hold: 4.0,          // s from the KO (or match end) before replays / results
@@ -195,7 +195,7 @@ export function postfightCamera() {
   return !!(m && m.over) || st.phase === 'replay'; // pose is captured untouched on the first over-frame
 }
 
-// ---------------------------------------------------------------- per-frame (from updateStadium)
+// ---------------------------------------------------------------- per-frame (from game.js)
 
 export function updatePostfight() {
   if (!ctx) return;
@@ -288,7 +288,7 @@ function hookShell() {
   };
 }
 
-/** Called from initStadium (ctx: scene, camera, getFighters, getMatch). */
+/** Called from game.js after the arena is built (ctx: scene, camera, getFighters, getMatch). */
 export function initPostfight(c) {
   ctx = c;
   ui = makeUi();

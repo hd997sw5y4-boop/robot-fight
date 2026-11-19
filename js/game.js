@@ -16,15 +16,11 @@ import { setWiresLow } from './wires.js';
 import { createApiBrain, wantsApiBrain, initApiBrainUI, fighterApiCfg, apiLabel, apiStatsSnapshot } from './api-brain.js';
 import { getSettings, isSettingsOpen, initSettings, updateFps, lastFps, cycleCameraMode, setCameraMode } from './settings.js';
 import { startFight as logStartFight, endFight as logEndFight, logFps, logGlitch, logStrike, logRound, logCpuIdle, stepFightQuality, logFall, logGetUp, logAnimSwitch, logInputPress, logInputAction, noteFrameWork, wallDist, setFightApiStats } from './fight-log.js';
-import { broadcastMain } from './arena/broadcast.js';
+import { broadcastMain, initBroadcast, updateBroadcast, xrPresenting } from './arena/broadcast.js';
 import { unlockAudio, playSfx, playHit, setBuzz, startCrowd } from './audio.js';
 import { announce, announceIntroSeconds } from './announcer.js';
 import { buildArena as buildArenaVisual, addArenaLights, updateCageFade, addFloorReflection } from './arena.js';
-// [stadium-arena hook] stadium scenery lives in its own module.
-import { initStadium, stadiumOwnsEnv, stadiumApplyEnv, stadiumSetGfx, updateStadium } from './arena/stadium.js';
-import { initPitCrew, setPitCrewGfx, updatePitCrew } from './arena/pit-crew.js';
-import { updateCrowdCam } from './arena/crowdcam.js'; // [stadium-broadcast hook]
-import { postfightCamera } from './arena/postfight.js'; // [postfight hook]
+import { initPostfight, updatePostfight, postfightCamera } from './arena/postfight.js';
 import {
   initArenaPhysics,
   attachFighter,
@@ -118,11 +114,11 @@ canvas.addEventListener('webglcontextrestored', () => location.reload(), false);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFShadowMap;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x080a10);
-scene.fog = new THREE.Fog(0x080a10, 18, 42);
+scene.background = new THREE.Color(0x020306);
+scene.fog = new THREE.Fog(0x020306, 14, 34);
 
 function clampFov(v) {
   return Math.max(45, Math.min(90, +v || 50));
@@ -159,13 +155,18 @@ function applyPixelRatio() {
   composer.setPixelRatio(pr);
 }
 function stepDynamicRes(dt) {
+  const min = gfxPreset().minScale || 0.6;
+  // High floors at 1 (native sharpness). Don't lower the backbuffer on that preset.
+  if (min >= 1) {
+    if (dyn.scale !== 1) { dyn.scale = 1; applyPixelRatio(); resize(); }
+    return;
+  }
   if (dt <= 0) return;
   dyn.acc += dt; dyn.n += 1; dyn.cooldown -= dt;
   if (dyn.acc < 1) return;
   const fps = dyn.n / dyn.acc;
   dyn.acc = 0; dyn.n = 0;
   if (dyn.cooldown > 0) return;
-  const min = gfxPreset().minScale || 0.6;
   let next = dyn.scale;
   if (fps < 50) next = Math.max(min, dyn.scale - 0.1);
   else if (fps > 58 && dyn.scale < 1) next = Math.min(1, dyn.scale + 0.05);
@@ -231,9 +232,9 @@ scene.add(hitLight);
 
 const pmrem = new THREE.PMREMGenerator(renderer);
 const roomEnv = pmrem.fromScene(new RoomEnvironment(), 0.06).texture;
-const darkBg = new THREE.Color(0x080a10);
+const darkBg = new THREE.Color(0x020306);
 scene.environment = roomEnv;
-scene.environmentIntensity = 0.38;
+scene.environmentIntensity = 0.62;
 
 let hdriEnv = null;
 let hdriBg = null;
@@ -252,25 +253,15 @@ function applyHdri(on) {
 }
 
 function syncEnvironment() {
-  // [stadium-arena hook] the stadium owns background/env/fog while it is the active arena.
-  if (stadiumOwnsEnv()) { stadiumApplyEnv(); return; }
   const on = hdriEnabled && !!hdriEnv;
-  if (on) {
-    scene.environment = hdriEnv;
-    scene.environmentIntensity = 1.05;
-    scene.background = hdriBg || hdriEnv;
-    scene.backgroundBlurriness = 0.04;
-    scene.backgroundIntensity = 0.7;
-    scene.fog = null;
-  } else {
-    scene.environment = roomEnv;
-    scene.environmentIntensity = 0.38;
-    scene.background = darkBg;
-    scene.backgroundBlurriness = 0;
-    scene.backgroundIntensity = 1;
-    if (!scene.fog) scene.fog = new THREE.Fog(0x080a10, 18, 42);
-  }
-  scene.traverse((o) => { if (o.userData && o.userData.voidWall) o.visible = !on; });
+  // HDRI (when on) is reflections only; the surround stays a dark, spotlit void.
+  scene.environment = on ? hdriEnv : roomEnv;
+  scene.environmentIntensity = on ? 1.2 : 0.62;
+  scene.background = darkBg;
+  scene.backgroundBlurriness = 0;
+  scene.backgroundIntensity = 1;
+  scene.fog = new THREE.Fog(0x020306, 14, 34);
+  scene.traverse((o) => { if (o.userData && o.userData.voidWall) o.visible = true; });
 }
 
 function loadHdri() {
@@ -298,8 +289,7 @@ function loadHdri() {
 }
 
 // Start fetching straight away (on by default); applied as soon as it's ready.
-// [stadium-arena hook] skip the 6.7 MB HDRI download until Industrial is picked.
-if (!stadiumOwnsEnv() && hdriEnabled) loadHdri().then(() => syncEnvironment());
+if (hdriEnabled) loadHdri().then(() => syncEnvironment());
 
 let lightMul = Math.max(0.5, Math.min(2, getSettings().light || 1));
 const litLights = [];
@@ -308,11 +298,14 @@ let floorMirror = null;
 // Floor mirror resolution per preset (Medium renders it at half size).
 function setMirrorRes(m) {
   const w = (GFX_PRESETS[gfxKey] && GFX_PRESETS[gfxKey].mirror) || 1024;
+  const u = m.material && m.material.uniforms;
+  if (u && u.strength) u.strength.value = gfxKey === 'high' ? 0.52 : 0.38;
   const rt = m.getRenderTarget && m.getRenderTarget();
-  if (!rt || rt.width === w) return;
+  if (!rt) return;
   const h = Math.round(w / Math.max(1, window.innerWidth / Math.max(1, window.innerHeight)));
+  if (rt.width === w && rt.height === h) return;
   rt.setSize(w, h);
-  const tx = m.material && m.material.uniforms && m.material.uniforms.texel;
+  const tx = u && u.texel;
   if (tx) tx.value.set(1 / w, 1 / h);
 }
 function applyGfx(key) {
@@ -321,14 +314,13 @@ function applyGfx(key) {
   setChromeLow(gfxKey === 'low');
   setWiresLow(gfxKey === 'low');
   setDebrisLow(gfxKey === 'low');
-  setPitCrewGfx(gfxKey);
-  stadiumSetGfx(gfxKey); // [stadium-arena hook]
   const p = gfxPreset();
   useBloom = !!p.bloom;
   dyn.scale = 1;
   applyPixelRatio();
   renderer.toneMappingExposure = p.exposure * lightMul;
   renderer.shadowMap.enabled = p.shadows;
+  renderer.shadowMap.type = p.shadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
   scene.traverse((o) => {
     if (o.isLight && o.shadow) {
       o.castShadow = !!(p.shadows && o.userData.wantsShadow);
@@ -425,7 +417,7 @@ function loadTex(url, colorSpace) {
   const t = texLoader.load(url);
   if (colorSpace) t.colorSpace = colorSpace;
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.anisotropy = 8;
+  t.anisotropy = 16;
   return t;
 }
 const metalColor = loadTex('./textures/metal_color.jpg', THREE.SRGBColorSpace);
@@ -478,6 +470,13 @@ function tint(root, color) {
       if (m && m.color) {
         if (!m.userData.baseColor) m.userData.baseColor = m.color.clone();
         m.color.copy(m.userData.baseColor).lerp(c, 0.42);
+      }
+      if (m) {
+        m.envMapIntensity = 1.25;
+        m.needsUpdate = true;
+        for (const map of [m.map, m.normalMap, m.roughnessMap, m.metalnessMap, m.aoMap]) {
+          if (map) map.anisotropy = 16;
+        }
       }
       if (m && m.aoMap && o.geometry && o.geometry.attributes.uv && !o.geometry.attributes.uv2) {
         o.geometry.setAttribute('uv2', o.geometry.attributes.uv);
@@ -1701,7 +1700,7 @@ window.addEventListener('keydown', (e) => {
     cycleCameraMode(); // saved; shown in the controls overlay
     return;
   }
-  // C: Broadcast view on/off (the jumbotron's TV director as the main camera).
+  // C: Broadcast view on/off (the TV director as the main camera).
   if ((e.key === 'c' || e.key === 'C') && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
     const cur = getSettings().cam;
     if (cur === 'broadcast') setCameraMode(prevCamMode && prevCamMode !== 'broadcast' ? prevCamMode : 'arena');
@@ -4043,7 +4042,7 @@ function updateFightingCamera(dt) {
   const vHalf = THREE.MathUtils.degToRad(camera.fov) / 2;
   const hHalf = Math.atan(Math.tan(vHalf) * camera.aspect);
   const span = dist / 2 + 1.25 * SIZE;
-  // Standoff uses CAM_SIZE so the view stays inside the stadium bowl and the larger robots fill more of the frame.
+  // Standoff uses CAM_SIZE so the slightly larger robots fill more of the frame.
   const want = Math.max(3.4 * CAM_SIZE, Math.min(13 * CAM_SIZE, Math.max(span / Math.tan(hHalf), 2.1 * SIZE / Math.tan(vHalf))));
   fightCamDist = snap || !fightCamDist ? want : fightCamDist + (want - fightCamDist) * (1 - Math.pow(0.05, dt));
   const mx = (a.x + b.x) / 2;
@@ -4196,9 +4195,8 @@ function updateCamera(dt) {
 
 
 function updateCameraInner(dt) {
-  if (postfightCamera()) { setFirstPersonHide(false); camModeLive = 'postfight'; return; } // [postfight hook]
-  // [stadium-broadcast hook] crowd-watch seat (V-cycle 'crowd') and VR own the camera when active.
-  if (updateCrowdCam(camera, dt)) { setFirstPersonHide(false); camModeLive = 'crowd'; return; }
+  if (postfightCamera()) { setFirstPersonHide(false); camModeLive = 'postfight'; return; }
+  if (xrPresenting()) { setFirstPersonHide(false); return; }
   const want = cameraMode();
   // Broadcast keeps directing through the KO (close-ups, cuts); other views go to the arena.
   const mode = match.over && want !== 'broadcast' ? 'arena' : want;
@@ -4702,8 +4700,8 @@ function tick() {
   hitLight.intensity = Math.max(0, hitLight.intensity - dt * 28);
   setBuzz(isSettingsOpen() ? 0 : buzzFromFighters());
   syncHud(dt);
-  updateStadium(dt); // [stadium-arena hook]
-  updatePitCrew(dt);
+  updateBroadcast();
+  updatePostfight();
   updateCageFade(cagePanels, camera, rawDt);
   renderFrame();
   stepDynamicRes(wallDt);
@@ -4825,18 +4823,12 @@ function onLoad(gltf) {
   }
   fighterRims = [makeFighterRim(0xc8e0ff), makeFighterRim(0xffd4b8)];
   applyLight(getSettings().light);
-  // [stadium-arena hook] scenery-only; mat, walls and physics stay as built above.
   cagePanels = built.fencePanels;
-  initPitCrew(scene, gfxKey);
-  initStadium({
-    scene, renderer, pmrem, industrial: built, gfx: gfxKey,
-    applyHdri, getHdri: () => !!(getSettings().hdri || ARENA.hdri),
-    trackLight,
-    untrackLight(l) { const i = litLights.indexOf(l); if (i >= 0) litLights.splice(i, 1); },
-    refreshLights: () => applyLight(getSettings().light),
-    // [stadium-broadcast hook] read-only getters for crowd cam / broadcast feed / music.
-    camera, canvas, getFighters: () => [p1, p2], getMatch: () => match,
+  initBroadcast({
+    scene, renderer, camera, canvas,
+    getFighters: () => [p1, p2], getMatch: () => match,
   });
+  initPostfight({ scene, camera, getFighters: () => [p1, p2], getMatch: () => match });
   initArenaPhysics();
   p1 = makeFighter(gltf, MODEL.colors.p1, 'p1');
   p2 = makeFighter(gltf, MODEL.colors.p2, 'p2');

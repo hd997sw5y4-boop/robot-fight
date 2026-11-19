@@ -3,9 +3,8 @@
 // World scale: the octagon (mat, cage, platform, physics bounds) and both robots grow together
 // (10% over the original). Speeds, reach, capsules, gravity and cage height follow this.
 export const WORLD_SCALE = 1.10;
-// Cameras keep the original (pre-scale) standoff so the slightly larger robots fill the frame
-// and the view stays inside the stadium bowl (LED barrier at ~15.6 m). Look-at height still
-// follows SIZE + matTop.
+// Cameras keep the original (pre-scale) standoff so the slightly larger robots fill the frame.
+// Look-at height still follows SIZE + matTop.
 export const CAM_SIZE = 1.12;
 // Robot size: every robot-relative distance (reach, spacing, capsules, wires) scales by this.
 export const SIZE = 1.12 * WORLD_SCALE;
@@ -99,7 +98,7 @@ export const ARENA = {
   apothem: 6.1 * WORLD_SCALE,
   floorY: 0,
   floorThickness: 0.28,
-  // Raised octagon stage: mat top sits 0.9 m above the arena floor (STADIUM.floorY).
+  // Raised octagon stage: mat top sits 0.9 m above the arena floor (ARENA.floorY).
   // Visual floor-mesh top and physics plane share this Y so feet and colliders agree.
   matTop: 0.9,
   // Short MMA cage (waist-to-chest). Visuals and physics share this height for the
@@ -108,9 +107,8 @@ export const ARENA = {
   cageHeight: 1.48 * WORLD_SCALE,
   // Two-bone stance IK is off: the solver was twisting legs and lifting feet off the mat.
   stanceIK: false,
-  // HDRI environment + backdrop (on by default via settings.js; the player's toggle is saved).
-  // Swap the file here when a final space/sky pick lands.
-  // Poly Haven Industrial Pipe and Valve 01 2K (CC0), Ezequiel's pick.
+  // HDRI is used for robot/mat reflections only (on by default; toggle saved).
+  // The surround stays a dark void. Poly Haven Industrial Pipe and Valve 01 2K (CC0).
   hdriUrl: './hdris/industrial_pipe_and_valve_01_2k.hdr',
 };
 
@@ -190,16 +188,17 @@ export const COMBAT = {
 
 export const GFX_PRESETS = {
   // minScale: how far auto-resolution may drop below the cap to hold frame rate.
+  // High is the sharpest: native DPR (cap 2), canvas MSAA, no bloom/FXAA, dynamic res floored at 1.
+  // Medium may scale a little but stays at or above Low's 1.0 effective ratio.
   // bloom: off. UnrealBloom was smearing leftover additive fixture glow into a white haze
   // over the cage centre. Exposure stays modest (ACES) so the metal mat stays a sharp mirror.
-  // mirror: planar mat reflection resolution (Medium renders it at half size).
+  // mirror: planar mat reflection resolution (High is full size; Medium is half).
   low: { pixelCap: 1, shadows: false, shadowSize: 512, exposure: 1.08, bloom: false, mirror: 0, minScale: 0.6 },
-  // medium: Macs / Retina / integrated GPUs. Jumbotron at 10 fps; debris and HDRI as High.
-  // Crowd/seat/truss layout is the Low stadium layout on every graphics setting.
-  medium: { pixelCap: 1.25, shadows: true, shadowSize: 1024, exposure: 1.12, bloom: false, mirror: 512, minScale: 0.55 },
-  high: { pixelCap: 1.25, shadows: true, shadowSize: 1024, exposure: 1.15, bloom: false, mirror: 512, minScale: 0.5 },
+  // medium: Macs / Retina / integrated GPUs. Shadows and the mat mirror stay a step under High.
+  medium: { pixelCap: 1.5, shadows: true, shadowSize: 1536, exposure: 1.14, bloom: false, mirror: 512, minScale: 0.8 },
+  high: { pixelCap: 2, shadows: true, shadowSize: 2048, exposure: 1.18, bloom: false, mirror: 1024, minScale: 1 },
   // phones/tablets (js/mobile.js): applied on top of low/high: pixel ratio and shadow caps.
-  mobile: { pixelCap: 1.25, shadowSize: 1024 }, // phones share the 1 / 1.25 caps
+  mobile: { pixelCap: 1.25, shadowSize: 1024 }, // phones stay capped; High sharpness is a desktop budget
 };
 
 // Per-part wrecking. Names in `bind` are normalized (lowercase, no "mixamorig",

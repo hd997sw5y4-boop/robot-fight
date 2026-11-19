@@ -35,8 +35,8 @@ const BANK = {
   cage: ['cage_0.ogg', 'cage_1.ogg', 'cage_2.ogg'],
   crash: ['crash_0.ogg', 'crash_1.ogg', 'crash_2.ogg', 'crash_3.ogg', 'crash_4.ogg'],
   bell: ['bell_000.ogg', 'bell_001.ogg', 'bell_002.ogg'],
-  crowdHit: ['crowd_short.ogg', 'crowd_stadium_short.ogg'],
-  crowdBig: ['crowd_whistle.ogg', 'crowd_stadium.ogg'],
+  crowdHit: ['crowd_short.ogg'],
+  crowdBig: ['crowd_whistle.ogg'],
   crowdKo: ['crowd_win.ogg', 'crowd_whistle.ogg'],
 };
 
@@ -553,7 +553,7 @@ function ensureCrowd() {
   src.buffer = buffers.get('crowd_loop.ogg');
   src.loop = true;
   const g = ctx.createGain();
-  g.gain.value = 0.45;
+  g.gain.value = 0.2;
   src.connect(g);
   g.connect(crowd);
   try { src.start(); } catch (_) { return; }
@@ -616,8 +616,6 @@ export function startCrowd() {
   ensureHum();
 }
 
-// [stadium-broadcast hook] read-only access for js/arena/music.js: reuse this context and the
-// master bus (so Master volume applies) and know when the announcer is talking (to duck music).
 export function getAudioGraph() {
   return ctx && master ? { ctx, master, voiceActive: () => performance.now() < voiceUntil } : null;
 }
