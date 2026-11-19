@@ -1,10 +1,11 @@
 // Mixamo-rigged Sketchfab "Robot character" (assetfactory, Free Standard).
 // Animations from Mixamo. Idle/walk/strafe use real clips; hips XZ root motion is stripped.
 // World scale: the octagon (mat, cage, platform, physics bounds) and both robots grow together
-// so the fight fills more of the screen. Speeds, reach, and capsules already follow SIZE.
-export const WORLD_SCALE = 1.25;
-// Cameras keep a pre-scale standoff so the larger robots fill the frame and the view stays
-// inside the stadium bowl (LED barrier at ~15.6 m). Look-at height still follows SIZE + matTop.
+// (10% over the original). Speeds, reach, capsules, gravity and cage height follow this.
+export const WORLD_SCALE = 1.10;
+// Cameras keep the original (pre-scale) standoff so the slightly larger robots fill the frame
+// and the view stays inside the stadium bowl (LED barrier at ~15.6 m). Look-at height still
+// follows SIZE + matTop.
 export const CAM_SIZE = 1.12;
 // Robot size: every robot-relative distance (reach, spacing, capsules, wires) scales by this.
 export const SIZE = 1.12 * WORLD_SCALE;
@@ -193,8 +194,8 @@ export const GFX_PRESETS = {
   // over the cage centre. Exposure stays modest (ACES) so the metal mat stays a sharp mirror.
   // mirror: planar mat reflection resolution (Medium renders it at half size).
   low: { pixelCap: 1, shadows: false, shadowSize: 512, exposure: 1.08, bloom: false, mirror: 0, minScale: 0.6 },
-  // medium: Macs / Retina / integrated GPUs. Jumbotron at
-  // 10 fps, medium crowd (stadium-config quality.medium); debris and HDRI as High.
+  // medium: Macs / Retina / integrated GPUs. Jumbotron at 10 fps; debris and HDRI as High.
+  // Crowd/seat/truss layout is the Low stadium layout on every graphics setting.
   medium: { pixelCap: 1.5, shadows: true, shadowSize: 1024, exposure: 1.12, bloom: false, mirror: 512, minScale: 0.55 },
   high: { pixelCap: 1.5, shadows: true, shadowSize: 1024, exposure: 1.15, bloom: false, mirror: 512, minScale: 0.5 },
   // phones/tablets (js/mobile.js): applied on top of low/high: pixel ratio and shadow caps.

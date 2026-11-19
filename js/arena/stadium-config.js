@@ -17,9 +17,12 @@ export const STADIUM = {
   truss: { inner: 6, outer: 42.4, top: 24, bottom: 22.4, spokes: 12 },
   board: { y: 15.6, size: 5.8, height: 3.6 },
   tunnels: [Math.PI / 4, (3 * Math.PI) / 4, (5 * Math.PI) / 4, (7 * Math.PI) / 4],
+  // Crowd, seats, bowl segments and truss detail stay at the Low layout on every
+  // graphics setting. Medium/High only change render quality (spots, normals).
+  layout: { segs: 72, crowd: 0.34, crowdUpper: 0.16, seatDetail: false, diagonals: false },
   quality: {
-    high: { segs: 112, crowd: 0.40, crowdUpper: 0.24, seatDetail: false, diagonals: false, cones: 0, spots: 4, glare: false, normals: true },
-    medium: { segs: 112, crowd: 0.56, crowdUpper: 0.38, seatDetail: true, diagonals: false, cones: 0, spots: 2, glare: false, normals: false },
-    low: { segs: 72, crowd: 0.34, crowdUpper: 0.16, seatDetail: false, diagonals: false, cones: 0, spots: 0, glare: false, normals: false },
+    high: { spots: 4, normals: true },
+    medium: { spots: 2, normals: false },
+    low: { spots: 0, normals: false },
   },
 };

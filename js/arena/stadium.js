@@ -251,7 +251,8 @@ function seatGeometry(detail) {
 
 function build(scene, renderer, pmrem, key) {
   const Q = STADIUM.quality[key] || STADIUM.quality.high;
-  const segs = Q.segs;
+  const lay = STADIUM.layout;
+  const segs = lay.segs;
   const group = new THREE.Group();
   group.name = 'stadiumArena';
   const lights = [];
@@ -379,7 +380,7 @@ function build(scene, renderer, pmrem, key) {
   const seatXs = [];
   const crowdXs = [];
   const seatGap = 0.56;
-  const sparseSeats = !Q.seatDetail;
+  const sparseSeats = !lay.seatDetail;
   const addTier = (tier, density, tunnels) => {
     for (let i = 0; i < tier.rows; i++) {
       const r = rowR(tier, i) + 0.42;
@@ -405,13 +406,13 @@ function build(scene, renderer, pmrem, key) {
       }
     }
   };
-  addTier(L, Q.crowd, true);
-  addTier(U, Q.crowdUpper, false);
+  addTier(L, lay.crowd, true);
+  addTier(U, lay.crowdUpper, false);
 
   const dummy = new THREE.Object3D();
   const color = new THREE.Color();
   const seatCount = seatXs.length / 3;
-  const seats = new THREE.InstancedMesh(seatGeometry(Q.seatDetail),
+  const seats = new THREE.InstancedMesh(seatGeometry(lay.seatDetail),
     new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.05 }), seatCount);
   for (let k = 0; k < seatCount; k++) {
     const a = seatXs[k * 3];
@@ -433,7 +434,7 @@ function build(scene, renderer, pmrem, key) {
   const crowdCount = crowdXs.length / 3;
   const torsoGeo = new THREE.BoxGeometry(0.4, 0.56, 0.24);
   torsoGeo.translate(0, 0.78, -0.02);
-  const headGeo = new THREE.IcosahedronGeometry(0.115, Q.seatDetail ? 1 : 0);
+  const headGeo = new THREE.IcosahedronGeometry(0.115, lay.seatDetail ? 1 : 0);
   headGeo.translate(0, 1.2, 0);
   const torsos = new THREE.InstancedMesh(torsoGeo, new THREE.MeshLambertMaterial(), crowdCount);
   const heads = new THREE.InstancedMesh(headGeo, new THREE.MeshLambertMaterial(), crowdCount);
@@ -482,7 +483,7 @@ function build(scene, renderer, pmrem, key) {
       member(bot0, tl0, 0.045);
       member(bot0, tr0, 0.045);
       member(tl0, tr0, 0.04);
-      if (Q.diagonals) {
+      if (lay.diagonals) {
         member(bot0, b % 2 ? tl1 : tr1, 0.04);
         member(bot1, b % 2 ? tr0 : tl0, 0.04);
       }
@@ -495,7 +496,7 @@ function build(scene, renderer, pmrem, key) {
       member(v(r, a0, T.bottom), v(r, a1, T.bottom), 0.08);
       member(v(r, a0, T.top), v(r, a1, T.top), 0.08);
       member(v(r, a0, T.bottom), v(r, a0, T.top), 0.045);
-      if (Q.diagonals) member(v(r, a0, T.bottom), v(r, a1, T.top), 0.04);
+      if (lay.diagonals) member(v(r, a0, T.bottom), v(r, a1, T.top), 0.04);
     }
   };
   ringTruss(T.inner, 24);

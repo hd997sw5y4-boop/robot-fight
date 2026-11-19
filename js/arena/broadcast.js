@@ -288,7 +288,7 @@ function frameShot(shot, a, b, t, seed, victim) {
       break;
     }
     case 'ringside': {
-      // Raised off the apron and pulled back so the 25% larger robots' heads stay in frame.
+      // Raised off the apron and pulled back so the larger robots' heads stay in frame.
       const r = 8.8 + dist * 0.5;
       _tp.copy(_mid).addScaledVector(_side, r).addScaledVector(_dir, Math.sin(t * 0.25 + seed) * 1.2);
       _tp.y = mt + 2.15 * SIZE;
