@@ -58,8 +58,8 @@ function removeGroup(g) {
   if (i >= 0) groups.splice(i, 1);
 }
 
-// stumpsOnly: a new round repairs the robots, so wires hanging from their stumps go; wires
-// on the torn-off pieces lying on the mat stay with them until the match ends.
+// stumpsOnly: a new round repairs the robots, so wires hanging from their stumps go.
+// Full clear (default) also drops wires on torn-off pieces — debris is cleared between rounds.
 export function clearWires(stumpsOnly = false) {
   if (stumpsOnly) {
     for (const g of groups.slice()) if (!g.piece) removeGroup(g);
@@ -102,6 +102,8 @@ export function stepWires(dt) {
   for (const g of groups.slice()) {
     g.t += dt;
     if (!g.anchor.parent && !g.anchor.isScene) { removeGroup(g); continue; }
+    // Settled torn-off pieces: leave the last posed wires alone, no verlet or arcs.
+    if (g.piece && g.anchor.userData && g.anchor.userData.resting) continue;
     g.anchor.updateWorldMatrix(true, false);
     g.anchor.getWorldPosition(_a);
     for (const w of g.wires) {

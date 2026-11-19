@@ -4625,8 +4625,8 @@ function startFightFromShell(opts) {
   // Shell owns best-of-N rounds; stash opts.bestOf so getFightState can report it if no shell match is running.
   if (opts.bestOf === 1 || opts.bestOf === 3 || opts.bestOf === 5) match.bestOf = opts.bestOf;
   if (opts.onEnd) onFightEnd(opts.onEnd);
-  // Round 2+ of the same match: the wreckage of earlier rounds stays on the mat.
-  resetMatch(opts.round != null && opts.round > 1);
+  // Debris is cleared between rounds so landed pieces cannot pile up and cost frames.
+  resetMatch(false);
   if (opts.skipIntro) {
     match.phase = 'fight';
     match.introT = 99;

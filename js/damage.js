@@ -1,6 +1,6 @@
 import { playSfx } from './audio.js';
 import { announce } from './announcer.js';
-import { spawnDebris, clearPhysicsDebris, PART_MASS, stepPhysics } from './physics.js';
+import { spawnDebris, clearPhysicsDebris, freezeDebris, dropDebris, getPhysicsDebris, debrisCaps, PART_MASS, stepPhysics } from './physics.js';
 import * as THREE from 'three';
 import { DAMAGE, ARENA, SIZE } from './config.js';
 import { getDamageLevel } from './settings.js';
@@ -891,26 +891,25 @@ const oilDrops = [];
 const puddles = [];
 const OIL_GEO = new THREE.SphereGeometry(0.016, 6, 4);
 // ---- Small debris: real robot parts ----
-// Solid hits knock pieces off the struck part (heavier hits shed more). Two kinds:
-//  * Torn-off skin: triangles cut from the defender's own skinned mesh right around the
-//    contact point (current pose, same material, UVs, paint, chrome and decals), thickened
-//    into a bent shell. Finger hits on an arm can tear a real finger segment off the hand.
-//    These are unique geometry, kept in a small ring (oldest removed).
-//  * Tech parts: panel-lined armor plates, PCB chips (green board, gold traces, glowing
-//    LEDs), coloured wire bundles, servos, gears, bolts and nuts. Each settles out of physics
-//    into an InstancedMesh batch (one draw call per shape+material), CHIP_MAX on the mat.
+// Solid hits knock pieces off the struck part (heavier hits shed more). Torn-off skin
+// is triangles cut from the defender's own skinned mesh around the contact point
+// (current pose, same material, UVs, paint, chrome and decals), thickened into a bent
+// shell. Unique geometry, kept in a small ring; once settled the pieces are frozen
+// (no physics, no shadows) and merged into one mesh per material.
 function mergeGeos(list) {
   const pos = [], nor = [], uv = [], col = [], idx = [];
   let base = 0;
   for (const item of list) {
     const g = item.g || item;
-    const c = new THREE.Color(item.color != null ? item.color : 0xffffff);
-    const p = g.attributes.position, n = g.attributes.normal, t = g.attributes.uv;
+    const c = item.color != null ? new THREE.Color(item.color) : null;
+    const p = g.attributes.position, n = g.attributes.normal, t = g.attributes.uv, vc = g.attributes.color;
     for (let i = 0; i < p.count; i++) {
       pos.push(p.getX(i), p.getY(i), p.getZ(i));
-      nor.push(n.getX(i), n.getY(i), n.getZ(i));
+      nor.push(n ? n.getX(i) : 0, n ? n.getY(i) : 1, n ? n.getZ(i) : 0);
       uv.push(t ? t.getX(i) : 0, t ? t.getY(i) : 0);
-      col.push(c.r, c.g, c.b);
+      if (c) col.push(c.r, c.g, c.b);
+      else if (vc) col.push(vc.getX(i), vc.getY(i), vc.getZ(i));
+      else col.push(1, 1, 1);
     }
     if (g.index) for (let i = 0; i < g.index.count; i++) idx.push(g.index.getX(i) + base);
     else for (let i = 0; i < p.count; i++) idx.push(i + base);
@@ -923,146 +922,6 @@ function mergeGeos(list) {
   out.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   out.setIndex(idx);
   return out;
-}
-const tx = (g, x, y, z) => { g.translate(x, y, z); return g; };
-const rx = (g, a) => { g.rotateX(a); return g; };
-const rz = (g, a) => { g.rotateZ(a); return g; };
-function canvasTex(w, h, draw) {
-  if (typeof document === 'undefined') return null;
-  const c = document.createElement('canvas'); c.width = w; c.height = h;
-  draw(c.getContext('2d'), w, h);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
-  return t;
-}
-// Grey panel with recessed seams, rivets and a hazard stencil; tinted by the material colour.
-const PANEL_TEX = canvasTex(128, 128, (g, w, h) => {
-  g.fillStyle = '#d8d8d8'; g.fillRect(0, 0, w, h);
-  g.strokeStyle = '#3a3a3a'; g.lineWidth = 3;
-  g.beginPath(); g.moveTo(0, 46); g.lineTo(78, 46); g.lineTo(96, 64); g.lineTo(128, 64); g.moveTo(78, 46); g.lineTo(78, 0); g.moveTo(40, 46); g.lineTo(40, 128); g.stroke();
-  g.strokeStyle = 'rgba(255,255,255,0.7)'; g.lineWidth = 1;
-  g.beginPath(); g.moveTo(0, 49); g.lineTo(78, 49); g.moveTo(43, 49); g.lineTo(43, 128); g.stroke();
-  g.fillStyle = '#555'; for (const [x, y] of [[8, 8], [68, 8], [8, 36], [68, 36], [52, 60], [52, 118], [118, 76], [118, 118]]) { g.beginPath(); g.arc(x, y, 3, 0, 7); g.fill(); }
-  g.fillStyle = '#222'; for (let i = 0; i < 4; i++) { g.save(); g.translate(60 + i * 14, 92); g.transform(1, 0, -0.6, 1, 0, 0); g.fillRect(0, 0, 7, 22); g.restore(); }
-});
-const PCB_TEX = canvasTex(128, 96, (g, w, h) => {
-  g.fillStyle = '#16602a'; g.fillRect(0, 0, w, h);
-  g.strokeStyle = '#d9b44a'; g.lineWidth = 2;
-  for (let i = 0; i < 14; i++) { const y = 6 + i * 6.5; g.beginPath(); g.moveTo(0, y); g.lineTo(30 + (i * 13) % 40, y); g.lineTo(44 + (i * 13) % 40, y + 10); g.lineTo(128, y + 10); g.stroke(); }
-  g.fillStyle = '#e5c25a'; for (let i = 0; i < 18; i++) { g.beginPath(); g.arc((i * 37) % 120 + 4, (i * 23) % 88 + 4, 2.2, 0, 7); g.fill(); }
-  g.fillStyle = '#111'; g.fillRect(52, 26, 34, 34); g.fillRect(12, 60, 22, 14); g.fillRect(96, 12, 18, 10);
-  g.fillStyle = '#999'; for (let i = 0; i < 8; i++) { g.fillRect(50, 28 + i * 4, 2, 2); g.fillRect(86, 28 + i * 4, 2, 2); }
-  g.fillStyle = '#ddd'; g.font = '8px monospace'; g.fillText('RX-7', 56, 46);
-});
-const PCB_GLOW = canvasTex(128, 96, (g, w, h) => {
-  g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
-  for (const [x, y, c] of [[104, 70, '#ff2a2a'], [112, 70, '#2aff5a'], [120, 70, '#ffb020'], [20, 20, '#40a0ff'], [100, 30, '#2aff5a']]) {
-    const gr = g.createRadialGradient(x, y, 0, x, y, 6); gr.addColorStop(0, c); gr.addColorStop(1, 'rgba(0,0,0,0)');
-    g.fillStyle = gr; g.fillRect(x - 6, y - 6, 12, 12);
-  }
-});
-function plateGeo(seed) {
-  const g = new THREE.BoxGeometry(0.085, 0.007, 0.062, 8, 1, 6);
-  const p = g.attributes.position;
-  for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i), z = p.getZ(i);
-    // bent and torn: curved along x, folded corner, a crumple
-    let y = p.getY(i) + x * x * (2.5 + seed * 2) + Math.max(0, x + z - 0.05) * 0.5 * seed;
-    y += Math.sin(x * 60 + seed * 5) * Math.cos(z * 50) * 0.003;
-    p.setY(i, y);
-  }
-  g.computeVertexNormals();
-  return g;
-}
-function pcbGeo() {
-  const board = new THREE.BoxGeometry(0.075, 0.004, 0.056);
-  const chip = tx(new THREE.BoxGeometry(0.02, 0.005, 0.02), 0.004, 0.004, -0.002);
-  const cap = tx(new THREE.CylinderGeometry(0.004, 0.004, 0.01, 8), -0.022, 0.007, 0.014);
-  return mergeGeos([{ g: board }, { g: chip, color: 0x222222 }, { g: cap, color: 0x3355aa }]);
-}
-const WIRE_COLS = [0xe53935, 0xfdd835, 0x1e88e5, 0x222222, 0x43a047, 0xff8f00];
-function wireGeo(seed) {
-  const list = [];
-  const pts = [];
-  for (let i = 0; i < 6; i++) pts.push(new THREE.Vector3(i * 0.022 - 0.055, Math.sin(i * 1.3 + seed * 2) * 0.012, Math.cos(i * 0.9 + seed) * 0.018));
-  for (let k = 0; k < 3; k++) {
-    const off = new THREE.Vector3(0, (k - 1) * 0.0075, (k % 2) * 0.006);
-    const curve = new THREE.CatmullRomCurve3(pts.map((q, i) => q.clone().add(off).add(new THREE.Vector3(0, i > 3 ? (k - 1) * 0.006 * (i - 3) : 0, 0))));
-    list.push({ g: new THREE.TubeGeometry(curve, 18, 0.0042, 6), color: WIRE_COLS[(k + seed * 2) % WIRE_COLS.length] });
-  }
-  list.push({ g: tx(rz(new THREE.CylinderGeometry(0.011, 0.011, 0.016, 8), Math.PI / 2), -0.06, 0, 0), color: 0x1a1a1a }); // plug
-  for (let k = 0; k < 3; k++) list.push({ g: tx(rz(new THREE.CylinderGeometry(0.0022, 0.0022, 0.008, 5), Math.PI / 2), 0.058, (k - 1) * 0.007 + 0.01, 0.01), color: 0xd4a050 }); // bare copper ends
-  return mergeGeos(list);
-}
-function gearShape(teeth, r, depth, hole) {
-  const s = new THREE.Shape();
-  for (let i = 0; i < teeth * 2; i++) {
-    const a0 = (i / (teeth * 2)) * Math.PI * 2, a1 = ((i + 1) / (teeth * 2)) * Math.PI * 2;
-    const rr = i % 2 ? r : r + depth;
-    if (i === 0) s.moveTo(Math.cos(a0) * rr, Math.sin(a0) * rr); else s.lineTo(Math.cos(a0) * rr, Math.sin(a0) * rr);
-    s.lineTo(Math.cos(a1) * rr, Math.sin(a1) * rr);
-  }
-  const h = new THREE.Path(); h.absarc(0, 0, hole, 0, Math.PI * 2, true); s.holes.push(h);
-  return s;
-}
-function gearGeo(color, teeth, r) {
-  const g = rx(new THREE.ExtrudeGeometry(gearShape(teeth, r, 0.0055, r * 0.32), { depth: 0.007, bevelEnabled: false, curveSegments: 6 }), Math.PI / 2);
-  return mergeGeos([{ g, color }]);
-}
-function hexShape(r, hole) {
-  const s = new THREE.Shape();
-  for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; if (i) s.lineTo(Math.cos(a) * r, Math.sin(a) * r); else s.moveTo(r, 0); }
-  if (hole) { const h = new THREE.Path(); h.absarc(0, 0, hole, 0, Math.PI * 2, true); s.holes.push(h); }
-  return s;
-}
-function nutGeo() {
-  return mergeGeos([{ g: rx(new THREE.ExtrudeGeometry(hexShape(0.014, 0.007), { depth: 0.01, bevelEnabled: true, bevelSize: 0.0012, bevelThickness: 0.0012, bevelSegments: 1 }), Math.PI / 2), color: 0xb8bec6 }]);
-}
-function boltGeo() {
-  const shaft = new THREE.CylinderGeometry(0.0075, 0.0075, 0.045, 8);
-  const p = shaft.attributes.position; // thread ridges
-  for (let i = 0; i < p.count; i++) { const y = p.getY(i); if (y < 0.015) { const k = 1 + 0.12 * Math.sin(y * 900); p.setX(i, p.getX(i) * k); p.setZ(i, p.getZ(i) * k); } }
-  shaft.computeVertexNormals();
-  const head = tx(rx(new THREE.ExtrudeGeometry(hexShape(0.015), { depth: 0.01, bevelEnabled: false }), -Math.PI / 2), 0, 0.0225, 0);
-  return mergeGeos([{ g: shaft, color: 0xaab0b8 }, { g: head, color: 0x8d949c }]);
-}
-function servoGeo() {
-  const body = new THREE.BoxGeometry(0.044, 0.04, 0.022);
-  const tabs = tx(new THREE.BoxGeometry(0.064, 0.004, 0.022), 0, 0.012, 0);
-  const label = tx(new THREE.BoxGeometry(0.03, 0.016, 0.0225), 0, -0.004, 0);
-  const shaft = tx(new THREE.CylinderGeometry(0.006, 0.006, 0.008, 10), 0.01, 0.024, 0);
-  const horn = tx(new THREE.CylinderGeometry(0.004, 0.009, 0.004, 4), 0.01, 0.03, 0);
-  horn.scale(2.2, 1, 0.7);
-  const cable = new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(-0.022, -0.012, 0), new THREE.Vector3(-0.034, -0.016, 0.006), new THREE.Vector3(-0.042, -0.006, 0.012), new THREE.Vector3(-0.05, -0.012, 0.004)]), 10, 0.003, 5);
-  return mergeGeos([{ g: body, color: 0x1b1d24 }, { g: tabs, color: 0x1b1d24 }, { g: label, color: 0x2a6fd6 }, { g: shaft, color: 0xd0d0d0 }, { g: horn, color: 0xf2f2f2 }, { g: cable, color: 0xe08a1e }]);
-}
-const chipMat = (color, metal, rough, extra = {}) => new THREE.MeshStandardMaterial({ color, metalness: metal, roughness: rough, emissive: new THREE.Color(color).multiplyScalar(0.05), envMapIntensity: 1.2, ...extra });
-const CHIP_MATS = {
-  chrome: chipMat(0xd6dbe2, 0.7, 0.25, { map: PANEL_TEX }),
-  dark: chipMat(0x7a808a, 0.65, 0.38, { map: PANEL_TEX }),
-  p1: chipMat(0x3f7dff, 0.45, 0.35, { map: PANEL_TEX }),
-  p2: chipMat(0xff4a4a, 0.45, 0.35, { map: PANEL_TEX }),
-  pcb: chipMat(0xffffff, 0.2, 0.55, { map: PCB_TEX, emissiveMap: PCB_GLOW, emissive: new THREE.Color(0xffffff), emissiveIntensity: 2.2, vertexColors: true }),
-  tech: chipMat(0xffffff, 0.5, 0.4, { vertexColors: true }),
-};
-CHIP_MATS.tech.emissive.setRGB(0.03, 0.03, 0.03);
-// kind: plate uses team/chrome panel materials; others carry their own colours.
-const CHIP_GEOS = [
-  { g: plateGeo(0.2), m: 0.12, kind: 'plate', w: 2 },
-  { g: plateGeo(0.9), m: 0.12, kind: 'plate', w: 2 },
-  { g: pcbGeo(), m: 0.05, mat: 'pcb', w: 2 },
-  { g: wireGeo(0), m: 0.04, mat: 'tech', w: 1.3 },
-  { g: wireGeo(1), m: 0.04, mat: 'tech', w: 1.3 },
-  { g: servoGeo(), m: 0.08, mat: 'tech', w: 1 },
-  { g: gearGeo(0xc9a443, 12, 0.02), m: 0.05, mat: 'tech', w: 1.2 },
-  { g: gearGeo(0xb4bac2, 9, 0.014), m: 0.04, mat: 'tech', w: 1.2 },
-  { g: boltGeo(), m: 0.05, mat: 'tech', w: 1.5 },
-  { g: nutGeo(), m: 0.04, mat: 'tech', w: 1.5 },
-];
-const CHIP_WSUM = CHIP_GEOS.reduce((a, c) => a + c.w, 0);
-function pickChipGeo() {
-  let r = Math.random() * CHIP_WSUM;
-  for (let i = 0; i < CHIP_GEOS.length; i++) { r -= CHIP_GEOS[i].w; if (r <= 0) return i; }
-  return 0;
 }
 
 // --- torn skin pieces sampled from the robot itself ---
@@ -1174,34 +1033,86 @@ function launchPiece(f, mesh, mass, point, d, force, scene) {
     ownerId: f && f.id,
   });
 }
+function recForMesh(mesh) {
+  if (!mesh) return null;
+  for (const d of getPhysicsDebris()) if (d.mesh === mesh) return d;
+  return null;
+}
+function discardMesh(mesh, scene) {
+  if (!mesh) return;
+  const rec = recForMesh(mesh);
+  if (rec) dropDebris(rec);
+  for (let i = debrisList.length - 1; i >= 0; i--) if (debrisList[i].obj === mesh) debrisList.splice(i, 1);
+  if (mesh.parent) mesh.parent.remove(mesh);
+  else if (scene) scene.remove(mesh);
+  mesh.visible = false;
+  if (mesh.geometry && !mesh.userData.deformReady && !mesh.userData.shared) mesh.geometry.dispose();
+}
 function keepSkinPiece(scene, mesh) {
   skinRing.push(mesh);
   const skinCap = Math.min(SKIN_MAX + 4, damageFx().skinMax);
-  while (skinRing.length > skinCap) {
-    const old = skinRing.shift();
-    if (old.parent) old.parent.remove(old);
-    old.visible = false;
-    old.geometry.dispose();
+  while (skinRing.length > skinCap) discardMesh(skinRing.shift(), scene);
+}
+
+const FADE_T = 0.35;
+function startFade(d) { if (d && d.fade == null) d.fade = FADE_T; }
+function cullAndFadeDebris(scene, dt) {
+  const cap = debrisCaps();
+  const all = getPhysicsDebris();
+  const small = all.filter((d) => d.frozen && d.small).sort((a, b) => (a.frozenAt || 0) - (b.frozenAt || 0));
+  const big = all.filter((d) => d.frozen && !d.small).sort((a, b) => (a.frozenAt || 0) - (b.frozenAt || 0));
+  for (let i = 0; i < small.length - cap.small; i++) startFade(small[i]);
+  // Torn limbs and heads stay as static props; only the overflow fades.
+  for (let i = 0; i < big.length - cap.big; i++) startFade(big[i]);
+  for (const d of all.slice()) {
+    if (d.fade == null) continue;
+    d.fade -= dt;
+    const k = Math.max(0, d.fade / FADE_T);
+    if (d.mesh) { d.mesh.scale.setScalar(Math.max(0.01, k)); d.mesh.updateMatrix(); }
+    if (d.fade <= 0) {
+      const mesh = d.mesh;
+      dropDebris(d);
+      discardMesh(mesh, scene);
+      skinRing = skinRing.filter((m) => m !== mesh);
+    }
+  }
+  mergeSettledSkin(scene);
+}
+function mergeSettledSkin(scene) {
+  const pieces = skinRing.filter((m) => m.userData.resting && m.parent && !m.userData.mergedSink);
+  if (pieces.length < 4) return;
+  const groups = new Map();
+  for (const m of pieces) {
+    const key = (m.material && m.material.uuid) || 'x';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(m);
+  }
+  for (const list of groups.values()) {
+    if (list.length < 3) continue;
+    const geos = [];
+    for (const m of list) {
+      const g = m.geometry.clone();
+      m.updateMatrixWorld(true);
+      g.applyMatrix4(m.matrixWorld);
+      geos.push({ g });
+    }
+    const merged = mergeGeos(geos);
+    for (const item of geos) item.g.dispose();
+    const mesh = new THREE.Mesh(merged, list[0].material);
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.matrixAutoUpdate = false;
+    mesh.updateMatrix();
+    mesh.userData.resting = true;
+    mesh.userData.mergedSink = true;
+    mesh.userData.shared = true;
+    scene.add(mesh);
+    for (const m of list) discardMesh(m, scene);
+    skinRing = skinRing.filter((m) => !list.includes(m));
+    skinRing.push(mesh);
   }
 }
 
-const CHIP_MAX = IS_MOBILE ? 8 : 16;
-const chipBatches = new Map(); // `${geo}|${mat}` -> InstancedMesh
-let chipRing = []; // resting chips in order: { key, slot }
-const chipsLive = [];
-function chipBatch(scene, gi, mk) {
-  const key = gi + '|' + mk;
-  let im = chipBatches.get(key);
-  if (!im) {
-    im = new THREE.InstancedMesh(CHIP_GEOS[gi].g, CHIP_MATS[mk], CHIP_MAX);
-    im.count = 0; im.castShadow = true; im.receiveShadow = true; im.frustumCulled = false;
-    im.userData.shared = true; im.userData.free = [];
-    scene.add(im);
-    chipBatches.set(key, im);
-  }
-  if (im.parent !== scene) scene.add(im);
-  return im;
-}
 export function shedChips(f, partId, point, dir, force, scene, opts = {}) {
   // Low-count debris from the robot's own armour: sampled skin/plate pieces, team-tinted
   // by the model's materials. Generic PCB / wire / gear / bolt chips are no longer spawned.
@@ -1237,37 +1148,8 @@ export function shedChips(f, partId, point, dir, force, scene, opts = {}) {
   }
   return skins;
 }
-const _cm = new THREE.Matrix4();
-function stepChips(scene) {
-  for (let i = chipsLive.length - 1; i >= 0; i--) {
-    const c = chipsLive[i];
-    if (!c.phys.frozen) continue;
-    // At rest: into the batch, out of the scene graph.
-    const im = chipBatch(scene, c.gi, c.mk);
-    if (chipRing.length >= CHIP_MAX) {
-      // Only past CHIP_MAX chips on the mat: the oldest resting chip gives up its slot.
-      const old = chipRing.shift();
-      const oim = chipBatches.get(old.key);
-      oim.setMatrixAt(old.slot, _cm.makeScale(0, 0, 0)); oim.instanceMatrix.needsUpdate = true;
-      oim.userData.free.push(old.slot);
-    }
-    const slot = im.userData.free.length ? im.userData.free.pop() : (im.count < CHIP_MAX ? im.count++ : null);
-    c.mesh.updateMatrix();
-    if (slot != null) {
-      im.setMatrixAt(slot, c.mesh.matrix);
-      im.instanceMatrix.needsUpdate = true;
-      chipRing.push({ key: c.gi + '|' + c.mk, slot });
-    }
-    scene.remove(c.mesh);
-    chipsLive.splice(i, 1);
-  }
-}
 function clearChips(scene) {
-  for (const c of chipsLive) scene.remove(c.mesh);
-  chipsLive.length = 0;
-  chipRing = [];
-  for (const im of chipBatches.values()) { im.count = 0; im.userData.free = []; }
-  for (const m of skinRing) { if (m.parent) m.parent.remove(m); m.visible = false; m.geometry.dispose(); }
+  for (const m of skinRing.slice()) discardMesh(m, scene);
   skinRing = [];
 }
 
@@ -1500,7 +1382,7 @@ export function applyPartHit(f, partId, damage, point, dir, scene, opts = {}) {
 
 export function stepDamage(scene, dt) {
   addSparkScene(scene);
-  stepChips(scene);
+  cullAndFadeDebris(scene, dt);
   stepWires(dt);
   stepOil(scene, dt);
   const floor = ARENA.floorY + 0.02;
@@ -1738,9 +1620,8 @@ function restoreMesh(mesh) {
   }
 }
 
-// Debris (torn-off parts, fingers, plates) never fades during a match: it stays on the mat
-// (frozen once settled, see physics.js syncDebris) and is cleared only when a new match starts.
-// Between rounds of one match (keepPieces) only the effects and stump wires are cleared.
+// Debris is frozen once it settles (no physics, no per-frame stepping). Oldest small pieces
+// over the cap fade out. Everything is cleared between rounds (and at a new match).
 export function clearAllDebris(scene, keepPieces = false) {
   if (keepPieces) {
     clearWires(true);
@@ -1881,18 +1762,21 @@ export function previewDamage(p2, scene, towardCam) {
     if (d.owner !== p2.id) continue;
     const targetX = p2.root.position.x - 0.55;
     const targetZ = p2.root.position.z + 1.55;
+    const mesh = (d.phys && d.phys.mesh) || d.obj;
     if (d.phys && d.phys.body) {
       d.phys.body.position.x += (targetX - d.phys.body.position.x) * 0.8;
       d.phys.body.position.z += (targetZ - d.phys.body.position.z) * 0.8;
       if (d.phys.body.position.y < 0.12) d.phys.body.position.y = 0.12;
       d.phys.body.velocity.setZero();
       d.phys.body.angularVelocity.setZero();
-      d.phys.settled = true;
+    } else if (mesh) {
+      mesh.position.x += (targetX - mesh.position.x) * 0.8;
+      mesh.position.z += (targetZ - mesh.position.z) * 0.8;
+      if (mesh.position.y < 0.12) mesh.position.y = 0.12;
     }
+    if (d.phys) { d.phys.settled = true; if (!d.phys.frozen) freezeDebris(d.phys); }
     d.settled = true;
-    if (d.phys && d.phys.mesh) {
-      d.obj.position.copy(d.phys.mesh.position);
-    }
+    if (mesh) { d.obj.position.copy(mesh.position); mesh.updateMatrix(); }
   }
   const debris = debrisList.map((d) => ({
     x: d.obj.position.x, y: d.obj.position.y, z: d.obj.position.z, settled: d.settled, owner: d.owner,

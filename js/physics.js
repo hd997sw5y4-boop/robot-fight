@@ -188,7 +188,7 @@ export function spawnDebris({ mesh, mass, velocity, angularVelocity, ownerId, sm
   if (angularVelocity) body.angularVelocity.set(angularVelocity.x, angularVelocity.y, angularVelocity.z);
   else body.angularVelocity.set((Math.random() - 0.5) * 14, (Math.random() - 0.5) * 16, (Math.random() - 0.5) * 14);
   body.collisionFilterGroup = G.DEBRIS;
-  // Brief ignore of fighters so the torn piece clears the body, then ricochet off everyone.
+  // Arena and other debris only — never fighters, so landed pieces cannot keep colliding.
   body.collisionFilterMask = G.ARENA | G.DEBRIS;
   body.userData = { kind: 'debris', ownerId: ownerId || null };
   world.addBody(body);
@@ -211,83 +211,93 @@ export function spawnDebris({ mesh, mass, velocity, angularVelocity, ownerId, sm
 export function getPhysicsDebris() { return debris; }
 
 export function clearPhysicsDebris() {
-  for (const d of debris) if (!d.frozen) world.removeBody(d.body);
+  for (const d of debris) {
+    if (d.body && d.body.world) world.removeBody(d.body);
+    d.body = null;
+  }
   debris.length = 0;
 }
 
-// Debris stays for the whole match; only its physics is capped. Past MAX_DYNAMIC moving
-// pieces, the oldest small ones lying on the mat are settled (static + asleep); past
-// MAX_BODIES bodies, the oldest small settled pieces lose their body and stay as frozen meshes.
-const DEBRIS_CAP = { high: { dynamic: 18, bodies: 44 }, low: { dynamic: 8, bodies: 20 } };
+// In-flight pieces stay in cannon. Once they slow down or have been on the mat ~1.5 s,
+// the body is removed and the mesh is a cheap static prop (no shadows, no per-frame sync).
+const DEBRIS_CAP = { high: { dynamic: 8, small: 12, big: 10 }, low: { dynamic: 5, small: 8, big: 8 } };
 let debrisLow = false;
 export function setDebrisLow(on) { debrisLow = !!on; }
-function settle(d) {
-  d.settled = true;
-  d.body.velocity.setZero();
-  d.body.angularVelocity.setZero();
-  d.body.type = CANNON.Body.STATIC;
-  d.body.sleep();
+export function debrisCaps() { return DEBRIS_CAP[debrisLow ? 'low' : 'high']; }
+
+function poseMeshFromBody(d) {
+  if (!d.body || !d.mesh) return;
+  const floor = matY() + 0.02;
+  d.mesh.position.set(d.body.position.x, Math.max(d.body.position.y, floor), d.body.position.z);
+  d.mesh.quaternion.set(d.body.quaternion.x, d.body.quaternion.y, d.body.quaternion.z, d.body.quaternion.w);
 }
+
+export function freezeDebris(d) {
+  if (!d || d.frozen) return;
+  d.settled = true;
+  d.frozen = true;
+  d.frozenAt = performance.now();
+  if (d.body) {
+    poseMeshFromBody(d);
+    d.body.velocity.setZero();
+    d.body.angularVelocity.setZero();
+    if (d.body.world) world.removeBody(d.body);
+    d.body = null;
+  }
+  const mesh = d.mesh;
+  if (!mesh) return;
+  mesh.userData.resting = true;
+  mesh.traverse((o) => {
+    if (!o.isMesh && !o.isLine) return;
+    o.castShadow = false;
+    if (o.isMesh) o.receiveShadow = false;
+    o.matrixAutoUpdate = false;
+    o.updateMatrix();
+  });
+  mesh.matrixAutoUpdate = false;
+  mesh.updateMatrix();
+}
+
+export function dropDebris(d) {
+  if (!d) return;
+  freezeDebris(d);
+  const i = debris.indexOf(d);
+  if (i >= 0) debris.splice(i, 1);
+}
+
 function capDebris() {
-  const cap = DEBRIS_CAP[debrisLow ? 'low' : 'high'];
-  const live = debris.filter((d) => !d.frozen);
-  // In-flight chips: past the cap the oldest drop out of physics where they are (on the mat).
-  const chips = live.filter((d) => d.small);
-  const maxChips = debrisLow ? 14 : 36;
-  if (chips.length > maxChips) {
-    const old = chips.sort((a, b) => b.live - a.live).slice(0, chips.length - maxChips);
-    for (const d of old) {
-      d.body.position.y = Math.min(d.body.position.y, matY() + 0.02);
-      d.mesh.position.set(d.body.position.x, d.body.position.y, d.body.position.z);
-      world.removeBody(d.body); d.settled = true; d.frozen = true;
-    }
-  }
-  const moving = live.filter((d) => !d.settled && !d.small);
+  const cap = debrisCaps();
+  const moving = debris.filter((d) => !d.frozen && d.body);
   if (moving.length > cap.dynamic) {
-    const cand = moving.filter((d) => d.live > 0.6 && d.body.position.y < matY() + 0.62 * SIZE)
-      .sort((a, b) => (a.mass - b.mass) || (b.live - a.live));
-    for (let i = 0; i < Math.min(cand.length, moving.length - cap.dynamic); i++) settle(cand[i]);
-  }
-  if (live.length > cap.bodies) {
-    const cand = live.filter((d) => d.settled).sort((a, b) => (a.mass - b.mass) || (b.live - a.live));
-    for (let i = 0; i < Math.min(cand.length, live.length - cap.bodies); i++) {
-      world.removeBody(cand[i].body);
-      cand[i].frozen = true; // the mesh stays exactly where it came to rest
-    }
+    const extra = moving.slice().sort((a, b) => (b.live || 0) - (a.live || 0));
+    for (let i = 0; i < moving.length - cap.dynamic; i++) freezeDebris(extra[i]);
   }
 }
 
 function syncDebris(dt) {
   capDebris();
+  const floor = matY() + 0.02;
+  const nearMat = matY() + 0.62 * SIZE;
   for (const d of debris) {
-    if (d.frozen) continue;
+    if (d.frozen || !d.body) continue;
     d.live = (d.live || 0) + dt;
-    if (d.live > 0.2 && (d.body.collisionFilterMask & G.FIGHTER) === 0) {
-      d.body.collisionFilterMask = G.ARENA | G.FIGHTER | G.DEBRIS;
-    }
-    if (!d.settled) {
-      const v = d.body.velocity.length();
-      const w = d.body.angularVelocity.length();
-      const onMat = d.body.position.y < matY() + 0.62 * SIZE;
-      if (onMat && v < 0.32 && w < 0.85) {
-        d.still += dt;
-        if (d.still > 0.4) {
-          settle(d);
-          // Small chips leave the physics world as soon as they rest: the mesh stays put
-          // (damage.js folds it into an instanced batch).
-          if (d.small) { world.removeBody(d.body); d.frozen = true; }
-        }
-      } else {
-        d.still = 0;
-      }
-    }
-    const floor = matY() + 0.02;
     if (d.body.position.y < floor) {
       d.body.position.y = floor;
       if (d.body.velocity.y < 0) d.body.velocity.y = 0;
     }
-    d.mesh.position.set(d.body.position.x, Math.max(d.body.position.y, floor), d.body.position.z);
-    d.mesh.quaternion.set(d.body.quaternion.x, d.body.quaternion.y, d.body.quaternion.z, d.body.quaternion.w);
+    const v = d.body.velocity.length();
+    const w = d.body.angularVelocity.length();
+    const onMat = d.body.position.y < nearMat;
+    d.onMat = onMat ? (d.onMat || 0) + dt : 0;
+    const slow = v < 0.28 && w < 0.7;
+    if (onMat && slow) d.still = (d.still || 0) + dt;
+    else d.still = 0;
+    // Rest: below a small speed for a moment, or about 1.5 s on the ground.
+    if (onMat && (d.still > 0.2 || d.onMat >= 1.5)) {
+      freezeDebris(d);
+      continue;
+    }
+    poseMeshFromBody(d);
   }
 }
 
