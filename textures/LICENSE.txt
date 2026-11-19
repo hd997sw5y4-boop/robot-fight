@@ -1,6 +1,6 @@
 Metal009 (resized to 512) from ambientCG — CC0 1.0. https://ambientcg.com/view?id=Metal009
 Metal008 (scratched metal, 1K, recompressed) from ambientCG — CC0 1.0. https://ambientcg.com/view?id=Metal008
-  Files: chrome_color.jpg, chrome_rough.jpg, chrome_metal.jpg, chrome_normal.jpg
+  (files removed; no longer used in the game)
 Rust004 (rust/grunge, 1K, recompressed) from ambientCG — CC0 1.0. https://ambientcg.com/view?id=Rust004
-  Files: rust_color.jpg, rust_rough.jpg
+  (files removed; no longer used in the game)
 These maps are mixed at runtime into the octagon chrome mat (scuffs, rust patches, varied roughness).

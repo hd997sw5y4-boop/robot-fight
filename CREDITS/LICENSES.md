@@ -93,8 +93,8 @@ Walking footsteps layer existing CC0 Kenney `thud_*` + `clank_h_*` (and sometime
 - **Metal001** — https://ambientcg.com/view?id=Metal001 — octagon fighting mat base (1K JPG color, OpenGL normal, roughness, metalness; `textures/mat_metal_*.jpg`), tiled in world XZ. Painted start lines, corner wedges, ROBOT FIGHT text and the LED edge are a transparent decal layered on top (`matDecalTexture` in `js/arena.js`).
 - **Metal009** — https://ambientcg.com/view?id=Metal009 — cage/post metal (`textures/metal_*.jpg`); also applied to pit-crew racks and tools.
 - **Wood062** — https://ambientcg.com/view?id=Wood062 — pit-crew desks and chairs (1K JPG color, OpenGL normal, roughness, resized to 512; `textures/pit-crew/wood_*.jpg`).
-- **Metal008** (scratched metal) — https://ambientcg.com/view?id=Metal008 — previously the chrome mat; files remain at `textures/chrome_*.jpg` but are no longer used as the mat material.
-- **Rust004** — https://ambientcg.com/view?id=Rust004 — rust and grunge masks previously mixed into the chrome mat (`textures/rust_*.jpg`); unused by the current Metal001 mat.
+- **Metal008** (scratched metal) — https://ambientcg.com/view?id=Metal008 — previously the chrome mat; the chrome texture files have been removed.
+- **Rust004** — https://ambientcg.com/view?id=Rust004 — rust and grunge masks previously mixed into the chrome mat the rust texture files have been removed.
 - **Concrete034** — https://ambientcg.com/view?id=Concrete034 — stadium stands and walls (`textures/stadium/concrete_*.jpg`; color and normal are non-square 1024×512, roughness 512). No longer used on the arena floor.
 - **Concrete023** — https://ambientcg.com/view?id=Concrete023 — polished dark concrete arena floor outside the ring (`textures/stadium/floor_*.jpg`; square 1K JPG color, OpenGL normal, roughness), tiled at 4 m.
 

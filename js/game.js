@@ -426,7 +426,6 @@ function loadTex(url, colorSpace) {
 }
 const metalColor = loadTex('./textures/metal_color.jpg', THREE.SRGBColorSpace);
 const metalRough = loadTex('./textures/metal_rough.jpg');
-const metalMetal = loadTex('./textures/metal_metalness.jpg');
 
 function tiled(src, sx, sy) {
   const t = src.clone();
@@ -4664,7 +4663,7 @@ function getFightState() {
 }
 
 function onLoad(gltf) {
-  const built = buildArenaVisual(scene, { tiled, metalColor, metalRough, metalMetal });
+  const built = buildArenaVisual(scene, { tiled, metalColor, metalRough });
   const lightRig = addArenaLights(scene, built.fixturePos);
   syncEnvironment(); // the void wall exists now: hide it if the HDRI backdrop is on
   // Sharp planar mirror on the metal mat (hidden on Low).

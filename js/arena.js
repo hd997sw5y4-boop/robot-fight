@@ -164,7 +164,7 @@ function cageHeight() {
 
 export const FENCE_TOP = 1.48;
 
-export function buildArena(scene, { tiled, metalColor, metalRough, metalMetal }) {
+export function buildArena(scene, { tiled, metalColor, metalRough }) {
   const group = new THREE.Group();
   const a = ARENA.apothem;
   const r = a / Math.cos(Math.PI / 8);
