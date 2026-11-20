@@ -329,12 +329,29 @@ export function dropDebris(d) {
   if (i >= 0) debris.splice(i, 1);
 }
 
+// Nothing may stop in mid-air: a piece is only frozen as a prop when it is down on the mat;
+// one that has to stop anywhere else (over the moving-piece cap, or still not at rest after
+// DEBRIS_MAX_LIVE s, e.g. caught on the cage rail) shrinks away and is removed instead
+// (damage.js runs the fade and disposes the mesh).
+const DEBRIS_MAX_LIVE = 5;
+const DEBRIS_FADE = 0.35;
+function retireDebris(d) {
+  const grounded = d.body && d.body.position.y < matY() + 0.2 * SIZE && d.body.velocity.length() < 1.2;
+  freezeDebris(d);
+  if (!grounded && d.fade == null) d.fade = DEBRIS_FADE;
+}
+
+/** Off the fight loop (menus, fighter select): nothing may hang in mid-air until the next fight. */
+export function settleLooseDebris() {
+  for (const d of debris.slice()) if (!d.frozen && d.body) retireDebris(d);
+}
+
 function capDebris() {
   const cap = debrisCaps();
   const moving = debris.filter((d) => !d.frozen && d.body);
   if (moving.length > cap.dynamic) {
     const extra = moving.slice().sort((a, b) => (b.live || 0) - (a.live || 0));
-    for (let i = 0; i < moving.length - cap.dynamic; i++) freezeDebris(extra[i]);
+    for (let i = 0; i < moving.length - cap.dynamic; i++) retireDebris(extra[i]);
   }
 }
 
@@ -369,6 +386,7 @@ function syncDebris(dt) {
       freezeDebris(d);
       continue;
     }
+    if (d.live > DEBRIS_MAX_LIVE) { retireDebris(d); continue; }
     poseMeshFromBody(d);
   }
 }

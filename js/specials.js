@@ -15,7 +15,9 @@ export function initSpecial(f) {
 
 export function specialAvail(f) {
   const energy = f && f.energy != null ? f.energy : SPECIAL.energyMax;
-  const busy = !f || !f.state || f.state === 'ko' || f.state === 'down' || f.state === 'getup' || f.state === 'hit'
+  // A special still in flight (a rocket fist returning after the punch clip already ended) is
+  // busy too: starting another one used to overwrite it and strand its fist and trail mid-air.
+  const busy = !f || !f.state || !!f.special || f.state === 'ko' || f.state === 'down' || f.state === 'getup' || f.state === 'hit'
     || f.state === 'punch' || f.state === 'kick' || f.state === 'ground' || f.state === 'dash' || f.state === 'rocket';
   const arm = ctx && ctx.canPunch ? ctx.canPunch(f) : true;
   return {
@@ -98,9 +100,15 @@ function fadeTrail(trail, dt) {
 }
 
 function disposeTrail(trail) {
-  for (const m of trail.pts) { if (m.parent) m.parent.remove(m); }
+  for (const m of trail.pts) { if (m.parent) m.parent.remove(m); m.visible = false; }
   trail.geo.dispose();
   trail.mat.dispose();
+}
+
+function disposeFist(fist) {
+  if (!fist) return;
+  if (fist.parent) fist.parent.remove(fist);
+  fist.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
 }
 
 function jetSprite(color) {
@@ -118,7 +126,7 @@ export function clearSpecial(f) {
     return;
   }
   const s = f.special;
-  if (s.fist && s.fist.parent) s.fist.parent.remove(s.fist);
+  disposeFist(s.fist);
   if (s.trail) disposeTrail(s.trail);
   if (s.jets) for (const j of s.jets) { if (j.parent) j.parent.remove(j); if (j.geometry) j.geometry.dispose(); if (j.material) j.material.dispose(); }
   hideHand(f, false);
@@ -131,6 +139,7 @@ export function tryRocketPunch(f, other) {
   if (ctx.inBell && ctx.inBell()) { if (ctx.logBellBlock) ctx.logBellBlock(f.id, 'rocket_punch'); return false; }
   const av = specialAvail(f);
   if (!av.rocket_punch) return false;
+  clearSpecial(f);
   spendEnergy(f, SPECIAL.rocketCost);
   f.specialKind = 'rocket';
   const clip = (f.actions && (f.actions.RightHook || f.actions.Uppercut || f.actions[MODEL.animations.punch])) ? (f.actions.RightHook ? 'RightHook' : (f.actions.Uppercut ? 'Uppercut' : MODEL.animations.punch)) : MODEL.animations.punch;
@@ -171,6 +180,7 @@ export function tryDash(f, other, dir) {
   const av = specialAvail(f);
   if (dir > 0 && !av.dash_forward) return false;
   if (dir < 0 && !av.dash_back) return false;
+  clearSpecial(f);
   spendEnergy(f, SPECIAL.dashCost);
   f.specialKind = 'dash';
   f.state = 'dash';
@@ -198,6 +208,11 @@ function flyRocket(f, other, dt) {
   const s = f.special;
   const spec = SPECIAL.rocket;
   s.t += dt;
+  s.life = (s.life || 0) + dt;
+  // Knocked out of the wind-up (hit, knocked down, KO, round over): the fist never launches.
+  // In flight it always finishes and comes home; a hard lifetime cleans up whatever happens.
+  const owner = f.state === 'punch' || f.state === 'idle' || f.state === 'block';
+  if ((s.phase === 'wind' && !owner) || s.life > spec.wind + spec.fly + spec.ret + 0.8) { clearSpecial(f); return; }
   const wrist = wristOf(f);
   const wp = new THREE.Vector3();
   if (wrist) wrist.getWorldPosition(wp);
@@ -250,13 +265,12 @@ function flyRocket(f, other, dt) {
       s.from = s.fist.position.clone();
       if (!s.hit && ctx.logSpecial) ctx.logSpecial(f.id, 'rocket_punch', 'miss');
     } else {
-      hideHand(f, false);
-      if (s.fist.parent) s.fist.parent.remove(s.fist);
-      disposeTrail(s.trail);
-      f.special = null;
-      f.specialKind = null;
-      if (ctx.endAttack) ctx.endAttack(f, 0.14);
-      else { f.state = 'idle'; f.cooldown = 0.18; }
+      clearSpecial(f);
+      // Only a robot still in its punch goes back to the guard (not one hit or downed meanwhile).
+      if (f.state === 'punch') {
+        if (ctx.endAttack) ctx.endAttack(f, 0.14);
+        else { f.state = 'idle'; f.cooldown = 0.18; }
+      }
     }
   }
 }

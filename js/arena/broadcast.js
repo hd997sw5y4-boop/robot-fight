@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { SIZE, ARENA } from '../config.js';
 import { isSettingsOpen } from '../settings.js';
 import { snapshotWires, applyWires, restoreWires } from '../wires.js';
+import { debrisPieces } from '../damage.js';
 
 const CFG = {
   recordHz: 30,
@@ -95,6 +96,8 @@ class FighterTrack {
 const _qa = new THREE.Quaternion();
 const _qb = new THREE.Quaternion();
 const lerp = (a, b, t) => a + (b - a) * t;
+const MAX_PIECES = 32; // torn-off parts recorded per frame (bounded)
+const PSTRIDE = 9;     // obj, owner (0 = p1, 1 = p2), position xyz, quaternion xyzw
 
 const rec = {
   times: null, head: 0, count: 0, tracks: [], debris: [], baseline: null,
@@ -112,15 +115,12 @@ const rec = {
     const slot = this.head;
     this.times[slot] = t;
     for (const tr of this.tracks) tr.record(slot);
-    // Scene-level dynamic objects (torn-off parts in debris pivots): world transforms.
+    // Torn-off parts (debris pivots, direct scene children): world pose + owner, a few per frame.
     const list = [];
-    for (const o of ctx.scene.children) {
-      if (this.baseline.has(o) || o.isLight || !o.visible || list.length >= 48 * 8) continue;
-      if (o.name === 'stadiumArena' || o.name === 'crowdWatchRig' || this.tracks.some((t) => t.f.root === o)) continue;
-      if (!(o.isGroup || o.isMesh) || o.isInstancedMesh) continue;
-      if (o.userData && o.userData.wire) continue;
-      if (o.name === 'stumpWire') continue;
-      list.push(o, o.position.x, o.position.y, o.position.z, o.quaternion.x, o.quaternion.y, o.quaternion.z, o.quaternion.w);
+    for (const d of debrisPieces()) {
+      if (list.length >= MAX_PIECES * PSTRIDE) break;
+      const o = d.obj;
+      list.push(o, d.owner === 'p2' ? 1 : 0, o.position.x, o.position.y, o.position.z, o.quaternion.x, o.quaternion.y, o.quaternion.z, o.quaternion.w);
     }
     this.debris[slot] = list;
     this.wires[slot] = snapshotWires();
@@ -132,47 +132,7 @@ const rec = {
     return (this.head - this.count + i + cap * 2) % cap;
   },
   oldest() { return this.count ? this.times[this.slotAt(0)] : 0; },
-  find(t) {
-    // Linear scan is fine (<= 184 samples).
-    let a = this.slotAt(0);
-    for (let i = 1; i < this.count; i++) {
-      const s = this.slotAt(i);
-      if (this.times[s] > t) {
-        const ta = this.times[a];
-        const k = (t - ta) / Math.max(1e-6, this.times[s] - ta);
-        return [a, s, Math.min(1, Math.max(0, k))];
-      }
-      a = s;
-    }
-    return [a, a, 0];
-  },
 };
-
-// Debris during replay: objects that did not exist yet are parked on their first recorded pose
-// (where the part tore off), so the limb still reads as attached before the tear.
-const debrisSaved = new Map();
-function applyDebris(a) {
-  debrisSaved.clear();
-  const firstPose = new Map();
-  for (let i = 0; i < rec.count; i++) {
-    const l = rec.debris[rec.slotAt(i)];
-    if (!l) continue;
-    for (let k = 0; k < l.length; k += 8) if (!firstPose.has(l[k])) firstPose.set(l[k], [l, k]);
-  }
-  const at = new Map();
-  const la = rec.debris[a] || [];
-  for (let k = 0; k < la.length; k += 8) at.set(la[k], [la, k]);
-  for (const [o, ref] of firstPose) {
-    const [l, k] = at.get(o) || ref;
-    debrisSaved.set(o, [o.position.clone(), o.quaternion.clone()]);
-    o.position.set(l[k + 1], l[k + 2], l[k + 3]);
-    o.quaternion.set(l[k + 4], l[k + 5], l[k + 6], l[k + 7]);
-  }
-}
-function restoreDebris() {
-  for (const [o, [p, q]] of debrisSaved) { o.position.copy(p); o.quaternion.copy(q); }
-  debrisSaved.clear();
-}
 
 // ---------------------------------------------------------------- director framing
 const _a = new THREE.Vector3();
@@ -254,7 +214,9 @@ function fighterPositions(fighters) {
 
 function snapshotState(f) {
   let det = 0;
+  // Whole limbs and torn-off sub-parts (hands, feet, fingers) both count as a tear.
   if (f.parts) for (const k in f.parts) if (f.parts[k] && f.parts[k].detached) det++;
+  if (f.subs) for (const k in f.subs) if (f.subs[k] && f.subs[k].detached) det++;
   return { health: f.health, state: f.state, det };
 }
 
@@ -475,6 +437,21 @@ function keepDuringReplay(o) {
 }
 
 const clipSaved = { active: false, hidden: [], debris: new Map() };
+const _pm = new THREE.Matrix4();
+const _pr = new THREE.Matrix4();
+const _pp = new THREE.Vector3();
+const _ps = new THREE.Vector3();
+const _pq = new THREE.Quaternion();
+const _rq = new THREE.Quaternion();
+const _rp = new THREE.Vector3();
+const _rs = new THREE.Vector3();
+// A fighter root's recorded world matrix in clip frame fi (the root is node 0 of its track).
+function rootMatrix(track, fi, out) {
+  const n = track.tr.nodes.length;
+  const b = track.buf;
+  const k = fi * n * 10;
+  return out.compose(_rp.set(b[k], b[k + 1], b[k + 2]), _rq.set(b[k + 3], b[k + 4], b[k + 5], b[k + 6]), _rs.set(b[k + 7], b[k + 8], b[k + 9]));
+}
 /** Pose the fighters (and torn-off parts) as they were at clip time t (seconds from clip start).
     Returns the two fighter root positions. Call restoreClipPose() after the render. */
 export function applyClipPose(clip, t) {
@@ -484,22 +461,33 @@ export function applyClipPose(clip, t) {
   const b = Math.min(clip.times.length - 1, a + 1);
   const k = Math.max(0, Math.min(1, (tt - clip.times[a]) / Math.max(1e-6, clip.times[b] - clip.times[a])));
   for (const { tr, buf, vis } of clip.tracks) { tr.save(); tr.apply(buf, vis, a, b, k); }
-  // Debris known to the clip: its recorded pose (or first pose before it existed). Others: hidden.
-  const known = new Map();
-  for (const list of clip.debris) for (let j = 0; j < list.length; j += 8) if (!known.has(list[j])) known.set(list[j], [list, j]);
-  const at = new Map();
-  const la = clip.debris[k < 0.5 ? a : b];
-  for (let j = 0; j < la.length; j += 8) at.set(la[j], [la, j]);
+  // Torn-off parts: their recorded flight from the frame they tore off. Before that they ride
+  // along with their robot (kept at the tear-frame offset from its root), since the robot's
+  // skin already has the hole. Parts cleared since (new round, faded) are put back for the render.
+  const first = new Map();
+  clip.debris.forEach((list, fi) => { for (let j = 0; j < list.length; j += PSTRIDE) if (!first.has(list[j])) first.set(list[j], [fi, list, j]); });
+  const fi = k < 0.5 ? a : b;
   clipSaved.debris.clear();
-  for (const [o, ref] of known) {
-    const [l, j] = at.get(o) || ref;
-    clipSaved.debris.set(o, [o.position.clone(), o.quaternion.clone()]);
-    o.position.set(l[j + 1], l[j + 2], l[j + 3]);
-    o.quaternion.set(l[j + 4], l[j + 5], l[j + 6], l[j + 7]);
+  for (const [o, [f0, l0, j0]] of first) {
+    clipSaved.debris.set(o, [o.position.clone(), o.quaternion.clone(), o.visible, o.parent]);
+    if (!o.parent) ctx.scene.add(o);
+    o.visible = true;
+    let ref = null;
+    for (let g = fi; g >= f0 && !ref; g--) { const l = clip.debris[g]; for (let j = 0; j < l.length; j += PSTRIDE) if (l[j] === o) { ref = [l, j]; break; } }
+    if (ref) {
+      const [l, j] = ref;
+      o.position.set(l[j + 2], l[j + 3], l[j + 4]);
+      o.quaternion.set(l[j + 5], l[j + 6], l[j + 7], l[j + 8]);
+    } else {
+      const track = clip.tracks[l0[j0 + 1]];
+      _pm.compose(_pp.set(l0[j0 + 2], l0[j0 + 3], l0[j0 + 4]), _pq.set(l0[j0 + 5], l0[j0 + 6], l0[j0 + 7], l0[j0 + 8]), _ps.set(1, 1, 1));
+      _pm.premultiply(rootMatrix(track, f0, _pr).invert()).premultiply(rootMatrix(track, fi, _pr));
+      _pm.decompose(o.position, o.quaternion, _ps);
+    }
   }
   clipSaved.hidden.length = 0;
   for (const o of ctx.scene.children) {
-    if (keepDuringReplay(o) || known.has(o) || !o.visible) continue;
+    if (keepDuringReplay(o) || first.has(o) || !o.visible) continue;
     if (!(o.isGroup || o.isMesh) || o.isInstancedMesh) continue;
     if (clip.tracks.some((x) => x.tr.f.root === o)) continue;
     o.visible = false;
@@ -516,7 +504,10 @@ export function applyClipPose(clip, t) {
 export function restoreClipPose(clip) {
   if (!clipSaved.active) return;
   for (const { tr } of clip.tracks) tr.restore();
-  for (const [o, [p, q]] of clipSaved.debris) { o.position.copy(p); o.quaternion.copy(q); }
+  for (const [o, [p, q, v, parent]] of clipSaved.debris) {
+    o.position.copy(p); o.quaternion.copy(q); o.visible = v;
+    if (!parent && o.parent) o.parent.remove(o);
+  }
   restoreWires();
   for (const o of clipSaved.hidden) o.visible = true;
   clipSaved.debris.clear();

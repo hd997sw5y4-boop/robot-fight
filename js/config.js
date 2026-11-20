@@ -89,8 +89,8 @@ export const MODEL = {
       torso: ['HitToBody', 'BigStomachHit', 'Reaction'],
       armL: ['HitToBody', 'Stunned', 'Reaction'],
       armR: ['HitToBody', 'Stunned', 'Reaction'],
-      legL: ['HitOnLegs', 'Reaction'],
-      legR: ['HitOnLegs', 'Reaction'],
+      legL: ['Reaction', 'Stunned'], // HitOnLegs is a sweep to the mat: heavy leg knockdowns only
+      legR: ['Reaction', 'Stunned'],
     },
     stunned: 'Stunned',
     hitHeavy: 'StumbleBackwards', // also used in knockdowns-getups

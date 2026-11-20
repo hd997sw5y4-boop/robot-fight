@@ -27,6 +27,7 @@ import {
   attachFighter,
   setFighterMove,
   stepPhysics,
+  settleLooseDebris,
   impactVelocity,
   resetFighterPhysics,
   clearPhysicsDebris,
@@ -1267,6 +1268,7 @@ const TOPPLE_POSES = ['HitOnLegs', 'HeadHit', 'BigStomachHit', 'Stunned', 'HitTo
 const SPECIAL_STRIKES = new Set([...(MODEL.animations.kickSpecial || []), ...(MODEL.animations.flipSpecial || [])]);
 const STRIKE_VMAX = 12.5 * SIZE; // m/s: fastest a fist or foot may travel
 const RETRACT_SPEED = 2.4; // clip seconds per second when a landed strike is pulled back
+const PUNCH_RETURN = 0.72; // punches' pull-back (follow-through or rewind) speed vs the strike
 function measureStrikes(f) {
   const A = MODEL.animations;
   const kicks = new Set([...(A.kickVariants || []), ...(A.kickSpecial || []), ...(A.flipSpecial || []), A.kick]);
@@ -1925,7 +1927,7 @@ function setAnim(f, name, fade = 0.2) {
     || (MODEL.animations.blockVariants || []).includes(clipName)
     || (MODEL.animations.victoryVariants || []).includes(clipName)
     || clipName === MODEL.animations.victory
-    || ['KnockedOut', 'GettingUp', 'KnockedDown', 'StandingReactDeathBackward', 'StumbleBackwards', 'LivershotKnockdown'].includes(clipName);
+    || ['KnockedOut', 'GettingUp', 'KnockedDown', 'StandingReactDeathBackward', 'StumbleBackwards', 'LivershotKnockdown', 'HitOnLegs'].includes(clipName);
   // fadeIn/crossFadeTo multiply their 0→1 interpolant by this.weight, so the incoming
   // clip must be weight 1 or it stays invisible (idle base layer fills the gap, but
   // the attack still runs and can deal damage). The interpolant is what blends in.
@@ -2108,11 +2110,15 @@ function pickBlock(f, other) {
   return clip;
 }
 
-function pickHitClip(f, partId) {
+// Light hit reactions by zone and force: harder blows favour the bigger reaction of the zone.
+const HIT_HARD = { head: 'HitOnSideOfHead', torso: 'BigStomachHit', armL: 'Stunned', armR: 'Stunned', legL: 'Stunned', legR: 'Stunned' };
+function pickHitClip(f, partId, force = 0) {
   const map = MODEL.animations.hitByPart || {};
-  const extra = ['Stunned', 'HitToBody', 'BigStomachHit', 'HeadHit', 'HitOnSideOfHead', 'HitOnLegs'];
+  const extra = ['Stunned', 'HitToBody', 'BigStomachHit', 'HeadHit', 'HitOnSideOfHead'];
   const list = availableClips(f, (map[partId] || map.torso || []).concat(extra));
+  const hard = force >= 3 ? HIT_HARD[partId] || HIT_HARD.torso : null;
   const clip = pickClip(list, MODEL.animations.hit || 'Stunned', f.lastHit, f, (n) => {
+    if (n === hard) return 6;
     if ((map[partId] || []).includes(n)) return 3;
     return 1;
   });
@@ -3242,7 +3248,7 @@ function applyHit(atk, def, spec, kind, strikeBone, contact) {
       // A landed blow always holds a flinch or stumble. WalkingBackwards is only for a light tap.
       const lightTap = !heavy && !counter && force < 2.6;
       const useStumble = !lightTap && def.actions.StumbleBackwards && (stumbleClip || force >= 2.6 || solid);
-      const clip = useStumble ? 'StumbleBackwards' : pickHitClip(def, hit.partId);
+      const clip = useStumble ? 'StumbleBackwards' : pickHitClip(def, hit.partId, force);
       setAnim(def, clip, 0.12);
       const act = def.actions[clip];
       const stun = ((useStumble ? COMBAT.hitStunHeavy : Math.max(COMBAT.hitStun, 0.45)) + (counter ? COMBAT.counterExtra : 0)) / statOf(def, 'recovery');
@@ -3453,9 +3459,12 @@ function applyGroundBow(f) {
 // At the peak of a jab, straight or hook, blend a two-bone arm IK so the punching arm is
 // almost fully straight (elbow nearly locked) and the fist reaches toward the target. The
 // body still lunges in; this only extends the arm on top of the clip. Hooks keep a little
-// elbow bend so they still read as hooks.
+// elbow bend so they still read as hooks. The weight follows the clip playhead both ways, so
+// a landed punch stays extended to the surface and folds back as the clip rewinds (pulled
+// strikes play backwards), instead of snapping in at the moment of contact. The fist (the
+// strike bone) is posed here before the next frame's contact test, so the hit follows it.
 function punchExtendWeight(f) {
-  if (f.state !== 'punch' || f.retract || !PUNCH_AIM_CLIPS.has(f.attackClip)) return 0;
+  if (f.state !== 'punch' || !PUNCH_AIM_CLIPS.has(f.attackClip)) return 0;
   const action = f.actions[f.attackClip];
   if (!action) return 0;
   const tm = strikeTiming(f, action);
@@ -3473,7 +3482,6 @@ function punchExtendWeight(f) {
     w = 1 - u * u * (3 - 2 * u);
   }
   if (f.attackClip === 'RightHook') w *= 0.72;
-  if (f.contactT >= 0 || f.atkContact || f.hitThisAttack) w *= 0.28;
   return w;
 }
 
@@ -3606,20 +3614,44 @@ function playVictory(f) {
 }
 
 // ---- Knockdowns and KO falls: Mixamo clips only (no ragdoll, no procedural fall) ----
-// Robots always take blows from the front (they face each other), so the clip is chosen by
-// where the blow landed: a torso/body shot folds the robot to its knees (LivershotKnockdown,
-// which also contains its own recovery); anything else knocks it over backwards
-// (StumbleBackwards played from the first stumble steps into the fall), it lies there for
-// COMBAT.downRest, then GettingUp (whose first frame is StumbleBackwards' last frame).
+// Robots take blows from the front, so every fall goes back along the blow; the clip is picked
+// by where it landed and how hard (knockdowns only happen on heavy blows, see applyHit):
+//   medium (force < FALL_HEAVY): body / legs fold to the knees and rise again (LivershotKnockdown,
+//     its own recovery); head / arms take a few stumble steps back and sit down hard.
+//   heavy: head snaps straight back (StandingReactDeathBackward) or drops (KnockedOut); body
+//     doubles over and drops (KnockedOut); legs are swept out (HitOnLegs); arms drop it or
+//     stumble it down.
+// Every fall ends lying on the back, the pose GettingUp starts from. `from` / `lieAt` / `holdAt`
+// are clip fractions; `push` is the knockback travel in body sizes at force 5.
 const FALL = {
-  backward: { clip: 'StumbleBackwards', from: 0, speed: 1.2, lieAt: 0.55 },
-  body: { clip: 'LivershotKnockdown', from: 0.1, speed: 1.2, lieAt: null },
+  kneel: { clip: 'LivershotKnockdown', from: 0.04, speed: 1.2, lieAt: null, push: 0.3 },
+  stumble: { clip: 'StumbleBackwards', from: 0.12, speed: 1.3, lieAt: 0.55, push: 0.7 },
+  snapBack: { clip: 'StandingReactDeathBackward', from: 0.4, speed: 1.35, lieAt: 0.8, push: 0.45 },
+  drop: { clip: 'KnockedOut', from: 0.12, speed: 1.2, lieAt: 0.5, push: 0.55 },
+  sweep: { clip: 'HitOnLegs', from: 0, speed: 1.25, lieAt: 0.5, holdAt: 0.6, push: 0.35 },
+};
+const FALL_HEAVY = 5.4;
+const FALL_BY_ZONE = {
+  head: { medium: [['stumble', 2], ['snapBack', 1]], heavy: [['snapBack', 3], ['drop', 2]] },
+  torso: { medium: [['kneel', 4], ['stumble', 1]], heavy: [['drop', 3], ['kneel', 1]] },
+  leg: { medium: [['kneel', 3], ['sweep', 1]], heavy: [['sweep', 3], ['drop', 1]] },
+  arm: { medium: [['stumble', 3], ['kneel', 1]], heavy: [['drop', 2], ['stumble', 1]] },
 };
 
+function pickFall(def, force, partId) {
+  const zone = hitZone(partId);
+  const tier = force >= FALL_HEAVY ? 'heavy' : 'medium';
+  const list = FALL_BY_ZONE[zone][tier].filter(([k]) => def.actions[FALL[k].clip] && k !== def.lastFall);
+  const opts = list.length ? list : FALL_BY_ZONE[zone][tier].filter(([k]) => def.actions[FALL[k].clip]);
+  let r = Math.random() * opts.reduce((n, [, w]) => n + w, 0);
+  for (const [k, w] of opts) { r -= w; if (r <= 0) return { key: k, zone, tier }; }
+  return opts.length ? { key: opts[0][0], zone, tier } : null;
+}
+
 function knockDown(def, fwd, force, partId) {
-  const body = partId === 'torso' && def.actions[FALL.body.clip] && Math.random() < 0.6;
-  const spec = body ? FALL.body : FALL.backward;
-  if (!def.actions[spec.clip]) return;
+  const pick = pickFall(def, force, partId) || (def.actions.StumbleBackwards ? { key: 'stumble', zone: 'torso', tier: 'medium' } : null);
+  if (!pick) return;
+  const spec = FALL[pick.key];
   logFall(def.id, def.root && def.root.position);
   def.state = 'down';
   def.stateT = 0;
@@ -3628,26 +3660,29 @@ function knockDown(def, fwd, force, partId) {
   def.shield.visible = false;
   def.downClip = spec.clip;
   def.downSpec = spec;
+  def.downKind = pick.key + ':' + pick.zone + ':' + pick.tier;
+  def.downForce = force;
+  def.lastFall = pick.key;
   def.downLying = false;
   def.downLieT = 0;
   def.landed = false;
   def.groundY = def.groundY || 0;
   def.fallYaw = def.root.rotation.y;
   def.fallYawVel = 0;
-  // Stumble steps play from the start of the clip; the root travels at that gait so the feet don't slide.
   const act = setAnim(def, spec.clip, 0.1);
+  const dur = act ? act.getClip().duration : 1;
   if (act) {
-    act.time = spec.from;
+    act.paused = false;
+    act.time = spec.from * dur;
     act.timeScale = spec.speed;
   }
-  const dur = act ? act.getClip().duration : 1;
-  const fallT = spec.lieAt != null
-    ? Math.max(0.2, (dur * spec.lieAt - (spec.from || 0)) / Math.max(0.2, spec.speed))
-    : (body ? 0.35 : 0.7);
-  const gait = body
-    ? Math.min(0.55, 0.2 + force * 0.04)
-    : clipGait(def, 'StumbleBackwards') * (spec.speed || 1);
-  def.hitPush = { x: fwd.x, z: fwd.z, dist: gait * fallT, gait, t0: 0, t1: fallT, legs: false };
+  // Travel back along the blow while the robot goes down (harder blows travel farther),
+  // eased out by pushSpeed, then it stays where it landed.
+  const fallT = Math.max(0.25, (dur * ((spec.lieAt != null ? spec.lieAt : 0.3) - spec.from)) / spec.speed);
+  const dist = spec.push * SIZE * Math.max(0.7, Math.min(1.5, force / 5));
+  const t1 = Math.min(fallT, 1.1);
+  const gait = dist / t1;
+  def.hitPush = { x: fwd.x, z: fwd.z, dist, gait, t0: 0, t1, legs: false };
   setFighterMove(def, fwd.x * gait, fwd.z * gait);
   announce('knockdown', { delay: 0.35 }); // [announcer hook]
 }
@@ -3663,7 +3698,7 @@ function dampFallYaw(f, dt) {
 }
 
 function stepDown(f, dt) {
-  const spec = f.downSpec || FALL.backward;
+  const spec = f.downSpec || FALL.stumble;
   dampFallYaw(f, dt);
   const hp = f.hitPush;
   if (hp && f.stateT >= hp.t0 && f.stateT <= hp.t1) {
@@ -3685,6 +3720,7 @@ function stepDown(f, dt) {
     }
     return;
   }
+  if (spec.holdAt && !act.paused && frac >= spec.holdAt) { act.time = spec.holdAt * dur; act.paused = true; }
   if (!f.downLying && frac >= spec.lieAt) {
     f.downLying = true;
     if (!f.landed) { f.landed = true; playSfx('clank', { vol: 1, rate: 0.55 }); addShake(0.14); }
@@ -3693,8 +3729,10 @@ function stepDown(f, dt) {
   // Lie still a beat (same every time: robots don't tire), then get up. The clock runs
   // through ground hits, so a robot can't be kept down.
   f.downLieT += dt;
-  const settled = frac >= 0.78 || !act.isRunning();
-  if ((settled && f.downLieT >= COMBAT.downRest / statOf(f, 'recovery')) || f.stateT > COMBAT.downMax) beginGetUp(f);
+  const settled = act.paused || frac >= 0.78 || !act.isRunning();
+  // Harder blows keep it down a little longer (same every time for the same blow).
+  const rest = (COMBAT.downRest + Math.max(0, Math.min(0.5, ((f.downForce || 5) - FALL_HEAVY) * 0.25))) / statOf(f, 'recovery');
+  if ((settled && f.downLieT >= rest) || f.stateT > COMBAT.downMax) beginGetUp(f);
 }
 
 // KO finishes follow the final blow: where it landed, how hard, and what is left of the robot.
@@ -4044,7 +4082,8 @@ function stepFighter(f, other, inp, dt) {
     if (action && f.strikeBase && !f.retract && f.contactT < 0 && action.timeScale > 0 && !(f.airMove && f.airMove.action === action)) {
       const st0 = tm.start, pk = tm.peak != null ? tm.peak : tm.a0;
       const u = (ct - st0) / Math.max(0.05, pk - st0);
-      const mul = u < 0.3 ? 0.95 : (ct <= tm.a1 ? 1.2 : 0.95);
+      // Punches come back slower than they go out (a natural pull-back, no hold at the end).
+      const mul = u < 0.3 ? 0.95 : (ct <= tm.a1 ? 1.2 : (f.state === 'punch' ? PUNCH_RETURN : 0.95));
       action.timeScale = Math.min(f.strikeCap || Infinity, f.strikeBase * mul);
     }
     // A small step into the strike when just out of reach; it stops on contact and never
@@ -4094,7 +4133,7 @@ function stepFighter(f, other, inp, dt) {
     if (pulled && !special && action && !f.retract && ct > tm.start + 0.04) {
       f.retract = true;
       action.paused = false;
-      action.timeScale = -Math.min(RETRACT_SPEED, f.strikeCap || Infinity);
+      action.timeScale = -Math.min(RETRACT_SPEED * (f.state === 'punch' ? PUNCH_RETURN : 1), f.strikeCap || Infinity);
     }
     const retracted = f.retract && action && (action.time <= tm.start + 0.02 || !action.isRunning());
     const done = airKick
@@ -4886,9 +4925,12 @@ function stepRound(dt) {
 
 const _guM = new THREE.Matrix4();
 
-// Get-up: the knockdown fall (StumbleBackwards) ends lying on the back in exactly the pose
-// GettingUp starts from (measured with __rfClipPose), so a short cross-fade is seamless and
-// no bone is ever posed by physics.
+// Get-up: every knockdown fall ends lying on the back near the pose GettingUp starts from
+// (measured with __rfClipPose), so a short cross-fade is seamless and no bone is ever posed by
+// physics. There is one get-up clip, so its pace follows the blow: after a medium knockdown
+// the robot skips the first beat on the mat and springs up quicker; after a heavy one it
+// rolls up slower and heavier. No root turn here: it gets up facing the way it fell and only
+// re-faces the opponent once upright (faceToward).
 function beginGetUp(f) {
   if (!f || f.state === 'getup') return;
   logGetUp(f.id, f.root && f.root.position);
@@ -4900,8 +4942,13 @@ function beginGetUp(f) {
   if (f.mixer) f.mixer.timeScale = 1;
   const clip = f.actions.GettingUp ? 'GettingUp' : (MODEL.animations.getUp || 'GettingUp');
   const act = setAnim(f, clip, 0.25);
-  // The whole clip, paced to COMBAT.getupTime.
-  if (act) act.timeScale = act.getClip().duration / Math.max(0.6, COMBAT.getupTime || 1.25) * statOf(f, 'recovery');
+  if (act) {
+    const heavy = (f.downForce || 5) >= FALL_HEAVY;
+    const pace = (heavy ? 0.88 : 1.14) * (0.95 + Math.random() * 0.1);
+    act.time = act.getClip().duration * (heavy ? 0 : 0.08);
+    // The (remaining) clip, paced to COMBAT.getupTime.
+    act.timeScale = act.getClip().duration / Math.max(0.6, COMBAT.getupTime || 1.25) * statOf(f, 'recovery') * pace;
+  }
   announce('getup', { delay: 0.2 }); // [announcer hook]
 }
 
@@ -4909,6 +4956,8 @@ const _hpA = new THREE.Vector3();
 const _hpB = new THREE.Vector3();
 const _hpE = new THREE.Euler();
 const _hpBnd = new THREE.Euler();
+const _hpQ = new THREE.Quaternion();
+const _hpY = new THREE.Vector3(0, 1, 0);
 // Diagnostics: how far each post-mixer stage turns the foot bones (deg), and the largest
 // frame-to-frame foot turn straight out of the mixer.
 function diagFootStage(f, stage) {
@@ -4939,14 +4988,21 @@ function poseAfterMixer(f, dt = 1 / 60) {
     const w = 1 - f.hipFree;
     f.hips.position.x += (f.hipsBind.x - f.hips.position.x) * w;
     f.hips.position.z += (f.hipsBind.z - f.hips.position.z) * w;
-    // Pin hips yaw to the bind pose so clip root rotation cannot fight steerYaw.
-    // X/Z (lean) and position Y (bounce) stay; hipFree still eases the pin off for strikes.
+    // Pin hips yaw to the bind pose so clip root rotation cannot fight steerYaw: one rotation
+    // about the vertical (lean and bounce stay; hipFree still eases the pin off for strikes).
+    // Yaw is only measurable while the hips are fairly upright. Lying flat (falls, get-up roll)
+    // the Euler yaw is gimbal noise and pinning it spun the lying body around, so the
+    // correction is frozen at its last upright value there and blends back in on the way up.
     if (f.hipsBindQ && w > 0.01) {
+      const upY = 1 - 2 * (f.hips.quaternion.x ** 2 + f.hips.quaternion.z ** 2); // hips up axis . vertical
       const e = _hpE.setFromQuaternion(f.hips.quaternion, 'YXZ');
       const b = _hpBnd.setFromQuaternion(f.hipsBindQ, 'YXZ');
-      let dy = Math.atan2(Math.sin(b.y - e.y), Math.cos(b.y - e.y));
-      e.y += dy * w;
-      f.hips.quaternion.setFromEuler(e);
+      const live = Math.atan2(Math.sin(b.y - e.y), Math.cos(b.y - e.y));
+      const s = Math.max(0, Math.min(1, (upY - 0.55) / 0.35));
+      if (f.hipYawFix == null) f.hipYawFix = live;
+      const dy = f.hipYawFix + Math.atan2(Math.sin(live - f.hipYawFix), Math.cos(live - f.hipYawFix)) * s * s * (3 - 2 * s);
+      if (upY > 0.9) f.hipYawFix = live;
+      f.hips.quaternion.premultiply(_hpQ.setFromAxisAngle(_hpY, dy * w));
     }
     // Never let the freed hips carry the body into the opponent.
     const opp = f === p1 ? p2 : p1;
@@ -5180,6 +5236,15 @@ function countFighterVis(f) {
   return { n, mats };
 }
 
+// Off the fight loop (menus, fighter select, results) the fight's own effects must not freeze
+// in mid-air: a rocket fist / its trail / dash jets are removed, sparks and smoke keep falling
+// and fading, and loose debris settles or shrinks away.
+function stepLooseEffects(dt, noPhysics) {
+  for (const f of [p1, p2]) if (f && f.special) clearSpecial(f);
+  if (noPhysics) settleLooseDebris();
+  stepDamage(scene, dt);
+}
+
 function tick() {
   const now = performance.now();
   if (renderer && renderer.info && renderer.info.reset) renderer.info.reset();
@@ -5287,11 +5352,13 @@ function tick() {
     shellCall('clearTapped');
     stepSelectPreview(dt);
     setWireObstacles([]);
+    stepLooseEffects(dt, true);
   } else {
     tapped.clear();
     shellCall('clearTapped');
     stepPhysics(dt);
     setWireObstacles([]);
+    stepLooseEffects(dt, false);
   }
 
   if (!match.camLock) updateCamera(dt);
@@ -5686,6 +5753,33 @@ function onLoad(gltf) {
     }
     return { dur, st: STRIKE_T && STRIKE_T[name], out };
   };
+  // Debug: objects spawned into the scene since the first call (strays: parts, chips, rockets).
+  window.__rfStrays = () => {
+    const base = window.__rfStrayBase || (window.__rfStrayBase = new Set(scene.children));
+    return scene.children.filter((o) => !base.has(o) && o.visible && o !== p1.root && o !== p2.root && (o.isMesh || o.isGroup))
+      .map((o) => [o.uuid.slice(0, 6), o.name || '', +(o.position.y - matTopY()).toFixed(2), o.geometry ? o.geometry.type : o.children.length, o.material && o.material.color ? o.material.color.getHexString() : '', Object.keys(o.userData || {}).join('|')]);
+  };
+  window.__rfRocket = (id) => { const f = id === 'p1' ? p1 : p2; f.energy = SPECIAL.energyMax; f.cooldown = 0; return tryRocketPunch(f, f === p1 ? p2 : p1); };
+  // Debug: punching arm extension (shoulder-to-hand / arm length) and the strike phase.
+  window.__rfArmExt = (id, punch, gap) => {
+    const f = id === 'p1' ? p1 : p2;
+    if (punch) {
+      const o = f === p1 ? p2 : p1;
+      if (gap) { const d = toward(f, o); o.root.position.set(f.root.position.x + d.x * gap, o.root.position.y, f.root.position.z + d.z * gap); if (o.phys && o.phys.body) o.phys.body.position.set(o.root.position.x, o.phys.body.position.y, o.root.position.z); }
+      f.cooldown = 0; const cpu = f.isCpu; f.isCpu = false; if (f.state !== 'punch') tryAttack(f, 'punch', punch, true); f.isCpu = cpu;
+    }
+    const a = f.ikArms && f.ikArms[punchingArmSide(f)]; if (!a || !a.upper) return null;
+    const A = a.upper.getWorldPosition(new THREE.Vector3()), B = a.lower.getWorldPosition(new THREE.Vector3()), C = a.hand.getWorldPosition(new THREE.Vector3());
+    const act = f.actions[f.attackClip];
+    return { st: f.state, clip: f.attackClip, t: act ? +act.time.toFixed(3) : null, ts: act ? +act.timeScale.toFixed(2) : null, ext: +(A.distanceTo(C) / (A.distanceTo(B) + B.distanceTo(C))).toFixed(3), w: +punchExtendWeight(f).toFixed(2), hit: !!f.hitThisAttack, retract: !!f.retract, gap: +f.root.position.distanceTo((f === p1 ? p2 : p1).root.position).toFixed(2) };
+  };
+  // Debug: a fighter's facing (deg): root yaw, and the hips' spine / chest headings in world.
+  window.__rfYawProbe = (id) => {
+    const f = id === 'p1' ? p1 : p2; const hq = f.hips.getWorldQuaternion(new THREE.Quaternion());
+    const y = new THREE.Vector3(0, 1, 0).applyQuaternion(hq); const z = new THREE.Vector3(0, 0, 1).applyQuaternion(hq);
+    const d = (v) => Math.round(Math.atan2(v.x, v.z) * 57.3);
+    return { st: f.state, clip: f.downClip || f.koClip || null, root: Math.round(f.root.rotation.y * 57.3), spine: d(y), chest: d(z), up: +y.y.toFixed(2), x: +f.root.position.x.toFixed(2), z: +f.root.position.z.toFixed(2) };
+  };
   window.__rfClipPose = (name, frac) => {
     const f = p1; const act = f.actions[name]; if (!act) return null;
     f.mixer.stopAllAction(); act.reset(); act.setEffectiveWeight(1); act.play();
@@ -5791,10 +5885,11 @@ function onLoad(gltf) {
   window.__rfBlowEye = (id, side = 'L') => { const f = id === 'p1' ? p1 : p2; const e = f.eyes && f.eyes.find((x) => x.side === side); blowEye(f, e, new THREE.Vector3(0, 0, 1)); return f.eyes.map((x) => x.blown); };
   window.__rfFighterStats = (id) => (id === 'p1' ? p1 : p2).stats;
   window.__rfForceKO = (id) => { const f = id === 'p1' ? p1 : p2; ko(f, f === p1 ? p2 : p1); };
-  window.__rfForceKnockdown = (id) => {
+  window.__rfForceKnockdown = (id, partId = 'head', force = 6) => {
     const f = id === 'p1' ? p1 : p2;
     const o = f === p1 ? p2 : p1;
-    knockDown(f, toward(o, f), 6, 'head');
+    knockDown(f, toward(o, f), force, partId);
+    return f.downKind;
   };
   window.__rfPrepFeetShot = () => {
     startFightFromShell({ skipIntro: true });
