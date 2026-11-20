@@ -134,7 +134,7 @@ export function clearSpecial(f) {
   const s = f.special;
   disposeFist(s.fist);
   if (s.trail) disposeTrail(s.trail);
-  if (s.jets) for (const j of s.jets) { if (j.parent) j.parent.remove(j); if (j.geometry) j.geometry.dispose(); if (j.material) j.material.dispose(); }
+  if (s.jets) for (const j of s.jets) { if (j.parent) j.parent.remove(j); j.visible = false; }
   hideHand(f, false);
   f.special = null;
   f.specialKind = null;
@@ -200,7 +200,8 @@ export function tryDash(f, other, dir) {
     : (f.actions && f.actions.StepBackward ? 'StepBackward' : null);
   if (clip) ctx.setAnim(f, clip, 0.08);
   else ctx.setAnim(f, (ctx.idleClipFor && ctx.idleClipFor(f)) || MODEL.animations.idle, 0.08);
-  const jets = [jetSprite(0x66d8ff), jetSprite(0xff9a3a)];
+  // Each robot keeps its pair of jets (no per-dash material, so no shader compile per dash).
+  const jets = f._jets || (f._jets = [jetSprite(0x66d8ff), jetSprite(0xff9a3a)]);
   for (const j of jets) { j.visible = true; ctx.scene.add(j); }
   f.special = { kind: 'dash', t: 0, dir, axis: v.clone(), jets, clip };
   f.invuln = Math.max(f.invuln || 0, SPECIAL.dash.invuln);
@@ -291,7 +292,7 @@ function dashSpeed(spec, u) {
 
 function endDash(f, toIdle) {
   const s = f.special;
-  if (s && s.jets) for (const j of s.jets) { if (j.parent) j.parent.remove(j); if (j.geometry) j.geometry.dispose(); if (j.material) j.material.dispose(); }
+  if (s && s.jets) for (const j of s.jets) { if (j.parent) j.parent.remove(j); j.visible = false; }
   f.special = null;
   f.specialKind = null;
   if (f.phys && f.phys.body) { f.phys.body.velocity.x = 0; f.phys.body.velocity.z = 0; }
