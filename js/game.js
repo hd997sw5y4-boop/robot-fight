@@ -12,7 +12,7 @@ import { SIZE, CAM_SIZE, MODEL, ARENA, COMBAT, DAMAGE, GFX_PRESETS, LOOP_CLIPS, 
 import { CLIP_SPEEDS } from './clip-speeds.js';
 import { applyChrome, setChromeLow } from './chrome.js';
 import { initJointLimits, applyJointLimits, fitJointLimits, hingeOf, hingeAngle, flexHinge } from './joints.js';
-import { setWiresLow, setWireObstacles } from './wires.js';
+import { setWiresLow, setWireObstacles, wireWarmMaterials } from './wires.js';
 import { createApiBrain, wantsApiBrain, initApiBrainUI, fighterApiCfg, apiLabel, apiStatsSnapshot, onApiDecision } from './api-brain.js';
 import { memoryKey, isLearningOn, promptNotes, rememberApiFights } from './api-learn.js';
 import { getSettings, isSettingsOpen, initSettings, updateFps, lastFps, cycleCameraMode, setCameraMode } from './settings.js';
@@ -45,7 +45,7 @@ import {
   onFightEnd,
 } from './api.js';
 import { createPacedBrain } from './brain.js';
-import { bindSpecials, initSpecial, tryRocketPunch, tryDash, stepSpecial, clearSpecial, specialAvail, syncEnergyHud } from './specials.js';
+import { bindSpecials, initSpecial, tryRocketPunch, tryDash, stepSpecial, clearSpecial, specialAvail, syncEnergyHud, specialWarmObjects } from './specials.js';
 import {
   prepareFighterDamage,
   canPunch,
@@ -63,14 +63,13 @@ import {
   clearAllDebris,
   syncPartHud,
   previewDamage,
-  warmupDamage,
-  warmupDamageCleanup,
   applyStrikeWear,
   strikeMul,
   debugBreakSub,
   oilStats,
   shedChips,
   damageFx,
+  damageWarmMaterials,
 } from './damage.js';
 
 let prevCamMode = null;
@@ -124,7 +123,12 @@ canvas.addEventListener('webglcontextrestored', () => location.reload(), false);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// three r187 dropped PCFSoftShadowMap (it fell back to PCF with a console warning); PCF is the
+// same filtered look, asked for directly.
+renderer.shadowMap.type = THREE.PCFShadowMap;
+// Reading shader logs after every link forces the browser to finish the compile right there
+// (a stall on first use). Only checked when debugging (?debug in the URL).
+renderer.debug.checkShaderErrors = /[?&]debug\b/.test(location.search);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x020306);
@@ -162,7 +166,7 @@ function basePixelRatio() {
 function applyPixelRatio() {
   const pr = Math.max(0.5, basePixelRatio() * dyn.scale);
   renderer.setPixelRatio(pr);
-  composer.setPixelRatio(pr);
+  if (useBloom) composer.setPixelRatio(pr);
 }
 function stepDynamicRes(dt) {
   const min = gfxPreset().minScale || 0.6;
@@ -172,17 +176,22 @@ function stepDynamicRes(dt) {
     return;
   }
   if (dt <= 0) return;
+  // Every change reallocates the drawing buffer (a hitch of its own), so it reacts to sustained
+  // trends only: 2 s under 45 fps to step down, 4 s over 57 fps to step back up, 3 s apart.
   dyn.acc += dt; dyn.n += 1; dyn.cooldown -= dt;
   if (dyn.acc < 1) return;
   const fps = dyn.n / dyn.acc;
   dyn.acc = 0; dyn.n = 0;
+  dyn.slow = fps < 45 ? (dyn.slow || 0) + 1 : 0;
+  dyn.fast = fps > 57 ? (dyn.fast || 0) + 1 : 0;
   if (dyn.cooldown > 0) return;
   let next = dyn.scale;
-  if (fps < 50) next = Math.max(min, dyn.scale - 0.1);
-  else if (fps > 58 && dyn.scale < 1) next = Math.min(1, dyn.scale + 0.05);
+  if (dyn.slow >= 2) next = Math.max(min, dyn.scale - 0.1);
+  else if (dyn.fast >= 4 && dyn.scale < 1) next = Math.min(1, dyn.scale + 0.05);
   if (next !== dyn.scale) {
     dyn.scale = next;
-    dyn.cooldown = 1.5;
+    dyn.cooldown = 3;
+    dyn.slow = 0; dyn.fast = 0;
     applyPixelRatio();
     resize();
   }
@@ -214,11 +223,12 @@ window.addEventListener('wheel', (e) => {
   // Wheel zooms the orbit camera in and out (FOV stays on the Settings slider).
   const f = Math.exp(Math.sign(e.deltaY) * Math.min(0.35, 0.08 + Math.abs(e.deltaY) * 0.0012));
   orbit.zoom = Math.max(0.08, Math.min(2.2, orbit.zoom * f));
+  orbit.touchedAt = performance.now();
 }, { passive: false });
 
 // Mouse orbit like Window Workshop 3D: drag (left or right button) to spin 360° and tilt;
 // double-click to reset the view.
-const orbit = { yaw: 0, pitch: 0.26, zoom: 1, drag: false };
+const orbit = { yaw: 0, pitch: 0.26, zoom: 1, drag: false, touchedAt: -1e9 };
 canvas.addEventListener('pointerdown', (e) => {
   if (e.button !== 0 && e.button !== 2) return;
   orbit.drag = true;
@@ -228,12 +238,13 @@ canvas.addEventListener('pointermove', (e) => {
   if (!orbit.drag) return;
   orbit.yaw -= e.movementX * 0.0065;
   orbit.pitch = Math.max(0.02, Math.min(1.4, orbit.pitch + e.movementY * 0.005));
+  orbit.touchedAt = performance.now();
 });
 const endDrag = (e) => { orbit.drag = false; canvas.releasePointerCapture?.(e.pointerId); };
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-canvas.addEventListener('dblclick', () => { orbit.yaw = 0; orbit.pitch = 0.26; orbit.zoom = 1; });
+canvas.addEventListener('dblclick', () => { orbit.yaw = 0; orbit.pitch = 0.26; orbit.zoom = 1; orbit.touchedAt = performance.now(); });
 
 const hitLight = new THREE.PointLight(0xffb44a, 0, 6);
 hitLight.decay = 2;
@@ -330,7 +341,6 @@ function applyGfx(key) {
   applyPixelRatio();
   renderer.toneMappingExposure = p.exposure * lightMul;
   renderer.shadowMap.enabled = p.shadows;
-  renderer.shadowMap.type = p.shadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
   scene.traverse((o) => {
     if (o.isLight && o.shadow) {
       o.castShadow = !!(p.shadows && o.userData.wantsShadow);
@@ -343,6 +353,7 @@ function applyGfx(key) {
   });
   applyLightIntensities();
   resize();
+  if (fightersStaged) prewarmShaders(); // shadows on/off: every lit material gets a new shader
 }
 
 function applyLight(v) {
@@ -399,7 +410,7 @@ function resize() {
   const w = window.innerWidth;
   const h = Math.max(window.innerHeight, 1);
   renderer.setSize(w, h, false);
-  composer.setSize(w, h);
+  if (useBloom) composer.setSize(w, h); // the bloom chain's targets exist only when it is used
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
@@ -568,12 +579,7 @@ function stageFighters(opts) {
   }
   p1.root.visible = true;
   p2.root.visible = true;
-  if (!stageFighters._warmed) {
-    stageFighters._warmed = true;
-    warmupDamage(scene);
-    try { renderer.compile(scene, camera); } catch (_) {}
-    warmupDamageCleanup(scene);
-  }
+  prewarmShaders();
 }
 
 function unstageFighters() {
@@ -1706,7 +1712,15 @@ function groundFeet(f, dt) {
   // into this frame (that feedback ratcheted the robots up into the air).
   f.root.position.y = 0;
   let minY = lowestFootY(f);
-  if (onBody) {
+  // Standing clips are grounded by the feet. If the hips come down near the feet (a stumble
+  // or reaction that crouches toward a sit), the whole body is measured too, so the seat and
+  // hands rest on the mat instead of sinking through it.
+  let bodyCheck = onBody;
+  if (!bodyCheck && f.hipsBone && minY != null) {
+    f.hipsBone.getWorldPosition(_footY);
+    bodyCheck = _footY.y - minY < 0.42 * SIZE;
+  }
+  if (bodyCheck) {
     const body = lowestBodyY(f);
     if (body != null && (minY == null || body < minY)) minY = body;
   }
@@ -1731,13 +1745,14 @@ function groundFeet(f, dt) {
   plantFeet(f, top, dt, skipIK);
 
   // Per-frame clamp after IK; not stored, so it can't accumulate.
-  minY = onBody ? Math.min(lowestFootY(f) ?? Infinity, lowestBodyY(f) ?? Infinity) : lowestFootY(f);
+  minY = bodyCheck ? Math.min(lowestFootY(f) ?? Infinity, lowestBodyY(f) ?? Infinity) : lowestFootY(f);
   if (!Number.isFinite(minY)) minY = null;
   if (minY != null && minY < top - 0.0004) {
     const lift = top - minY;
     f.root.position.y += lift;
     if (lift > 0.03) logGlitch('sinking', { id: f.id, d: +lift.toFixed(3), state: f.state });
   }
+  f._lowY = minY == null ? null : Math.max(minY, top); // lowest grounded point, for the log
 }
 
 // Foot plant: while idle or blocking, with no footwork and no turn, a nearly planted foot is
@@ -2935,7 +2950,7 @@ function clampRootMotion(f, dt) {
   const dx = pos.x - f._prevRoot.x;
   const dz = pos.z - f._prevRoot.z;
   const speed = Math.hypot(dx, dz) / dt;
-  const air = f.airLock != null || f.state === 'dodge';
+  const air = f.airLock != null || f.state === 'dodge' || f.state === 'dash';
   const cap = (air ? 11 : 6.8) * SIZE;
   if (speed > cap) {
     const s = cap / speed;
@@ -3220,23 +3235,43 @@ function applyHit(atk, def, spec, kind, strikeBone, contact) {
       if (atk._hitCombo >= 3) announce('combo', { n: atk._hitCombo, delay: 0.12 });
       else if (heavy) announce('bigHit', { delay: 0.1 });
       if (def.health <= COMBAT.maxHealth * 0.25) announce('lowHp', { side: def === p1 ? 0 : 1, delay: 0.2 });
-      def.state = 'hit';
-      def.stateT = 0;
       // A landed blow always holds a flinch or stumble. WalkingBackwards is only for a light tap.
       const lightTap = !heavy && !counter && force < 2.6;
-      const useStumble = !lightTap && def.actions.StumbleBackwards && (stumbleClip || force >= 2.6 || solid);
+      const useStumble = !lightTap && !!def.actions.StumbleBackwards && !!(stumbleClip || force >= 2.6 || solid);
       const clip = useStumble ? 'StumbleBackwards' : pickHitClip(def, hit.partId, force);
-      setAnim(def, clip, 0.12);
-      const act = def.actions[clip];
       const stun = ((useStumble ? COMBAT.hitStunHeavy : Math.max(COMBAT.hitStun, 0.45)) + (counter ? COMBAT.counterExtra : 0)) / statOf(def, 'recovery');
-      def.hitDur = stun;
-      const gaitName = useStumble ? 'StumbleBackwards' : (lightTap ? 'WalkingBackwards' : clip);
-      const gait = clipGait(def, gaitName) * Math.max(0.2, (act && act.timeScale) || 1);
-      const t1 = useStumble ? def.hitDur * 0.92 : Math.max(lightTap ? 0.2 : 0.22, stun * (lightTap ? 0.75 : 0.55));
-      def.hitPush = { x: fwd.x, z: fwd.z, dist: gait * t1 * (lightTap ? 1 : 0.75), gait, t0: 0, t1, legs: !!lightTap };
-      setFighterMove(def, fwd.x * gait * (lightTap ? 1 : 0.75), fwd.z * gait * (lightTap ? 1 : 0.75));
+      startHitReaction(def, fwd, { clip, useStumble, lightTap, stun });
     }
   }
+}
+
+// StumbleBackwards is a few backward steps that end in a sit-down onto the mat. As a hit
+// reaction (the robot stays up) only the stepping part may play: past STUMBLE_STEP_END of the
+// clip the hips drop toward the mat while the root was still held up by the feet, and the robot
+// sank ~55 cm into the mat on long stuns. The stun now fits inside the steps (the clip is
+// slowed to fill a long stun, never run into the sit), and groundFeet also checks the body.
+const STUMBLE_STEP_END = 0.27; // hips start to drop at ~0.3 of the clip (measured)
+function startHitReaction(def, fwd, { clip, useStumble, lightTap, stun }) {
+  def.state = 'hit';
+  def.stateT = 0;
+  setAnim(def, clip, 0.12);
+  const act = def.actions[clip];
+  def.hitDur = stun;
+  if (useStumble && act) {
+    // A re-hit mid-stumble keeps the clip going (no pose pop), so only the steps left count.
+    const left = act.getClip().duration * STUMBLE_STEP_END - (act.isRunning() ? act.time : 0);
+    const ts = Math.max(0.2, act.timeScale || 1);
+    // Leave a 0.12 s blend back to the guard before the steps run out.
+    if ((stun + 0.12) * ts > left) {
+      act.timeScale = Math.max(0.35, left / (stun + 0.12));
+      if ((stun + 0.12) * act.timeScale > left) def.hitDur = Math.max(0.2, left / act.timeScale - 0.12);
+    }
+  }
+  const gaitName = useStumble ? 'StumbleBackwards' : (lightTap ? 'WalkingBackwards' : clip);
+  const gait = clipGait(def, gaitName) * Math.max(0.2, (act && act.timeScale) || 1);
+  const t1 = useStumble ? def.hitDur * 0.92 : Math.max(lightTap ? 0.2 : 0.22, stun * (lightTap ? 0.75 : 0.55));
+  def.hitPush = { x: fwd.x, z: fwd.z, dist: gait * t1 * (lightTap ? 1 : 0.75), gait, t0: 0, t1, legs: !!lightTap };
+  setFighterMove(def, fwd.x * gait * (lightTap ? 1 : 0.75), fwd.z * gait * (lightTap ? 1 : 0.75));
 }
 
 // ---- Ground attacks: stomp / ground punch on a robot that is down (not KO'd) ----
@@ -3478,7 +3513,7 @@ function punchingArmSide(f) {
 }
 
 function aimBoneY(bone, worldDir, weight) {
-  if (!bone || !bone.parent || weight <= 0 || worldDir.lengthSq() < 1e-8) return;
+  if (!bone || !bone.parent || !(weight > 0) || !(worldDir.lengthSq() >= 1e-8)) return;
   bone.parent.updateWorldMatrix(true, false);
   bone.parent.getWorldQuaternion(_ikPQ);
   bone.getWorldQuaternion(_ikWQ);
@@ -3492,9 +3527,12 @@ function aimBoneY(bone, worldDir, weight) {
   bone.quaternion.slerp(_ikWant, weight);
 }
 
+const _ikPole = new THREE.Vector3();
+const _ikPoleDir = new THREE.Vector3();
+const _ikNat = new THREE.Vector3();
 function applyPunchReach(f) {
-  const w = punchExtendWeight(f);
-  if (w < 0.02) return;
+  const w = Math.min(1, punchExtendWeight(f));
+  if (!(w >= 0.02)) return; // NaN-safe
   const other = f === p1 ? p2 : p1;
   if (!other || !f.ikArms) return;
   const hook = f.attackClip === 'RightHook';
@@ -3545,7 +3583,23 @@ function applyPunchReach(f) {
   let cosA = (len1 * len1 + dist * dist - len2 * len2) / (2 * len1 * dist);
   cosA = THREE.MathUtils.clamp(cosA, -1, 1);
   const angA = Math.acos(cosA);
-  _ikAxis.crossVectors(_ikD, _ikC);
+  // Bend side (pole). The clip's elbow decides it while the arm is clearly bent; as the clip
+  // arm straightens that offset shrinks to noise and could swing the elbow backward (the joint
+  // limit then snapped it: the LeftForeArm "jointFlip" pops in uppercuts / elbow strikes), so
+  // it blends into the natural side: elbow down and back toward the body.
+  _ikPoleDir.copy(_ikD).normalize();
+  _ikPole.copy(_ikC).addScaledVector(_ikPoleDir, -_ikC.dot(_ikPoleDir));
+  const clipBend = _ikPole.length();
+  toward(f, other, _ikNat).multiplyScalar(-0.45);
+  _ikNat.y -= 1;
+  _ikNat.addScaledVector(_ikPoleDir, -_ikNat.dot(_ikPoleDir));
+  if (_ikNat.lengthSq() > 1e-8) {
+    _ikNat.normalize();
+    const k = Math.min(1, clipBend / (0.3 * len1));
+    if (clipBend > 1e-6) _ikPole.divideScalar(clipBend); else _ikPole.copy(_ikNat);
+    _ikPole.lerp(_ikNat, 1 - k);
+  }
+  _ikAxis.crossVectors(_ikD, _ikPole);
   if (_ikAxis.lengthSq() < 1e-8) {
     _ikAxis.set(0, 1, 0).cross(_ikD);
     if (_ikAxis.lengthSq() < 1e-8) _ikAxis.set(1, 0, 0).cross(_ikD);
@@ -4563,6 +4617,20 @@ const _cvB = new THREE.Vector3();
 const _cvF = new THREE.Vector3();
 const _cvR = new THREE.Vector3();
 let camModeLive = null;
+let camModeAuto = false;
+// Small HUD label under the timer naming the view on screen; it grows briefly on a change.
+const CAM_NAMES = { arena: 'Arena', fighting: 'Fighting', third: '3rd Person', first: '1st Person', broadcast: 'Broadcast' };
+let camLabelTimer = 0;
+function paintCamLabel(mode) {
+  const el = document.getElementById('camLabel');
+  const name = document.getElementById('camLabelName');
+  if (!el || !name) return;
+  name.textContent = CAM_NAMES[mode] || mode;
+  el.classList.add('pulse');
+  clearTimeout(camLabelTimer);
+  camLabelTimer = setTimeout(() => el.classList.remove('pulse'), 1300);
+}
+let camModeChangedAt = -1e9;
 
 function cameraMode() {
   let m = getSettings().cam || 'arena';
@@ -4784,7 +4852,12 @@ function updateCameraInner(dt) {
   // Broadcast keeps directing through the KO (close-ups, cuts); other views go to the arena.
   const mode = match.over && want !== 'broadcast' ? 'arena' : want;
   if (mode !== camModeLive) {
+    // Manual: the player picked this view (V, C, pad, menu). Auto: the game switched it
+    // (match over -> arena, head torn off -> 3rd person).
+    camModeAuto = mode !== (getSettings().cam || 'arena');
+    camModeChangedAt = performance.now();
     camModeLive = mode;
+    paintCamLabel(mode);
     camera.near = mode === 'first' ? 0.04 : 0.1;
     camera.updateProjectionMatrix();
     // Mid-fight view changes ease in updateCamera (no snap).
@@ -5186,6 +5259,16 @@ function fighterLogPose(f) {
   let footX = r.x, footZ = r.z;
   const foot = f.ikLegs && ((f.ikLegs.L && f.ikLegs.L.foot) || (f.ikLegs.R && f.ikLegs.R.foot));
   if (foot) { foot.getWorldPosition(_logFt); footX = _logFt.x; footZ = _logFt.z; }
+  // Both soles (toe or ankle, whichever is lower) for the planted-foot slide check.
+  const feet = [];
+  for (const side of ['L', 'R']) {
+    const leg = f.ikLegs && f.ikLegs[side];
+    if (!leg || !leg.foot) { feet.push(null); continue; }
+    leg.foot.getWorldPosition(_logFt);
+    let y = _logFt.y;
+    if (leg.toe) { leg.toe.getWorldPosition(_logH); y = Math.min(y, _logH.y); }
+    feet.push([_logFt.x, y, _logFt.z]);
+  }
   const cap = f.phys && f.phys.body && f.phys.body.position;
   const act = f.current && f.actions[f.current];
   const vis = f._visCount;
@@ -5194,7 +5277,7 @@ function fighterLogPose(f) {
     hips, head, wall: wallDist(r.x, r.z),
     state: f.state, clip: f.current,
     wx: act ? act.getEffectiveWeight() : 1,
-    footX, footZ,
+    footX, footZ, feet, low: f._lowY,
     capX: cap ? cap.x : r.x, capZ: cap ? cap.z : r.z,
     vis: vis && vis.n, mats: vis && vis.mats,
   };
@@ -5221,6 +5304,27 @@ function stepLooseEffects(dt, noPhysics) {
   stepDamage(scene, dt);
 }
 
+// Pose sanity: a non-finite bone rotation (one bad IK / limit frame) would make that limb vanish
+// for a frame and poison anything that follows the bone (stump wires kept NaN for good). Any
+// such bone goes back to its last good pose and the fight log records which bone and clip.
+function guardPose(f) {
+  if (!f.poseBones) {
+    f.poseBones = [];
+    f.model.traverse((o) => { if (o.isBone) f.poseBones.push({ b: o, q: o.quaternion.clone(), p: o.position.clone() }); });
+  }
+  let bad = null;
+  for (const e of f.poseBones) {
+    const q = e.b.quaternion, p = e.b.position;
+    if (Number.isFinite(q.x + q.y + q.z + q.w + p.x + p.y + p.z)) { e.q.copy(q); e.p.copy(p); continue; }
+    q.copy(e.q); p.copy(e.p);
+    if (!bad) bad = boneKey(e.b.name);
+  }
+  if (bad) {
+    f.model.updateWorldMatrix(true, true);
+    logGlitch('nanBone', { id: f.id, bone: bad, state: f.state, clip: f.current });
+  }
+}
+
 function tick() {
   const now = performance.now();
   if (renderer && renderer.info && renderer.info.reset) renderer.info.reset();
@@ -5237,6 +5341,7 @@ function tick() {
   const live = !!(p1 && p2 && fightersStaged && !previewMode);
   if (live && !bellRung && (shellRoundOver() || match.over)) ringBell('round');
   let canAct = false;
+  const simT0 = performance.now();
   if (live) {
   if (match.phase === 'intro') {
     if (!match.introT) document.getElementById('banner').classList.add('show');
@@ -5295,6 +5400,7 @@ function tick() {
     blendLegPose(f, dt);
     if (window.__rfDiag) diagFootStage(f, 3);
     groundFeet(f, dt);
+    guardPose(f);
     clampRootMotion(f, dt);
     // Keep roots inside the octagon after clip motion and knockdown travel.
     const pad = DOWN_STATES.has(f.state) || f.ghost ? CAGE_PAD + 0.15 : CAGE_PAD;
@@ -5345,7 +5451,10 @@ function tick() {
   syncHud(dt);
   try { updateBroadcast(); } catch (e) { console.warn('[broadcast]', e); }
   updateCageFade(cagePanels, camera, rawDt);
+  const renderT0 = performance.now();
   renderFrame();
+  const renderMs = performance.now() - renderT0;
+  const simMs = renderT0 - simT0;
   stepDynamicRes(wallDt);
   if (match.phase === 'fight' && p1 && p2) {
     if (!tick._visT || now - tick._visT > 200) {
@@ -5359,16 +5468,23 @@ function tick() {
     for (const d of list) {
       const pos = d.body ? d.body.position : (d.mesh && d.mesh.position);
       if (!pos) continue;
-      const out = wallDist(pos.x, pos.z) < -0.05 || d._out;
-      const under = pos.y < floorY;
+      // Each escape is reported once (the flag used to stay set and count every frame).
+      const out = !!d.escapedNew || (!d.frozen && wallDist(pos.x, pos.z) < -0.05);
+      d.escapedNew = false;
+      const under = !d.frozen && pos.y < floorY;
       if (out || under) debrisFlags.push({ x: pos.x, y: pos.y, z: pos.z, out, under });
     }
     const camPos = camera.position;
     const info = renderer.info && renderer.info.render;
+    const mem = renderer.info && renderer.info.memory;
     stepFightQuality({
       phase: match.phase,
-      dt, wallDt, fps,
+      dt, wallDt, fps, simMs, renderMs,
+      render: info ? { calls: info.calls, tris: info.triangles, geometries: mem ? mem.geometries : 0, textures: mem ? mem.textures : 0, programs: renderer.info.programs ? renderer.info.programs.length : 0, pr: +renderer.getPixelRatio().toFixed(2) } : null,
+      debrisLive: list.length,
       camMode: camModeLive || (getSettings() && getSettings().cam),
+      camAuto: camModeAuto,
+      camManual: (camModeLive === 'arena' && (orbit.drag || now - orbit.touchedAt < 1500)) || (!camModeAuto && now - camModeChangedAt < 1200),
       matY: matTopY(),
       draws: info ? info.calls : 0,
       tris: info ? info.triangles : 0,
@@ -5394,6 +5510,73 @@ function buzzFromFighters() {
   }
   return b;
 }
+
+// Shader pre-warm. Effects (sparks, smoke, oil, torn-off parts, chips, wires, rocket fist, dash
+// jets) used to compile their shaders the first time they appeared mid-fight: 100-250 ms
+// hitches on a Mac, and the log showed new programs being linked all fight long. At fight start
+// (and after a graphics change) one tiny copy of every variant is compiled with the live lights
+// and shadow setup, off the main thread where the browser supports it, then removed.
+let warmedFor = '';
+let warmKeep = []; // warm-up materials kept alive so their programs stay cached
+function prewarmShaders() {
+  if (!p1 || !p2) return;
+  const key = gfxKey + '|' + (renderer.shadowMap.enabled ? 1 : 0) + '|' + (hdriEnabled && hdriEnv ? 1 : 0);
+  if (warmedFor === key) return;
+  warmedFor = key;
+  const g = new THREE.Group();
+  g.name = 'shaderWarm';
+  const geo = new THREE.BoxGeometry(0.001, 0.001, 0.001);
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(geo.attributes.position.count * 3).fill(1), 3));
+  const temp = [];
+  const add = (obj) => { obj.frustumCulled = false; g.add(obj); return obj; };
+  const robotMats = new Set();
+  for (const f of [p1, p2]) f.model.traverse((o) => { if (o.isMesh) for (const m of [].concat(o.material)) if (m) robotMats.add(m); });
+  for (const m of robotMats) {
+    // Torn-off pieces and chips: the robot materials on plain and instanced meshes, lit and
+    // shadow-receiving or not (settled debris drops shadows), with and without vertex colours.
+    const plain = m.clone();
+    plain.vertexColors = false;
+    temp.push(plain);
+    for (const mat of [m, plain]) {
+      for (const recv of [true, false]) {
+        const a = add(new THREE.Mesh(geo, mat)); a.receiveShadow = recv; a.castShadow = recv;
+        const b = add(new THREE.InstancedMesh(geo, mat, 1)); b.receiveShadow = recv; b.castShadow = recv;
+      }
+    }
+  }
+  for (const f of [p1, p2]) if (f.shield) add(new THREE.Mesh(geo, f.shield.material)); // hidden until a block
+  for (const m of damageWarmMaterials()) add(new THREE.Mesh(geo, m));
+  const wm = wireWarmMaterials();
+  for (const m of wm.mesh) add(new THREE.Mesh(geo, m));
+  add(new THREE.Line(geo, wm.line));
+  const fx = specialWarmObjects();
+  for (const o of fx) { o.visible = true; add(o); }
+  camera.getWorldDirection(_warmDir);
+  g.position.copy(camera.position).addScaledVector(_warmDir, 2);
+  scene.add(g);
+  // The warm-up materials stay alive: three frees a program when the last material using it
+  // is disposed, so effects that make and dispose their own materials (jets, chips) would
+  // otherwise compile again on every use. The previous set is released only after this one
+  // holds the programs.
+  const keep = temp.slice();
+  for (const o of fx) o.traverse((c) => { if (c.material) keep.push(c.material); });
+  const done = () => {
+    scene.remove(g);
+    geo.dispose();
+    for (const o of fx) o.traverse((c) => { if (c.geometry && c.geometry !== geo) c.geometry.dispose(); });
+    for (const m of warmKeep) if (!keep.includes(m)) m.dispose();
+    warmKeep = keep;
+  };
+  // Parallel compile where the browser has it (Chrome); otherwise a plain compile right now.
+  // compile() can't see every variant a real frame uses (the transmission pass renders into a
+  // linear target without tone mapping; shadow depth programs), so one real frame with the
+  // invisible warm-up set in view follows; it builds exactly the programs the fight will use.
+  const finish = () => { try { renderFrame(); } catch (e) { /* the next tick renders anyway */ } done(); };
+  const p = renderer.extensions.has('KHR_parallel_shader_compile') ? renderer.compileAsync(scene, camera) : null;
+  if (p && p.then) p.then(finish, done);
+  else { renderer.compile(scene, camera); finish(); }
+}
+const _warmDir = new THREE.Vector3();
 
 function startFightFromShell(opts) {
   opts = opts || {};
@@ -5488,7 +5671,7 @@ function onLoad(gltf) {
   });
   hookFightLogShell();
   bindSpecials({
-    scene, gfxKey, playSfx, setAnim, idleClipFor, toward, placeInOctagon, endAttack,
+    scene, gfxKey, playSfx, setAnim, idleClipFor, toward, placeInOctagon, endAttack, setFighterMove,
     inBell, canPunch, logBellBlock, logSpecial, logInputAction,
     dealRocketHit(atk, def, point, dir) {
       applyHit(atk, def, { damage: SPECIAL.rocket.damage }, 'rocket', null, { point, dir });
@@ -5858,6 +6041,19 @@ function onLoad(gltf) {
   };
   window.__rfBlowEye = (id, side = 'L') => { const f = id === 'p1' ? p1 : p2; const e = f.eyes && f.eyes.find((x) => x.side === side); blowEye(f, e, new THREE.Vector3(0, 0, 1)); return f.eyes.map((x) => x.blown); };
   window.__rfFighterStats = (id) => (id === 'p1' ? p1 : p2).stats;
+  // Debug: a strong non-knockdown stumble with a chosen stun (long stuns used to sink the robot).
+  window.__rfForceStumble = (id, stun = 1.4) => {
+    const f = id === 'p1' ? p1 : p2;
+    const o = f === p1 ? p2 : p1;
+    if (!f.actions.StumbleBackwards || DOWN_STATES.has(f.state) || f.state === 'ko') return null;
+    startHitReaction(f, toward(o, f), { clip: 'StumbleBackwards', useStumble: true, lightTap: false, stun });
+    return f.actions.StumbleBackwards.timeScale;
+  };
+  // Debug: renderer load right now (last rendered frame).
+  window.__rfRenderInfo = () => {
+    const i = renderer.info;
+    return { calls: i.render.calls, tris: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures, programs: i.programs ? i.programs.length : 0, pr: renderer.getPixelRatio(), gfx: gfxKey, debris: getPhysicsDebris().length };
+  };
   window.__rfForceKO = (id) => { const f = id === 'p1' ? p1 : p2; ko(f, f === p1 ? p2 : p1); };
   window.__rfForceKnockdown = (id, partId = 'head', force = 6) => {
     const f = id === 'p1' ? p1 : p2;
