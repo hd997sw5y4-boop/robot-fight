@@ -33,7 +33,7 @@ export const SPECIAL = {
   },
   dash: {
     dist: 1.65 * SIZE,
-    time: 0.22,
+    time: 0.32, // bell-shaped burst: ~6.4 m/s average, ~9.5 m/s peak
     invuln: 0.12,
   },
 };

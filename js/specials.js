@@ -1,6 +1,6 @@
 /* Rocket punch and thruster dash: shared energy, Mixamo clips plus VFX. */
 import * as THREE from 'three';
-import { SIZE, MODEL, CAGE_PAD, SPECIAL } from './config.js';
+import { SIZE, MODEL, SPECIAL } from './config.js';
 
 let ctx = null;
 export function bindSpecials(c) { ctx = c; }
@@ -118,6 +118,12 @@ function jetSprite(color) {
   );
   m.rotation.x = Math.PI / 2;
   return m;
+}
+
+// One of each special-effect object, for the shader pre-warm (disposed by the caller).
+export function specialWarmObjects() {
+  const trail = makeTrail(0xffa040, true);
+  return [jetSprite(0x66d8ff), fistMesh(), trail.pts[0]];
 }
 
 export function clearSpecial(f) {
@@ -275,39 +281,54 @@ function flyRocket(f, other, dt) {
   }
 }
 
+// Thruster dash: a smooth burst through the physics body (velocity, never position), so the
+// cage and the other robot stop it like any step. Speed follows a bell (eases in and out) whose
+// area is exactly spec.dist; the old version moved the root AND set the body velocity, so it
+// travelled about twice per frame (12-16 m/s spikes) and then got clamped back: a visible jump.
+function dashSpeed(spec, u) {
+  return (spec.dist / spec.time) * 6 * u * (1 - u); // integral over the dash = spec.dist
+}
+
+function endDash(f, toIdle) {
+  const s = f.special;
+  if (s && s.jets) for (const j of s.jets) { if (j.parent) j.parent.remove(j); if (j.geometry) j.geometry.dispose(); if (j.material) j.material.dispose(); }
+  f.special = null;
+  f.specialKind = null;
+  if (f.phys && f.phys.body) { f.phys.body.velocity.x = 0; f.phys.body.velocity.z = 0; }
+  if (!toIdle) return;
+  f.state = 'idle';
+  f.cooldown = 0.12;
+  if (ctx.setAnim && ctx.idleClipFor) ctx.setAnim(f, ctx.idleClipFor(f), 0.16);
+}
+
 function flyDash(f, other, dt) {
   const s = f.special;
   const spec = SPECIAL.dash;
+  // Hit, knocked down or KO'd mid-dash: the reaction owns the body from here.
+  if (f.state !== 'dash') { endDash(f, false); return; }
   s.t += dt;
   const u = Math.min(1, s.t / spec.time);
-  const step = spec.dist * (dt / spec.time) * (1.15 - u * 0.3);
-  const nx = f.root.position.x + s.axis.x * step;
-  const nz = f.root.position.z + s.axis.z * step;
-  const pos = new THREE.Vector3(nx, f.root.position.y, nz);
-  if (ctx.placeInOctagon) ctx.placeInOctagon(pos, CAGE_PAD);
-  f.root.position.x = pos.x;
-  f.root.position.z = pos.z;
-  if (f.phys && f.phys.body) {
-    f.phys.body.position.x = pos.x;
-    f.phys.body.position.z = pos.z;
-    f.phys.body.velocity.x = s.axis.x * (spec.dist / spec.time) * (1 - u);
-    f.phys.body.velocity.z = s.axis.z * (spec.dist / spec.time) * (1 - u);
-  }
-  // Thruster jets just behind the hips, flaring opposite the dash.
-  const back = s.axis.clone().multiplyScalar(-0.28 * SIZE);
-  const base = f.root.position.clone();
+  // Sample the bell half a frame ahead: the velocity set now is integrated on the next step.
+  const v = dashSpeed(spec, Math.min(1, (s.t + dt * 0.5) / spec.time));
+  if (ctx.setFighterMove) ctx.setFighterMove(f, s.axis.x * v, s.axis.z * v);
+  else if (f.phys && f.phys.body) { f.phys.body.velocity.x = s.axis.x * v; f.phys.body.velocity.z = s.axis.z * v; }
+  // Thruster jets just behind the hips, flaring opposite the dash, fading with the burst.
+  const flare = Math.sin(Math.PI * u);
+  const back = _jetBack.copy(s.axis).multiplyScalar(-0.28 * SIZE);
+  const base = _jetBase.copy(f.root.position);
   base.y += 0.72 * SIZE;
-  if (s.jets[0]) { s.jets[0].position.copy(base).add(back).add(new THREE.Vector3(-0.12 * SIZE, 0, 0)); s.jets[0].lookAt(base); s.jets[0].material.opacity = 0.4 + 0.5 * Math.sin(s.t * 40); }
-  if (s.jets[1]) { s.jets[1].position.copy(base).add(back).add(new THREE.Vector3(0.12 * SIZE, 0, 0)); s.jets[1].lookAt(base); s.jets[1].material.opacity = 0.4 + 0.5 * Math.sin(s.t * 40 + 1); }
-  if (u >= 1) {
-    if (s.jets) for (const j of s.jets) { if (j.parent) j.parent.remove(j); if (j.geometry) j.geometry.dispose(); if (j.material) j.material.dispose(); }
-    f.special = null;
-    f.specialKind = null;
-    f.state = 'idle';
-    f.cooldown = 0.12;
-    if (ctx.setAnim && ctx.idleClipFor) ctx.setAnim(f, ctx.idleClipFor(f), 0.12);
+  for (let i = 0; i < 2; i++) {
+    const j = s.jets[i];
+    if (!j) continue;
+    j.position.copy(base).add(back);
+    j.position.x += (i ? 0.12 : -0.12) * SIZE;
+    j.lookAt(base);
+    j.material.opacity = (0.35 + 0.45 * Math.sin(s.t * 40 + i)) * (0.3 + 0.7 * flare);
   }
+  if (u >= 1) endDash(f, true);
 }
+const _jetBack = new THREE.Vector3();
+const _jetBase = new THREE.Vector3();
 
 export function stepSpecial(f, other, dt) {
   if (!f) return;
