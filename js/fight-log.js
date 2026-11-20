@@ -2,16 +2,24 @@
 /* Fight data log: every fight is recorded in localStorage (rotated, size-capped).
    Download / copy / clear from Settings. Desktop-first.
    Keys / Authorization headers are never stored or exported. */
+import * as THREE from 'three';
 import { getSettings } from './settings.js';
 import { ARENA, SIZE } from './config.js';
 
+// Storage key stays v1 so older logs keep loading; the export carries LOG_VERSION.
+// v2 adds: timeline (settings / camera changes during a fight), fpsByGfx, renderer snapshots
+// on spikes (draws, tris, geometries, textures, programs, sim/render ms), camera events tagged
+// manual vs auto, and nanGeo (which geometry produced NaN positions, with a short stack).
 const KEY = 'rf_fight_log_v1';
+const LOG_VERSION = 2;
 const MAX_BYTES = 420000;
 const MAX_FIGHTS = 18;
 const MAX_EVENTS = 400;
 const MAX_PATH = 480;       // ~96 s at 5 Hz, then downsample
 const MAX_QEVENTS = 280;
 const PATH_HZ = 5;
+const MAX_TIMELINE = 120;
+const MAX_NAN = 24;
 
 let current = null;
 let hookInstalled = false;
@@ -124,7 +132,7 @@ function saveAll(data) {
     let fights = (data.fights || []).slice(-MAX_FIGHTS);
     const pack = (list) => {
       for (const f of list) shrinkFight(f);
-      return JSON.stringify({ version: 1, fights: list });
+      return JSON.stringify({ version: LOG_VERSION, fights: list });
     };
     out = pack(fights);
     while (out.length > MAX_BYTES && fights.length) {
@@ -144,7 +152,7 @@ function saveAll(data) {
   } catch (err) {
     try {
       const fights = ((data && data.fights) || []).slice(-4);
-      localStorage.setItem(KEY, JSON.stringify({ version: 1, fights: sanitizeLog(fights) }));
+      localStorage.setItem(KEY, JSON.stringify({ version: LOG_VERSION, fights: sanitizeLog(fights) }));
       setSaveError('');
       return true;
     } catch (err2) {
@@ -178,15 +186,29 @@ function finalizedFps(raw) {
   };
 }
 
+function finalizedFpsByGfx(raw) {
+  const by = raw && raw.fpsByGfx;
+  if (!by) return by;
+  const out = {};
+  for (const [k, s] of Object.entries(by)) {
+    if (!s || s.mean != null) { out[k] = s; continue; }
+    out[k] = finalizedFps({ fps: s });
+    if (s.spikes) out[k].spikes = s.spikes;
+  }
+  return out;
+}
+
 function snapshotCurrent(ended) {
   if (!current) return null;
   const fps = finalizedFps(current);
+  const fpsByGfx = finalizedFpsByGfx(current);
   const rec = {
     ...current,
     ended: ended || current.ended || 'complete',
     endedAt: current.endedAt || nowIso(),
     durationS: +((performance.now() - current._t0) / 1000).toFixed(2),
     fps,
+    fpsByGfx,
   };
   rec.summary = buildSummary(rec);
   const clean = sanitizeLog(rec);
@@ -213,6 +235,7 @@ function shrinkFight(f) {
     f.path = f.path.filter((_, i) => i % step === 0);
   }
   if (f.qevents && f.qevents.length > MAX_QEVENTS) f.qevents = f.qevents.slice(-MAX_QEVENTS);
+  if (f.timeline && f.timeline.length > MAX_TIMELINE) f.timeline = f.timeline.slice(-MAX_TIMELINE);
 }
 
 function installConsoleHook() {
@@ -224,6 +247,8 @@ function installConsoleHook() {
         if (a == null) return String(a);
         if (typeof a === 'string') return a;
         if (a && a.message) return a.message;
+        if (a && a.isBufferGeometry) return `[BufferGeometry ${a.name || a.type || ''}]`;
+        if (a && a.isObject3D) return `[${a.type} ${a.name || ''}]`;
         try { return String(a); } catch (_) { return '[unprintable]'; }
       }).join(' ');
       const rec = { t: nowIso(), level, msg: String(msg).slice(0, 400).replace(SECRET_VAL, '***') };
@@ -240,6 +265,40 @@ function installConsoleHook() {
 
 installConsoleHook();
 
+// NaN geometry: three.js only says "Computed radius is NaN". Record which geometry it was
+// (its name; producers name their dynamic geometry) and a short stack, so a log pinpoints it.
+let nanHookInstalled = false;
+const pendingNan = [];
+function installNanHook() {
+  if (nanHookInstalled || !THREE.BufferGeometry) return;
+  nanHookInstalled = true;
+  const proto = THREE.BufferGeometry.prototype;
+  const orig = proto.computeBoundingSphere;
+  proto.computeBoundingSphere = function () {
+    orig.call(this);
+    try {
+      const bs = this.boundingSphere;
+      if (bs && !Number.isFinite(bs.radius)) recordNanGeometry(this);
+    } catch (_) {}
+  };
+}
+function recordNanGeometry(geo) {
+  const pos = geo.attributes && geo.attributes.position;
+  let bad = 0;
+  if (pos) for (let i = 0; i < pos.count && bad < 999; i++) if (!Number.isFinite(pos.getX(i) + pos.getY(i) + pos.getZ(i))) bad += 1;
+  const stack = String((new Error()).stack || '').split('\n').slice(3, 9)
+    .map((l) => l.trim().replace(/^at\s+/, '').replace(/https?:\/\/[^/]+\//, '').slice(0, 110));
+  const rec = { name: geo.name || geo.type || 'BufferGeometry', verts: pos ? pos.count : 0, bad, stack };
+  if (current) {
+    current.quality.nanGeo = (current.quality.nanGeo || 0) + 1;
+    const list = current.nanGeo || (current.nanGeo = []);
+    const same = list.find((r) => r.name === rec.name && r.stack[0] === rec.stack[0]);
+    if (same) same.n = (same.n || 1) + 1;
+    else if (list.length < MAX_NAN) list.push({ t: +((performance.now() - current._t0) / 1000).toFixed(2), n: 1, ...rec });
+  } else if (pendingNan.length < MAX_NAN) pendingNan.push({ at: nowIso(), ...rec });
+}
+installNanHook();
+
 function emptyMoves() { return {}; }
 
 function moveRec(moves, name) {
@@ -248,12 +307,15 @@ function moveRec(moves, name) {
   return moves[k];
 }
 
+const SLIDE_SKIP = new Set(['down', 'ko', 'dodge', 'dash', 'kick', 'getup']);
+
 function emptyQuality() {
   return {
     yawSnap: 0, visPop: 0, matPop: 0, shadowFlick: 0, boneJump: 0,
     spike: 0, noFade: 0, weight0: 0, footSlide: 0, camSnap: 0, camClip: 0,
     outOfCage: 0, throughCage: 0, belowMat: 0, wallStuck: 0, bodyDrift: 0,
     debrisOut: 0, debrisUnder: 0, fall: 0, getup: 0, bellBlock: 0, special: 0,
+    camClipManual: 0, camSnapManual: 0, nanGeo: 0, plantSlide: 0,
   };
 }
 
@@ -271,6 +333,10 @@ export function startFight({ p1, p2, mode, labels } = {}) {
       p2: { label: (labels && labels.p2) || sideLabel(p2, null, 'CPU'), name: (p2 && p2.config && p2.config.name) || 'P2' },
     },
     fps: { n: 0, sum: 0, min: 99, max: 0, drops: 0, below30: 0, last: 0 },
+    fpsByGfx: {},
+    timeline: [],
+    nanGeo: pendingNan.splice(0, pendingNan.length),
+    renderInfo: null,
     console: pendingConsole.splice(0, pendingConsole.length),
     glitches: [],
     qevents: [],
@@ -297,19 +363,50 @@ export function startFight({ p1, p2, mode, labels } = {}) {
   current._prev = { p1: null, p2: null, cam: null, vis: { p1: 0, p2: 0 }, mats: { p1: 0, p2: 0 }, shadow: null, work: [] };
   current._stuck = { p1: 0, p2: 0 };
   current._press = null;
+  current._set = settingsSnapshot();
+  current._setAt = 0;
   return current;
+}
+
+/** A setting or view changed during the fight (gfx, camera, damage, hdri...). src: manual | auto. */
+export function logSetting(key, value, src = 'manual', from) {
+  if (!current) return;
+  const t = +((performance.now() - current._t0) / 1000).toFixed(2);
+  const tl = current.timeline || (current.timeline = []);
+  const last = tl[tl.length - 1];
+  if (last && last.k === key && t - last.t < 0.05) { last.v = value; return; }
+  tl.push({ t, k: key, v: value, from: from === undefined ? null : from, src });
+  if (tl.length > MAX_TIMELINE * 2) tl.splice(0, tl.length - MAX_TIMELINE);
+}
+
+// Settings are polled (4 Hz) so every path that changes them (menu, keys, pad) is covered.
+function pollSettings(now) {
+  if (now - (current._setAt || 0) < 250) return;
+  current._setAt = now;
+  const snap = settingsSnapshot();
+  const prev = current._set || snap;
+  for (const k of ['gfx', 'damage', 'hdri', 'difficulty', 'match', 'loop']) {
+    if (snap[k] !== prev[k]) logSetting(k, snap[k], 'manual', prev[k]);
+  }
+  current._set = snap;
 }
 
 export function activeFight() { return current; }
 
-export function logFps(fps) {
-  if (!current || !(fps > 0) || !Number.isFinite(fps)) return;
-  const s = current.fps;
+function addFps(s, fps) {
   s.n += 1; s.sum += fps; s.last = fps;
   if (fps < s.min) s.min = fps;
   if (fps > s.max) s.max = fps;
   if (fps < 30) s.below30 += 1;
   if (fps < 20) s.drops += 1;
+}
+
+export function logFps(fps) {
+  if (!current || !(fps > 0) || !Number.isFinite(fps)) return;
+  addFps(current.fps, fps);
+  const g = (getSettings() || {}).gfx || 'high';
+  const by = current.fpsByGfx || (current.fpsByGfx = {});
+  addFps(by[g] || (by[g] = { n: 0, sum: 0, min: 99, max: 0, drops: 0, below30: 0, last: 0, spikes: 0 }), fps);
 }
 
 export function logGlitch(kind, data) {
@@ -481,19 +578,45 @@ export function stepFightQuality(env) {
     for (const w of env.work) noteFrameWork(w);
   }
 
-  // Frame spikes (wall-clock). Context: clips, camera, draws, anything flagged this frame.
+  pollSettings(now);
+  if (env.camMode && env.camMode !== prev.camMode) {
+    if (prev.camMode) logSetting('camera', env.camMode, env.camAuto ? 'auto' : 'manual', prev.camMode);
+    prev.camMode = env.camMode;
+  }
+  const ri = env.render;
+  if (ri) {
+    // Peak renderer load over the fight (and the latest snapshot).
+    const R = current.renderInfo || (current.renderInfo = { peak: {}, last: null });
+    R.last = ri;
+    for (const k of Object.keys(ri)) if (typeof ri[k] === 'number' && !(R.peak[k] >= ri[k])) R.peak[k] = ri[k];
+  }
+
+  // Frame spikes (wall-clock). Context: clips, camera, renderer load, sim / render ms, new
+  // shader programs (a compile at first use), and anything flagged this frame.
   if (env.wallDt > 0.055 || (env.fps > 0 && env.fps < 18)) {
     const work = (prev.work || []).slice();
+    const gfx = (current._set && current._set.gfx) || '';
+    const by = current.fpsByGfx && current.fpsByGfx[gfx];
+    if (by) by.spikes = (by.spikes || 0) + 1;
     qpush('spike', {
       dt: r2(env.wallDt * 1000),
       fps: r1(env.fps),
+      gfx,
       cam: env.camMode,
       clips: [env.p1 && env.p1.clip, env.p2 && env.p2.clip],
       draws: env.draws || 0,
       tris: env.tris || 0,
+      geo: ri ? ri.geometries : undefined,
+      tex: ri ? ri.textures : undefined,
+      prog: ri ? ri.programs : undefined,
+      newProg: ri && prev.prog != null && ri.programs > prev.prog ? ri.programs - prev.prog : undefined,
+      simMs: env.simMs != null ? r1(env.simMs) : undefined,
+      renderMs: env.renderMs != null ? r1(env.renderMs) : undefined,
+      debris: env.debrisLive,
       work: work.length ? work : undefined,
     });
   }
+  if (ri) prev.prog = ri.programs;
   prev.work = [];
 
   for (const side of ['p1', 'p2']) {
@@ -502,8 +625,11 @@ export function stepFightQuality(env) {
     const p = prev[side];
     const w = s.wall;
     if (w < -0.04) qpush('outOfCage', { id: side, w: r2(w), x: r2(s.x), z: r2(s.z) });
-    if (s.y < matY - 0.06 || s.hips < matY - 0.08 || s.head < matY - 0.08) {
-      qpush('belowMat', { id: side, y: r2(Math.min(s.y, s.hips, s.head)) });
+    // Sinking is judged on real geometry: the lowest grounded point (soles, or the body when
+    // down), the hips and the head. The root is only the clip's origin; clips stand at different
+    // heights over it, so it can sit under the mat while every visible part is on top.
+    if ((s.low != null && s.low < matY - 0.03) || s.hips < matY - 0.08 || s.head < matY - 0.08) {
+      qpush('belowMat', { id: side, low: s.low == null ? null : r2(s.low - matY), root: r2(s.y - matY), hips: r2(s.hips - matY), head: r2(s.head - matY), st: s.state, clip: s.clip });
     }
     if (p && p.wall >= 0.02 && w < -0.02) qpush('throughCage', { id: side, w: r2(w) });
     if (w < 0.14 && Math.hypot(s.x - (p && p.x || s.x), s.z - (p && p.z || s.z)) < 0.012) {
@@ -521,7 +647,17 @@ export function stepFightQuality(env) {
       if (s.footX != null && p.footX != null && s.state !== 'down' && s.state !== 'ko' && s.state !== 'dodge' && s.state !== 'kick') {
         const root = Math.hypot(s.x - p.x, s.z - p.z);
         const foot = Math.hypot(s.footX - p.footX, s.footZ - p.footZ);
-        if (root > 0.004 && Math.abs(foot - root) > 0.11) qpush('footSlide', { id: side, d: r2(Math.abs(foot - root)) });
+        if (root > 0.004 && Math.abs(foot - root) > 0.11) qpush('footSlide', { id: side, d: r2(Math.abs(foot - root)), st: s.state, clip: s.clip });
+      }
+    }
+    // Planted-foot slide (frame-rate independent): a sole resting on the mat in two frames
+    // in a row that still moves sideways faster than 0.45 m/s is skating.
+    if (p && s.feet && p.feet && env.dt > 0 && !SLIDE_SKIP.has(s.state)) {
+      for (let i = 0; i < 2; i++) {
+        const a = s.feet[i], b = p.feet[i];
+        if (!a || !b || a[1] - matY > 0.035 || b[1] - matY > 0.035) continue;
+        const v = Math.hypot(a[0] - b[0], a[2] - b[2]) / env.dt;
+        if (v > 0.45) qpush('plantSlide', { id: side, foot: i ? 'R' : 'L', v: r2(v), st: s.state, clip: s.clip });
       }
     }
     if (s.wx != null && s.wx < 0.04 && (s.state === 'punch' || s.state === 'kick' || s.state === 'dodge')) {
@@ -541,13 +677,19 @@ export function stepFightQuality(env) {
     }
   }
 
+  // Camera: a view the player is steering (mouse orbit / wheel / view switch) is logged as
+  // manual and kept apart from automatic camera faults. A camera standing outside the cage is
+  // fine (the panels fade); it clips only inside the cage mesh or under the mat.
   if (env.cam) {
     const c = env.cam;
     const pc = prev.cam;
+    const manual = !!env.camManual;
     if (pc && Math.hypot(c.x - pc.x, c.y - pc.y, c.z - pc.z) > 1.6) {
-      qpush('camSnap', { d: r2(Math.hypot(c.x - pc.x, c.y - pc.y, c.z - pc.z)), mode: env.camMode });
+      qpush(manual ? 'camSnapManual' : 'camSnap', { d: r2(Math.hypot(c.x - pc.x, c.y - pc.y, c.z - pc.z)), mode: env.camMode });
     }
-    if (c.wall < 0.18 || c.y < matY + 0.05) qpush('camClip', { w: r2(c.wall), y: r2(c.y), mode: env.camMode });
+    const cageTop = matY + (ARENA.cageHeight || 1.48) + 0.1;
+    const inWall = Math.abs(c.wall) < 0.12 && c.y < cageTop;
+    if (inWall || c.y < matY + 0.05) qpush(manual ? 'camClipManual' : 'camClip', { w: r2(c.wall), y: r2(c.y), mode: env.camMode });
     prev.cam = c;
   }
   if (prev.shadow != null && env.shadowOn != null && prev.shadow !== env.shadowOn) qpush('shadowFlick', {});
@@ -591,6 +733,8 @@ function buildSummary(fight) {
     pathSamples: pathN,
     inputLatencyMs: avgLag,
     cpuStuck: (fight.cpuFlags || []).filter((f) => f.kind === 'cpuStuck').length,
+    nanGeo: (fight.nanGeo || []).length ? fight.nanGeo.map((r) => r.name) : undefined,
+    settingsChanges: (fight.timeline || []).length || undefined,
     heldRepeats: (fight.qevents || []).filter((e) => e && e.k === 'heldRepeat').length || undefined,
     ended: fight.ended || undefined,
     api: fight.apiStats || undefined,
@@ -639,6 +783,7 @@ function logWithOpen() {
     if (i >= 0) all.fights[i] = snap;
     else all.fights.push(snap);
   }
+  all.version = LOG_VERSION;
   return sanitizeLog(all);
 }
 
@@ -680,5 +825,5 @@ export function clearLog() {
 }
 
 if (typeof window !== 'undefined') {
-  window.RFFightLog = { startFight, endFight, abandonFight, logFps, logGlitch, logStrike, logRound, getLog, downloadLog, copyLog, clearLog, sanitizeLog, noteFrameWork, setFightLearning, logHeldRepeat, logSaveError, hasOpenFight };
+  window.RFFightLog = { startFight, endFight, abandonFight, logFps, logGlitch, logStrike, logRound, getLog, downloadLog, copyLog, clearLog, sanitizeLog, noteFrameWork, setFightLearning, logHeldRepeat, logSaveError, hasOpenFight, logSetting };
 }
