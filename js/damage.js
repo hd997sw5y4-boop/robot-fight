@@ -33,6 +33,10 @@ export function damageFx() {
 }
 
 const SMOKE_GEO = new THREE.SphereGeometry(0.07, 6, 5);
+// Effect materials created ahead of use, for the shader pre-warm at fight start (game.js).
+export function damageWarmMaterials() {
+  return [sparkMat, sparkMatHot, smokeMat, oilDropMat, ...getPuddleMats()];
+}
 const sparkMat = new THREE.MeshBasicMaterial({ color: 0xffe189, toneMapped: false });
 const sparkMatHot = new THREE.MeshBasicMaterial({ color: 0xfff6de, toneMapped: false });
 
@@ -1785,24 +1789,3 @@ export function previewDamage(p2, scene, towardCam) {
 
 
 /** Hidden stand-ins so renderer.compile can warm sparks, oil, puddles and smoke. */
-export function warmupDamage(scene) {
-  if (!scene || warmupDamage._done) return;
-  warmupDamage._done = true;
-  getPuddleMats();
-  const g = new THREE.Group();
-  g.visible = false;
-  g.add(new THREE.Mesh(SPARK_GEO, sparkMat));
-  g.add(new THREE.Mesh(SPARK_GEO, sparkMatHot));
-  g.add(new THREE.Mesh(OIL_GEO, oilDropMat));
-  g.add(new THREE.Mesh(SMOKE_GEO, smokeMat));
-  const puddles = getPuddleMats();
-  if (puddles && puddles[0]) g.add(new THREE.Mesh(PUDDLE_GEO, puddles[0]));
-  scene.add(g);
-  warmupDamage._group = g;
-}
-export function warmupDamageCleanup(scene) {
-  const g = warmupDamage._group;
-  if (!g) return;
-  if (g.parent) g.parent.remove(g);
-  warmupDamage._group = null;
-}

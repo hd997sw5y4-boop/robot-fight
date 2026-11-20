@@ -256,7 +256,7 @@ export function spawnDebris({ mesh, mass, velocity, angularVelocity, ownerId, sm
   body.collisionFilterMask = G.ARENA | G.DEBRIS;
   body.userData = { kind: 'debris', ownerId: ownerId || null };
   world.addBody(body);
-  const rec = { mesh, body, mass, settled: false, still: 0, lastClank: 0, ownerId: ownerId || null, live: 0, small: !!small };
+  const rec = { mesh, body, mass, settled: false, still: 0, lastClank: 0, ownerId: ownerId || null, live: 0, small: !!small, ext: Math.max(hx, hz) };
   body.addEventListener('collide', (e) => {
     if (rec.settled) return;
     const other = e.body === body ? e.target : e.body;
@@ -366,13 +366,21 @@ function syncDebris(dt) {
       d.body.position.y = floor;
       if (d.body.velocity.y < 0) d.body.velocity.y = 0;
     }
-    const [cx, cz] = clampBodyToCage(d.body.position.x, d.body.position.z, 0.08);
-    if (cx !== d.body.position.x || cz !== d.body.position.z) {
+    // Keep the whole piece inside the cage (its half-size from the inner face, not just its
+    // centre), bouncing off softly. A centre that got past the wall plane (tunnelled at speed)
+    // is counted once as an escape for the fight log, then brought back in.
+    const pad = Math.min(0.35, Math.max(0.04, d.ext || 0.08));
+    const px = d.body.position.x, pz = d.body.position.z;
+    const [cx, cz] = clampBodyToCage(px, pz, pad);
+    if (cx !== px || cz !== pz) {
+      if (!d.escaped && wallDist(px, pz) < -0.02) { d.escaped = true; d.escapedNew = true; }
       d.body.position.x = cx;
       d.body.position.z = cz;
-      d.body.velocity.x *= 0.2;
-      d.body.velocity.z *= 0.2;
-      d._out = true;
+      const [nx, nz] = wallOutward(px, pz);
+      const out = d.body.velocity.x * nx + d.body.velocity.z * nz;
+      if (out > 0) { d.body.velocity.x -= nx * out * 1.35; d.body.velocity.z -= nz * out * 1.35; }
+      d.body.velocity.x *= 0.6;
+      d.body.velocity.z *= 0.6;
     }
     const v = d.body.velocity.length();
     const w = d.body.angularVelocity.length();

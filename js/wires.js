@@ -33,6 +33,8 @@ const _n2 = new THREE.Vector3();
 let obstacles = []; // { ax,ay,az, bx,by,bz, r }
 
 export function setWiresLow(on) { low = !!on; }
+// Materials for the shader pre-warm (mesh materials, then the arc line material).
+export function wireWarmMaterials() { return { mesh: mats.slice(), line: arcMat }; }
 export function setWireObstacles(list) { obstacles = list || []; }
 
 function wireCount() { return groups.reduce((n, g) => n + g.wires.length, 0); }
@@ -53,6 +55,7 @@ function makeTubeGeo(sides) {
     }
   }
   const geo = new THREE.BufferGeometry();
+  geo.name = 'stumpWire';
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
   geo.setIndex(idx);
@@ -96,6 +99,19 @@ function updateTube(geo, pts, radius, sides) {
   geo.attributes.position.needsUpdate = true;
   geo.attributes.normal.needsUpdate = true;
   geo.computeBoundingSphere();
+}
+
+function chainFinite(P) {
+  for (let k = 0; k < P.length; k++) if (!Number.isFinite(P[k].x + P[k].y + P[k].z)) return false;
+  return true;
+}
+
+// Straight down from the anchor, at rest: the chain swings out again from there.
+function rehang(w, a) {
+  for (let k = 0; k <= SEGS; k++) {
+    w.pts[k].set(a.x + w.off.x, a.y + w.off.y - k * w.len, a.z + w.off.z);
+    w.prev[k].copy(w.pts[k]);
+  }
 }
 
 function flushWire(w) {
@@ -192,6 +208,7 @@ function arc(g) {
     arr[k * 3 + 2] = from.z + (to.z - from.z) * t + (Math.random() - 0.5) * j;
   }
   const geo = new THREE.BufferGeometry();
+  geo.name = 'wireArc';
   geo.setAttribute('position', new THREE.BufferAttribute(arr, 3));
   const line = new THREE.Line(geo, arcMat);
   line.frustumCulled = false;
@@ -216,6 +233,8 @@ export function stepWires(dt) {
     if (g.piece && g.anchor.userData && g.anchor.userData.resting) continue;
     g.anchor.updateWorldMatrix(true, false);
     g.anchor.getWorldPosition(_a);
+    // A bad anchor frame (non-finite bone) is skipped; it used to poison the chain for good.
+    if (!Number.isFinite(_a.x + _a.y + _a.z)) continue;
     for (const w of g.wires) {
       const P = w.pts; const Q = w.prev;
       P[0].copy(_a).add(w.off); Q[0].copy(P[0]);
@@ -242,6 +261,7 @@ export function stepWires(dt) {
         }
         P[0].copy(_a).add(w.off);
       }
+      if (!chainFinite(P)) rehang(w, _a);
       flushWire(w);
     }
     // Arcs: frequent right after the tear, tapering off, done after ~20 s.
