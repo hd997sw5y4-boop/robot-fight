@@ -169,9 +169,9 @@ export const COMBAT = {
   contactHold: 0.1,      // after a fist/foot connects it is pulled back this soon
   knockdownForce: 4.6,   // a heavy blow at least this hard knocks down (heavy counters always do)
   kickKnockChance: 0.25,  // other heavy kicks knock down this often
-  punchLunge: 0.68 * SIZE, // metres a strike steps forward into the swing (stops on contact)
-  kickLunge: 0.55 * SIZE,
-  strikeGap: 1.3 * SIZE,   // chest-gap guard; lunges no longer wait for a wide opening
+  punchStep: 0.68 * SIZE, // longest step into a strike: lead foot steps, back foot follows (stops on contact)
+  kickStep: 0.55 * SIZE,
+  strikeGap: 1.3 * SIZE,   // chest-gap guard; steps in don't wait for a wide opening
   bodyRadius: 0.27 * SIZE, // striking distance to the body surface (contact itself uses skeleton capsules, game.js CAPS)
   fistShell: 0.16 * SIZE,  // fist surface beyond the hand bone (contact tolerance)
   kickShell: 0.15 * SIZE,

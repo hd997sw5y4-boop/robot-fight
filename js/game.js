@@ -1333,6 +1333,13 @@ function measureStrikes(f) {
     while (i1 < N && s[i1 + 1].reach > rest + lift * 0.55) i1++;
     const a0 = Math.max(0, s[i0].t - 0.04);
     const a1 = Math.min(dur, s[i1].t + 0.04);
+    // Wind-up: the strike is most pulled back (lowest reach) in the 0.45 s before the peak;
+    // from there on the fist/foot drives out. Striking side: the bone furthest out at the peak.
+    let iw = pk;
+    for (let i = pk; i >= 0 && s[i].t >= s[pk].t - 0.45; i--) if (s[i].reach < s[iw].reach) iw = i;
+    let hb = 0;
+    for (let j = 1; j < bones.length; j++) if (s[pk].zs[j] > s[pk].zs[hb]) hb = j;
+    const side = /^Left/.test(boneKey(bones[hb].name)) ? 'L' : 'R';
     let end = Math.min(dur, a1 + 0.12);
     if (kind === 'kick') {
       // A kick hands control back once the KICKING foot is back on the mat. (Testing the lowest
@@ -1362,7 +1369,7 @@ function measureStrikes(f) {
       const r0 = s.reduce((b, r) => (Math.abs(r.t - startT) < Math.abs(b.t - startT) ? r : b), s[0]);
       for (let j = 0; j < allTips.length; j++) gap0 = Math.max(gap0, r0.tp[j].distanceTo(guardTips[j]));
     }
-    out[name] = { kind, dur, start: startT, a0, a1, end, peak: s[pk].t, reach: +(s[pk].reach * 1).toFixed(3), vpk: +vpk.toFixed(2), gap0: +gap0.toFixed(3) };
+    out[name] = { kind, dur, start: startT, a0, a1, end, peak: s[pk].t, windup: s[iw].t, side, reach: +(s[pk].reach * 1).toFixed(3), vpk: +vpk.toFixed(2), gap0: +gap0.toFixed(3) };
   }
   f.mixer.stopAllAction();
   f.current = null;
@@ -1742,7 +1749,7 @@ function groundFeet(f, dt) {
   }
   f.root.position.y = f.groundY;
   f.model.updateWorldMatrix(true, true);
-  plantFeet(f, top, dt, skipIK);
+  footwork(f, top, dt, skipIK);
 
   // Per-frame clamp after IK; not stored, so it can't accumulate.
   minY = bodyCheck ? Math.min(lowestFootY(f) ?? Infinity, lowestBodyY(f) ?? Infinity) : lowestFootY(f);
@@ -1755,54 +1762,152 @@ function groundFeet(f, dt) {
   f._lowY = minY == null ? null : Math.max(minY, top); // lowest grounded point, for the log
 }
 
-// Foot plant: while idle or blocking, with no footwork and no turn, a nearly planted foot is
-// held where it landed by bending the knee on its hinge and swinging the thigh. Rotations
-// only: bones keep their length (the old plant moved the foot bone inside the shin, and since
-// no clip animates that position the offset stuck and grew until the knee looked bent
-// backward). The hold eases in and out, the anchor creeps after the clip foot so it never
-// stores tension, and any attack, step or turn releases it within ~0.1 s.
-const PLANT_IN = 0.18;     // s to engage
-const PLANT_OUT = 0.08;    // s to release
-const PLANT_FOLLOW = 3;    // 1/s anchor creep toward the clip foot
-const PLANT_MAX = 0.08;    // furthest the anchor may trail the clip foot (world units)
-const PLANT_SPEED = 0.25;  // root speed (units/s) that counts as footwork
-const PLANT_TURN = 0.8;    // root yaw rate (rad/s) that counts as a turn
+// Planted feet. A foot the clip puts on the mat is held where it landed (knee hinge + thigh
+// swing, rotations only, bones keep their length), so the root moving under it (walking,
+// stumbling, being pushed, turning, stepping into a strike) can't skate it across the mat.
+// The hold lets go into a short swing back to the clip foot when the clip lifts the foot, when
+// it trails the clip foot too far or the leg can't reach it (a re-plant step with a small lift),
+// or when the state leaves footwork. Strikes script the feet (strikeFootwork): the lead foot
+// steps in with the body over the wind-up, the back foot stays planted with its heel coming up
+// as the hips drive through, and follows after the hit.
 const DEG = Math.PI / 180;
-function plantFeet(f, top, dt, off) {
+const FW_STATES = new Set(['idle', 'block', 'walk', 'hit', 'punch', 'kick', 'ground', 'dash']);
+const FW_GROUND = 0.04;        // clip sole this close to the mat counts as planted
+const FW_LOCK_MAX = 0.15 * SIZE; // furthest a planted foot may trail the clip foot
+const FW_SNAP = 2 * SIZE;      // further than this (a round reset): drop the plant
+const FW_SHOVE = 5 * SIZE;     // root faster than this (m/s) is a shove: planted feet go with it
+const FW_SWING = 0.12;         // s: lifted by the clip, the foot swings back to it
+const FW_RESTEP = 0.17;        // s: re-plant step
+const FW_OUT = 0.08;           // s: hand-off to the clip when footwork turns off
+const FW_LIFT = 0.07 * SIZE;   // re-plant / step-in foot lift
+const FW_HEEL = 16 * DEG;      // back heel lift at full drive
+const _fwA = new THREE.Vector3();
+const _fwT = new THREE.Vector3();
+const _fwK = new THREE.Vector3();
+const _fwQ = new THREE.Quaternion();
+const _fwQ2 = new THREE.Quaternion();
+const _fwQ3 = new THREE.Quaternion();
+const _fwUp = new THREE.Vector3(0, 1, 0);
+const FW_SWING_V = 1.6 * SIZE; // m/s: a hand-off swing is never faster than this on average
+function fwSwing(p, x, y, z, dur, lift, cx, cz) {
+  p.mode = 'swing'; p.fx = x; p.fz = z; p.t = 0; p.lift = lift;
+  p.dur = cx == null ? dur : Math.max(dur, Math.hypot(x - cx, z - cz) / FW_SWING_V);
+}
+function footwork(f, top, dt, off) {
   if (!f.ikLegs) return;
-  const P = f.footPlant || (f.footPlant = { L: { w: 0, x: 0, z: 0 }, R: { w: 0, x: 0, z: 0 } });
-  const r = f.root;
-  const last = f._plantRoot || (f._plantRoot = { x: r.position.x, z: r.position.z, yaw: r.rotation.y });
+  const P = f.footPlant || (f.footPlant = { L: { mode: 'free', w: 0, heel: 0 }, R: { mode: 'free', w: 0, heel: 0 } });
   const step = Math.max(dt || 0, 1e-3);
-  const speed = Math.hypot(r.position.x - last.x, r.position.z - last.z) / step;
-  const turn = Math.abs(Math.atan2(Math.sin(r.rotation.y - last.yaw), Math.cos(r.rotation.y - last.yaw))) / step;
-  last.x = r.position.x; last.z = r.position.z; last.yaw = r.rotation.y;
-  const still = !off && (f.state === 'idle' || f.state === 'block') && f.airLock == null
-    && speed < PLANT_SPEED && turn < PLANT_TURN;
+  const striking = f.state === 'punch' || f.state === 'kick';
+  const sw = striking && f.strikeWork && f.strikeWork.clip === f.attackClip ? f.strikeWork : null;
+  // Kicks pivot and lift on the clip's own feet: only the step in before one is posed here.
+  const on = !off && FW_STATES.has(f.state) && f.airLock == null && !f.airMove
+    && (f.state !== 'kick' || (sw && sw.u < 1 && sw.S > 0));
+  // A shove (or a separation push) faster than any step carries the planted feet along.
+  const rp = f.root.position;
+  const last = f._fwRoot || (f._fwRoot = { x: rp.x, z: rp.z });
+  const rdx = rp.x - last.x, rdz = rp.z - last.z;
+  last.x = rp.x; last.z = rp.z;
+  // (Also a single hitch frame that jumps the body further than a step could cover.)
+  const shove = Math.hypot(rdx, rdz) > Math.min(FW_SHOVE * step, 0.09 * SIZE);
   for (const side of ['L', 'R']) {
     const leg = f.ikLegs[side];
     const p = P[side];
     if (!leg || !leg.thigh || !leg.shin || !leg.foot) continue;
     const part = f.parts && f.parts[side === 'L' ? 'legL' : 'legR'];
     const sub = f.subs && f.subs[side === 'L' ? 'footL' : 'footR'];
-    leg.foot.getWorldPosition(_ikC);
+    leg.foot.getWorldPosition(_ikC); // the clip's ankle
     let low = _ikC.y;
     if (leg.toe) { leg.toe.getWorldPosition(_ikT); low = Math.min(low, _ikT.y); }
-    const want = still && !(part && part.detached) && !(sub && sub.detached) && Math.abs(top - low) < 0.045 ? 1 : 0;
-    if (p.w <= 0) { p.x = _ikC.x; p.z = _ikC.z; } // a fresh plant starts where the foot is
-    p.w += (want - p.w) * Math.min(1, step / (want ? PLANT_IN : PLANT_OUT));
-    if (!want && p.w < 0.01) p.w = 0;
-    const kf = Math.min(1, step * PLANT_FOLLOW);
-    p.x += (_ikC.x - p.x) * kf;
-    p.z += (_ikC.z - p.z) * kf;
-    let dx = p.x - _ikC.x;
-    let dz = p.z - _ikC.z;
-    const d = Math.hypot(dx, dz);
-    if (d > PLANT_MAX) { dx *= PLANT_MAX / d; dz *= PLANT_MAX / d; p.x = _ikC.x + dx; p.z = _ikC.z + dz; }
-    if (p.w <= 0 || Math.min(d, PLANT_MAX) * p.w < 0.0015) continue;
-    _ikT.set(_ikC.x + dx * p.w, _ikC.y, _ikC.z + dz * p.w);
-    reachFoot(f, leg, _ikT);
+    const grounded = low - top < FW_GROUND;
+    const role = sw ? sw.role[side] : null;
+    const ok = on && role !== 'free' && !(part && part.detached) && !(sub && sub.detached);
+    if (shove) {
+      if (p.ax != null) { p.ax += rdx; p.az += rdz; }
+      if (p.fx != null) { p.fx += rdx; p.fz += rdz; }
+      if (p.sx != null) { p.sx += rdx; p.sz += rdz; }
+    }
+    // Where the foot is shown now (last frame's result), for hand-offs.
+    const shownX = p.mode === 'free' ? _ikC.x : (p.sx != null ? p.sx : _ikC.x);
+    const shownZ = p.mode === 'free' ? _ikC.z : (p.sz != null ? p.sz : _ikC.z);
+    if (p.mode !== 'free' && Math.hypot(shownX - _ikC.x, shownZ - _ikC.z) > FW_SNAP) p.mode = 'free';
+    let maxLock = FW_LOCK_MAX;
+    if (!ok) {
+      if (p.mode === 'lock' || p.mode === 'lead') fwSwing(p, shownX, 0, shownZ, FW_OUT, 0, _ikC.x, _ikC.z);
+    } else if (role === 'lead' && sw.u < 1) {
+      if (p.mode !== 'lead') { p.mode = 'lead'; p.fx = shownX; p.fz = shownZ; }
+    } else {
+      // Step done (or the strike ended mid-step): land it on the clip foot.
+      if (p.mode === 'lead') fwSwing(p, shownX, 0, shownZ, FW_SWING, 0, _ikC.x, _ikC.z);
+      if (role === 'back') maxLock = FW_LOCK_MAX + sw.S;
+      if (p.mode === 'free' && grounded) { p.mode = 'lock'; p.ax = _ikC.x; p.az = _ikC.z; }
+      else if (p.mode === 'lock') {
+        const d = Math.hypot(p.ax - _ikC.x, p.az - _ikC.z);
+        if (!grounded) fwSwing(p, p.ax, 0, p.az, FW_SWING, 0, _ikC.x, _ikC.z);
+        else if (role === 'back' && sw.follow && d > 0.05 * SIZE) fwSwing(p, p.ax, 0, p.az, 0.2, 0.5 * FW_LIFT, _ikC.x, _ikC.z);
+        else if (d > maxLock || !legReaches(leg, p.ax, _ikC.y, p.az)) fwSwing(p, p.ax, 0, p.az, FW_RESTEP, FW_LIFT * Math.max(0.6, Math.min(1, d / FW_LOCK_MAX)), _ikC.x, _ikC.z);
+      }
+    }
+    // Target for this frame.
+    let tx = _ikC.x, ty = _ikC.y, tz = _ikC.z;
+    if (p.mode === 'lock') { tx = p.ax; tz = p.az; }
+    else if (p.mode === 'lead') {
+      const u = Math.max(0, Math.min(1, sw.u));
+      const e = u * u * (3 - 2 * u);
+      tx = p.fx + (_ikC.x - p.fx) * e;
+      tz = p.fz + (_ikC.z - p.fz) * e;
+      ty += Math.min(FW_LIFT * 1.3, 0.04 * SIZE + 0.25 * sw.S) * Math.sin(Math.PI * u);
+    } else if (p.mode === 'swing') {
+      p.t += step;
+      const u = Math.min(1, p.t / Math.max(1e-3, p.dur));
+      const e = u * u * (3 - 2 * u);
+      tx = p.fx + (_ikC.x - p.fx) * e;
+      tz = p.fz + (_ikC.z - p.fz) * e;
+      ty += p.lift * Math.sin(Math.PI * u);
+      if (u >= 1) {
+        if (ok && grounded) { p.mode = 'lock'; p.ax = _ikC.x; p.az = _ikC.z; } else p.mode = 'free';
+      }
+    }
+    p.w = p.mode === 'free' ? 0 : 1;
+    // Back heel: comes up off the mat (pivoting on the ball of the foot) as the hips drive.
+    const heelWant = role === 'back' && p.mode === 'lock' && leg.toe ? (f._strikeDrive || 0) : 0;
+    p.heel += (heelWant - p.heel) * Math.min(1, step * 14);
+    if (p.heel < 0.01) p.heel = 0;
+    p.sx = tx; p.sz = tz;
+    const moved = Math.hypot(tx - _ikC.x, ty - _ikC.y, tz - _ikC.z);
+    if (moved < 0.0015 && !(p.heel > 0)) continue;
+    _fwA.set(tx, ty, tz);
+    if (p.heel > 0) {
+      // Rotate the ankle about the toe: the toe stays, the heel lifts.
+      leg.toe.getWorldPosition(_fwT);
+      _fwT.x += tx - _ikC.x; _fwT.z += tz - _ikC.z;
+      _fwK.set(_fwT.x - tx, 0, _fwT.z - tz);
+      if (_fwK.lengthSq() > 1e-8) {
+        _fwK.normalize().negate().cross(_fwUp).normalize();
+        _fwQ.setFromAxisAngle(_fwK, FW_HEEL * p.heel);
+        _fwA.sub(_fwT).applyQuaternion(_fwQ).add(_fwT);
+      } else _fwQ.identity();
+    }
+    reachFoot(f, leg, _fwA);
+    if (p.heel > 0 && leg.shin) {
+      // Pitch the foot about the ball and keep the toes flat on the mat.
+      leg.toe.getWorldQuaternion(_fwQ3);
+      leg.foot.getWorldQuaternion(_fwQ2);
+      leg.shin.getWorldQuaternion(_ikQ2);
+      _fwQ2.premultiply(_fwQ);
+      leg.foot.quaternion.copy(_ikQ2.invert().multiply(_fwQ2));
+      leg.toe.quaternion.copy(_fwQ2.invert().multiply(_fwQ3));
+      leg.foot.updateMatrixWorld(true);
+    }
   }
+}
+// Can the leg reach this ankle position (_ikC is the clip ankle)? Hip-to-ankle under ~98% of
+// the leg's length, or no further than the clip's own pose already stretches it.
+function legReaches(leg, x, y, z) {
+  leg.thigh.getWorldPosition(_ikA);
+  leg.shin.getWorldPosition(_ikB);
+  const l = _ikA.distanceTo(_ikB) + _ikB.distanceTo(_ikC);
+  const d = Math.hypot(x - _ikA.x, y - _ikA.y, z - _ikA.z);
+  return d < l * 0.98 || d <= _ikA.distanceTo(_ikC) + 0.005;
 }
 
 // Move the ankle to target by flexing the knee on its fitted hinge (sets the hip-to-ankle
@@ -2444,7 +2549,7 @@ function tryAttack(f, kind, clipName, exact = false) {
   if (usesCpuBrain(f) && other && STRIKE_T) {
     const tip = strikeTip(clip);
     const gap = f.root.position.distanceTo(other.root.position);
-    const close = Math.min((kind === 'kick' ? COMBAT.kickLunge : COMBAT.punchLunge) || 0, 0.36 * SIZE);
+    const close = Math.min((kind === 'kick' ? COMBAT.kickStep : COMBAT.punchStep) || 0, 0.36 * SIZE);
     if (tip != null && tip + close < gap - 0.06) return false;
   }
   if (!f.isCpu) logInputAction(f.id, kind);
@@ -2492,8 +2597,74 @@ function tryAttack(f, kind, clipName, exact = false) {
     f.strikeCap = cap;
     // Start in the wind-up, not at the measured contact frame, so the strike reads.
     if (st) action.time = isPoppyClip(clip) ? Math.max(0, st.start - 0.12) : Math.max(0, st.start - 0.22);
+    // Punches: a readable wind-up, a very fast drive and a calmer recovery (same time to contact).
+    f.strikePlan = kind === 'punch' && st && !SPECIAL_STRIKES.has(clip)
+      ? punchPlan(clip, st, action.time, base, cap, mods.timeScale * statOf(f, 'speed')) : null;
+    if (f.strikePlan) { action.time = f.strikePlan.t0; action.timeScale = f.strikePlan.rW; }
   }
+  f.strikeWork = strikeFootwork(f, other, kind, clip);
   return true;
+}
+
+// Punch playback plan in clip seconds. A uniform speed-up hid the anticipation, so the clip
+// is played in phases: the wind-up (the fist pulled back while the hips and shoulder load) near
+// real time, the drive from there to full extension as fast as the limb-speed cap allows, and the
+// recovery at whatever rate brings the clip to its end when the old uniform playback did.
+// Time to the peak stays within ~12% of the old playback, so balance and the measured hit
+// windows (clip time) are unchanged.
+const WINDUP_RATE = 1.0;   // clip speed of the wind-up (x real time, damage / stats scale it)
+const WINDUP_MAX = 0.2;    // clip seconds of wind-up shown before the drive
+function punchPlan(clip, st, t0Old, base, cap, slow) {
+  const pk = st.peak != null ? st.peak : st.a0;
+  if (!(pk > t0Old + 0.06)) return null;
+  // Old uniform playback, integrated: 0.95x early, 1.2x through the window, PUNCH_RETURN after.
+  const oldRate = (t) => Math.min(cap, base * ((t - st.start) / Math.max(0.05, pk - st.start) < 0.3 ? 0.95 : (t <= st.a1 ? 1.2 : PUNCH_RETURN)));
+  const wall = (a, b, rate) => { let T = 0; const n = 24; for (let i = 0; i < n; i++) { const t = a + (b - a) * (i + 0.5) / n; T += (b - a) / n / rate(t); } return T; };
+  const Tpk = wall(t0Old, pk, oldRate);
+  const Tend = wall(t0Old, st.end, oldRate);
+  const tw = Math.max(t0Old + 0.02, Math.min(pk - 0.05, st.windup != null ? st.windup : t0Old + 0.6 * (pk - t0Old)));
+  const t0 = Math.max(t0Old, tw - WINDUP_MAX);
+  let rW = Math.min(cap, WINDUP_RATE * slow);
+  const rS = Math.min(cap, Math.max(rW, (pk - tw) / Math.max(0.03, Tpk - (tw - t0) / rW)));
+  const allow = Tpk * 1.12;
+  if ((tw - t0) / rW + (pk - tw) / rS > allow) rW = Math.min(cap, (tw - t0) / Math.max(0.02, allow - (pk - tw) / rS));
+  const rF = Math.max(rW, rS * 0.7); // through the rest of the hit window
+  const Ta1 = (tw - t0) / rW + (pk - tw) / rS + Math.max(0, st.a1 - pk) / rF;
+  const rR = Math.min(cap, Math.max(base * 0.5, Math.max(0, st.end - st.a1) / Math.max(0.05, Tend - Ta1)));
+  return { clip, t0, tw, pk, a1: st.a1, end: st.end, rW, rS, rF, rR, side: st.side || 'R' };
+}
+function punchPlanRate(p, ct) {
+  const k = 0.025; // short ramps so the speed change has no visible hitch
+  if (ct < p.tw - k) return p.rW;
+  if (ct < p.tw + k) return p.rW + (p.rS - p.rW) * (ct - p.tw + k) / (2 * k);
+  if (ct < p.pk) return p.rS;
+  if (ct < p.a1) return p.rF;
+  return p.rR;
+}
+
+// Strike footwork, planned at the start of the attack. Out of reach, the robot steps in during
+// the wind-up: the lead foot lifts and lands with the body while the back foot stays planted,
+// then follows after the hit. Up close the feet just stay planted. (footwork() poses the feet.)
+const STEP_GAP = 0.62 * SIZE; // a step in stops at this chest gap (the strike's own lean closes the rest)
+function strikeFootwork(f, other, kind, clip) {
+  if (!other || !f.ikLegs || !f.ikLegs.L.foot || !f.ikLegs.R.foot) return null;
+  const st = STRIKE_T && STRIKE_T[clip];
+  const fwd = toward(f, other);
+  const proj = (side) => { f.ikLegs[side].foot.getWorldPosition(_ikC); return _ikC.x * fwd.x + _ikC.z * fwd.z; };
+  const lead = proj('L') >= proj('R') ? 'L' : 'R';
+  const back = lead === 'L' ? 'R' : 'L';
+  const max = (kind === 'kick' ? COMBAT.kickStep : COMBAT.punchStep) || 0;
+  const S = Math.max(0, Math.min(max, chestGap(f, other) - STEP_GAP));
+  const role = { L: null, R: null };
+  let stepper = lead;
+  if (kind === 'kick') {
+    // The support leg steps; the kicking leg is the clip's.
+    const kicker = (st && st.side) || back;
+    stepper = kicker === 'L' ? 'R' : 'L';
+    role[kicker] = 'free';
+  } else role[back] = 'back';
+  if (S > 0.06 * SIZE) role[stepper] = 'lead';
+  return { clip, kind, S, u: S > 0.06 * SIZE ? 0 : 1, x0: f.root.position.x, z0: f.root.position.z, fx: fwd.x, fz: fwd.z, t0: null, stopped: false, follow: false, role };
 }
 
 // Jabs, straights (Punching / PunchCombo) and hooks get a peak arm-extension IK so the
@@ -2516,12 +2687,12 @@ function strikeTip(name) {
 function fitStrikeClip(f, kind, clip, other) {
   if (!STRIKE_T || !other) return clip;
   const gap = f.root.position.distanceTo(other.root.position);
-  // Only credit a short step-in: the full lunge often stops once chests are close,
-  // so assuming the whole punchLunge made Punching / Uppercut look in range and then miss.
-  const lunge = Math.min((kind === 'kick' ? COMBAT.kickLunge : COMBAT.punchLunge) || 0, 0.36 * SIZE);
+  // Only credit a short step-in: the full step often stops once chests are close,
+  // so assuming the whole punchStep made Punching / Uppercut look in range and then miss.
+  const stepIn = Math.min((kind === 'kick' ? COMBAT.kickStep : COMBAT.punchStep) || 0, 0.36 * SIZE);
   const fits = (n) => {
     const tip = strikeTip(n);
-    return tip != null && tip + lunge >= gap - 0.02 && tip <= gap + 0.35;
+    return tip != null && tip + stepIn >= gap - 0.02 && tip <= gap + 0.35;
   };
   if (clip && fits(clip)) return clip;
   const pool = kind === 'punch' ? punchClipsFor(f) : availableClips(f, MODEL.animations.kickVariants);
@@ -2597,6 +2768,7 @@ function endAttack(f, fade = 0.2) {
   f.cooldown = Math.max(f.cooldown, rec / statOf(f, 'recovery'));
   f.state = 'idle';
   f.atkContact = false;
+  f.strikePlan = null;
   f.backOff = Math.max(f.backOff || 0, 0.4);
   endAir(f);
   if (!f.hitThisAttack && f.attackClip) logStrike(f.id, f.attackClip, 'miss', 0);
@@ -3470,7 +3642,7 @@ function applyGroundBow(f) {
 
 // At the peak of a jab, straight or hook, blend a two-bone arm IK so the punching arm is
 // almost fully straight (elbow nearly locked) and the fist reaches toward the target. The
-// body still lunges in; this only extends the arm on top of the clip. Hooks keep a little
+// body still steps in; this only extends the arm on top of the clip. Hooks keep a little
 // elbow bend so they still read as hooks. The weight follows the clip playhead both ways, so
 // a landed punch stays extended to the surface and folds back as the clip rewinds (pulled
 // strikes play backwards), instead of snapping in at the moment of contact. The fist (the
@@ -3565,7 +3737,7 @@ function applyPunchReach(f) {
   _ikD.lerp(_ikT, aimMix * w).normalize();
 
   const wantLen = curLen + (full * lock - curLen) * w;
-  // Don't drive the fist through the opponent; the body lunge still closes the rest of the gap.
+  // Don't drive the fist through the opponent; the step in still closes the rest of the gap.
   const toChest = Math.hypot(other.root.position.x - _ikA.x, other.root.position.z - _ikA.z);
   const maxToBody = Math.max(0.1, toChest - (COMBAT.bodyRadius || 0.27 * SIZE) - 0.02);
   const reach = Math.min(wantLen, maxToBody);
@@ -4110,25 +4282,39 @@ function stepFighter(f, other, inp, dt) {
     const ct = action ? action.time : f.stateT; // clip playhead: windows stay right at any speed
     // Weight curve over the strike: a slight held wind-up, a hard acceleration into the impact,
     // and a heavier follow-through (contact / retraction below override it).
-    if (action && f.strikeBase && !f.retract && f.contactT < 0 && action.timeScale > 0 && !(f.airMove && f.airMove.action === action)) {
+    const plan = f.strikePlan && f.strikePlan.clip === f.attackClip ? f.strikePlan : null;
+    if (plan && action && !f.retract && f.contactT < 0 && action.timeScale > 0) {
+      action.timeScale = Math.min(f.strikeCap || Infinity, punchPlanRate(plan, ct));
+    } else if (action && f.strikeBase && !f.retract && f.contactT < 0 && action.timeScale > 0 && !(f.airMove && f.airMove.action === action)) {
       const st0 = tm.start, pk = tm.peak != null ? tm.peak : tm.a0;
       const u = (ct - st0) / Math.max(0.05, pk - st0);
       // Punches come back slower than they go out (a natural pull-back, no hold at the end).
       const mul = u < 0.3 ? 0.95 : (ct <= tm.a1 ? 1.2 : (f.state === 'punch' ? PUNCH_RETURN : 0.95));
       action.timeScale = Math.min(f.strikeCap || Infinity, f.strikeBase * mul);
     }
-    // A small step into the strike when just out of reach; it stops on contact and never
-    // drives inside striking distance (that pushed fists through torsos).
+    // Out of reach, the strike steps in over the wind-up (strikeFootwork): the body travels the
+    // planned step on an eased curve while the lead foot steps with it. It stops on contact and
+    // never drives inside striking distance (that pushed fists through torsos).
     const gap = f.root.position.distanceTo(other.root.position);
     const airKick = f.airMove && f.airMove.action === action ? f.airMove : null;
+    const sw = f.strikeWork && f.strikeWork.clip === f.attackClip ? f.strikeWork : null;
+    if (sw && sw.t0 == null) sw.t0 = ct;
     if (airKick) stepAirMove(f, dt); // airborne travel only, lands still
-    else if (!f.atkContact && ct < tm.a0 && chestGap(f, other) > 0.46 * SIZE && !limbInside(f, other, f.state)) {
-      // Step into every swing; chestGap / limbInside stop the body driving through the opponent.
-      const lunge = (f.state === 'kick' ? COMBAT.kickLunge : COMBAT.punchLunge) || 0;
-      const fwd = toward(f, other);
-      const v = lunge / Math.max(0.1, (tm.a0 - tm.start) / Math.max(0.2, action ? action.timeScale : 1));
-      setFighterMove(f, fwd.x * v, fwd.z * v);
+    else if (sw && sw.u < 1) {
+      const ut = Math.max(0, Math.min(1, (ct - sw.t0) / Math.max(0.04, tm.a0 - sw.t0)));
+      const moved = (f.root.position.x - sw.x0) * sw.fx + (f.root.position.z - sw.z0) * sw.fz;
+      if (!sw.stopped && (f.atkContact || chestGap(f, other) <= STEP_GAP || limbInside(f, other, f.state))) sw.stopped = true;
+      if (!sw.stopped && ct < tm.a0) {
+        const want = sw.S * ut * ut * (3 - 2 * ut);
+        // (Capped well under the root-teleport check: physics steps at 60 Hz.)
+        const v = Math.max(0, Math.min(2.8 * SIZE, (want - moved) / Math.max(dt, 1 / 60)));
+        const fwd = toward(f, other);
+        setFighterMove(f, fwd.x * v, fwd.z * v);
+      } else setFighterMove(f, 0, 0);
+      sw.u = Math.max(sw.u, ut, sw.stopped ? 0 : Math.min(1, moved / Math.max(1e-3, sw.S)));
     } else setFighterMove(f, 0, 0);
+    // The back foot follows once the hit has landed or the window has passed.
+    if (sw && !sw.follow && ((f.contactT >= 0 && f.stateT - f.contactT > 0.06) || ct > tm.a1 || f.retract)) sw.follow = true;
     // Limb contact decides, not root distance: the swept fist/foot test runs through the whole
     // active window (the old root-distance gate let near-miss strikes skip the test and sail
     // through the body).
@@ -5053,6 +5239,22 @@ function poseAfterMixer(f, dt = 1 / 60) {
       if (upY > 0.9) f.hipYawFix = live;
       f.hips.quaternion.premultiply(_hpQ.setFromAxisAngle(_hpY, dy * w));
     }
+    // Weight shift: back over the rear leg in the wind-up, forward and down onto the lead leg
+    // as the punch lands (the planted feet hold, so the knees take it).
+    const sb = strikeBodyCurve(f, dt);
+    if (sb.shift !== 0 && f.hips.parent) {
+      // Up close (elbows, hooks inside) the forward shift shrinks so the body doesn't drive in.
+      const room = sb.shift > 0 ? Math.max(0, Math.min(1, (chestGap(f, f === p1 ? p2 : p1) - 0.42 * SIZE) / (0.3 * SIZE))) : 1;
+      sb.shift *= room * (SHIFT_SCALE[f.attackClip] ?? 1);
+      const parent = f.hips.parent;
+      parent.updateWorldMatrix(true, false);
+      const fw = toward(f, f === p1 ? p2 : p1);
+      _hpB.copy(f.hips.position).applyMatrix4(parent.matrixWorld);
+      _hpB.x += fw.x * sb.shift * 0.075 * SIZE;
+      _hpB.z += fw.z * sb.shift * 0.075 * SIZE;
+      _hpB.y -= Math.max(0, sb.shift) * 0.025 * SIZE;
+      f.hips.position.copy(_hpB.applyMatrix4(_guM.copy(parent.matrixWorld).invert()));
+    }
     // Never let the freed hips carry the body into the opponent.
     const opp = f === p1 ? p2 : p1;
     if (f.hipFree > 0.01 && opp && f.hips.parent) {
@@ -5074,7 +5276,77 @@ function poseAfterMixer(f, dt = 1 / 60) {
   applyStumpLeg(f, dt);
   applyFlinch(f, dt);
   applyGroundBow(f);
+  applyStrikeTwist(f);
   applyPunchReach(f);
+}
+
+// Full-body punch: an additive turn about the vertical layered on the clip, hips first, then
+// the spine, the chest and last the punching shoulder. It loads away from the punch in the
+// wind-up, drives through on the strike (each link a beat behind the one below) and settles in
+// the recovery. Driven by the clip playhead, so a pulled punch rewinding unwinds it too. The
+// thighs are turned back by the hip turn so the planted legs don't swing with the pelvis.
+// Degrees: [load, drive] per link.
+// Hooks and elbows already sweep across in the clip; a big extra turn drove them into the body.
+const TWIST_LINKS = [['hips', 6, 8, 0], ['Spine', 3, 5, 0.1], ['Spine1', 3, 4, 0.2], ['Spine2', 3, 3, 0.3], ['shoulder', 0, 4, 0.38]];
+const SHIFT_SCALE = { ElbowPunching: 0.2, RightHook: 0.3, Uppercut: 0.3 };
+const TWIST_SCALE = { LeadJab: 0.6, Punching: 1, PunchCombo: 0.7, ElbowPunching: 0.25, RightHook: 0.25, Uppercut: 0.3 };
+const _twQ = new THREE.Quaternion();
+const _twP = new THREE.Quaternion();
+const _twY = new THREE.Vector3(0, 1, 0);
+const smooth01 = (x) => { const u = Math.max(0, Math.min(1, x)); return u * u * (3 - 2 * u); };
+function strikeBodyCurve(f, dt) {
+  const sb = f._sb || (f._sb = { v: TWIST_LINKS.map(() => 0), shift: 0, sign: 1, side: 'R' });
+  const plan = f.state === 'punch' && f.strikePlan && f.strikePlan.clip === f.attackClip ? f.strikePlan : null;
+  const action = plan && f.actions[plan.clip];
+  if (plan && action) {
+    const ct = action.time;
+    const sc = (TWIST_SCALE[plan.clip] || 0.8) * (f === p1 && cameraMode() === 'first' ? 0.35 : 1);
+    sb.sign = plan.side === 'L' ? -1 : 1; // the punching shoulder comes forward
+    sb.side = plan.side;
+    const load = smooth01((ct - plan.t0) / Math.max(0.03, plan.tw - plan.t0));
+    const s = (ct - plan.tw) / Math.max(0.03, plan.pk - plan.tw);
+    const rec = ct > plan.pk ? 1 - smooth01((ct - plan.pk) / Math.max(0.05, plan.end - plan.pk)) : 1;
+    for (let i = 0; i < TWIST_LINKS.length; i++) {
+      const [, L, D, delay] = TWIST_LINKS[i];
+      const d = ct < plan.tw ? 0 : smooth01((s - delay) / 0.8);
+      sb.v[i] = sc * sb.sign * DEG * (ct < plan.tw ? -L * load : (-L * (1 - d) + D * d) * rec);
+    }
+    const dh = ct < plan.tw ? 0 : smooth01(s / 0.8);
+    sb.shift = (ct < plan.tw ? -0.4 * load : (-0.4 * (1 - dh) + dh) * rec) * (f === p1 && cameraMode() === 'first' ? 0.5 : 1);
+    f._strikeDrive = Math.max(0, dh * rec);
+  } else {
+    // Out of the punch the layer settles back over ~0.1 s instead of snapping.
+    const k = Math.exp(-Math.max(dt || 0, 1 / 120) * 22);
+    for (let i = 0; i < sb.v.length; i++) sb.v[i] *= k;
+    sb.shift *= k;
+    if (Math.abs(sb.shift) < 1e-3) sb.shift = 0;
+    f._strikeDrive = 0;
+  }
+  return sb;
+}
+function yawBoneWorld(b, ang) {
+  if (!b || !b.parent || !(Math.abs(ang) > 1e-5)) return;
+  b.parent.getWorldQuaternion(_twP);
+  _twQ.setFromAxisAngle(_twY, ang);
+  b.quaternion.premultiply(_twP.clone().invert().multiply(_twQ).multiply(_twP)).normalize();
+  b.updateMatrixWorld(true);
+}
+function applyStrikeTwist(f) {
+  const sb = f._sb;
+  if (!sb || !f.hips || DOWN_STATES.has(f.state)) return;
+  if (!sb.v.some((a) => Math.abs(a) > 1e-4)) return;
+  f.model.updateWorldMatrix(true, true);
+  for (let i = 0; i < TWIST_LINKS.length; i++) {
+    const a = sb.v[i];
+    if (!Number.isFinite(a)) { sb.v[i] = 0; continue; }
+    const key = TWIST_LINKS[i][0];
+    if (key === 'hips') {
+      yawBoneWorld(f.hips, a);
+      for (const s of ['L', 'R']) yawBoneWorld(f.ikLegs && f.ikLegs[s] && f.ikLegs[s].thigh, -a);
+    } else if (key === 'shoulder') {
+      yawBoneWorld(f.ikArms && f.ikArms[sb.side] && f.ikArms[sb.side].shoulder, a);
+    } else yawBoneWorld(f.flinchBones && f.flinchBones[key], a);
+  }
 }
 
 // Leg damage fraction (0 intact .. 1 empty); legs bend instead of breaking off.
