@@ -31,7 +31,6 @@ const _tan = new THREE.Vector3();
 const _n1 = new THREE.Vector3();
 const _n2 = new THREE.Vector3();
 let obstacles = []; // { ax,ay,az, bx,by,bz, r }
-let wireSave = null;
 
 export function setWiresLow(on) { low = !!on; }
 export function setWireObstacles(list) { obstacles = list || []; }
@@ -157,7 +156,6 @@ export function clearWires(stumpsOnly = false) {
   while (groups.length) removeGroup(groups[0]);
   for (const b of bolts) { if (b.line.parent) b.line.parent.remove(b.line); b.line.geometry.dispose(); }
   bolts.length = 0;
-  wireSave = null;
 }
 
 function collidePoint(p) {
@@ -258,51 +256,4 @@ export function stepWires(dt) {
     b.t += dt;
     if (b.t > b.life) { if (b.line.parent) b.line.parent.remove(b.line); b.line.geometry.dispose(); bolts.splice(i, 1); }
   }
-}
-
-function packGroups() {
-  return groups.map((g) => g.wires.map((w) => {
-    const arr = new Float32Array((SEGS + 1) * 3);
-    for (let k = 0; k <= SEGS; k++) { arr[k * 3] = w.pts[k].x; arr[k * 3 + 1] = w.pts[k].y; arr[k * 3 + 2] = w.pts[k].z; }
-    return arr;
-  }));
-}
-
-function unpackInto(snap, k, other) {
-  const nG = Math.min(groups.length, snap.length);
-  for (let gi = 0; gi < nG; gi++) {
-    const gw = groups[gi].wires;
-    const sw = snap[gi] || [];
-    const ow = other && other[gi];
-    const nW = Math.min(gw.length, sw.length);
-    for (let wi = 0; wi < nW; wi++) {
-      const pts = gw[wi].pts;
-      const a = sw[wi];
-      const b = ow && ow[wi];
-      for (let i = 0; i <= SEGS; i++) {
-        const i3 = i * 3;
-        if (b && k > 0) {
-          pts[i].set(a[i3] + (b[i3] - a[i3]) * k, a[i3 + 1] + (b[i3 + 1] - a[i3 + 1]) * k, a[i3 + 2] + (b[i3 + 2] - a[i3 + 2]) * k);
-        } else pts[i].set(a[i3], a[i3 + 1], a[i3 + 2]);
-      }
-      flushWire(gw[wi]);
-    }
-  }
-}
-
-/** Packed point snapshot for replay recording (30 Hz). */
-export function snapshotWires() { return packGroups(); }
-
-/** Pose wires as they were at a recorded sample (lerped). Call restoreWires() after the render. */
-export function applyWires(a, b, k) {
-  if (!wireSave) wireSave = packGroups();
-  for (const bolt of bolts) if (bolt.line) bolt.line.visible = false;
-  unpackInto(a || [], k, b);
-}
-
-export function restoreWires() {
-  for (const bolt of bolts) if (bolt.line) bolt.line.visible = true;
-  if (!wireSave) return;
-  unpackInto(wireSave, 0, null);
-  wireSave = null;
 }

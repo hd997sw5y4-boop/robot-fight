@@ -84,8 +84,6 @@ html.rf-mobile .fs-foot .rfs-go { min-width: 140px; min-height: 46px; }
 html.rf-mobile nav.rfs-menu .rfs-btn { padding: 8px 12px 8px 44px; min-height: 46px; }
 html.rf-mobile nav.rfs-menu .rfs-btn::before { left: 12px; font-size: 13px; }
 html.rf-mobile #bottom { display: none !important; } /* keyboard hint bar */
-html.rf-mobile #rfPostfight .pf-skip { right: max(14px, env(safe-area-inset-right)); bottom: calc(9vh + 10px); min-height: 44px; padding: 0 18px; font-size: 14px; }
-html.rf-mobile #rfPostfight .pf-skip kbd { display: none; }
 html.rf-mobile .rfs-mainwrap .rfs-col { width: 100%; }
 html.rf-mobile body.fs-open #rfRotate { display: none !important; }
 

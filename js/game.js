@@ -21,7 +21,6 @@ import { broadcastMain, initBroadcast, updateBroadcast, xrPresenting } from './a
 import { unlockAudio, playSfx, playHit, setBuzz, startCrowd } from './audio.js';
 import { announce, announceIntroSeconds } from './announcer.js';
 import { buildArena as buildArenaVisual, addArenaLights, updateCageFade, addFloorReflection } from './arena.js';
-import { initPostfight, updatePostfight, postfightCamera } from './arena/postfight.js';
 import {
   initArenaPhysics,
   attachFighter,
@@ -837,28 +836,6 @@ function renderRosterPortraits(list, size) {
     // leave unstaged; fighters exist in memory for the upcoming select preview
   }
   return out;
-}
-
-function setReplayPresentation(on) {
-  if (floorMirror) {
-    if (on) {
-      floorMirror.userData.wasVisible = floorMirror.visible;
-      floorMirror.visible = false;
-    } else if (gfxKey !== 'low') {
-      floorMirror.visible = floorMirror.userData.wasVisible !== false;
-    }
-  }
-  if (on) {
-    if (scene.fog && !scene.userData._fogSaved) {
-      scene.userData._fogSaved = { near: scene.fog.near, far: scene.fog.far };
-      scene.fog.near = 60;
-      scene.fog.far = 180;
-    }
-  } else if (scene.fog && scene.userData._fogSaved) {
-    scene.fog.near = scene.userData._fogSaved.near;
-    scene.fog.far = scene.userData._fogSaved.far;
-    scene.userData._fogSaved = null;
-  }
 }
 
 function collectWireObstacles() {
@@ -4802,7 +4779,6 @@ function updateCamera(dt) {
 
 
 function updateCameraInner(dt) {
-  if (postfightCamera()) { setFirstPersonHide(false); camModeLive = 'postfight'; return; }
   if (xrPresenting()) { setFirstPersonHide(false); return; }
   const want = cameraMode();
   // Broadcast keeps directing through the KO (close-ups, cuts); other views go to the arena.
@@ -5368,7 +5344,6 @@ function tick() {
   setBuzz(isSettingsOpen() ? 0 : buzzFromFighters());
   syncHud(dt);
   try { updateBroadcast(); } catch (e) { console.warn('[broadcast]', e); }
-  try { updatePostfight(); } catch (e) { console.warn('[postfight]', e); }
   updateCageFade(cagePanels, camera, rawDt);
   renderFrame();
   stepDynamicRes(wallDt);
@@ -5500,7 +5475,6 @@ function onLoad(gltf) {
     scene, renderer, camera, canvas,
     getFighters: () => [p1, p2], getMatch: () => match,
   });
-  initPostfight({ scene, camera, getFighters: () => [p1, p2], getMatch: () => match, setReplayPresentation });
   initArenaPhysics();
   fighterGltf = gltf;
   onPhysicsBounce((kind, impact, rec) => {

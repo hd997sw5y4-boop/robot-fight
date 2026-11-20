@@ -15,8 +15,6 @@ const _box = new THREE.Box3();
 const _color = new THREE.Color();
 
 const debrisList = [];
-/** Torn-off parts currently in the scene ({ obj, owner }), for the replay recorder. */
-export function debrisPieces() { return debrisList; }
 const sparks = [];
 const smokes = [];
 

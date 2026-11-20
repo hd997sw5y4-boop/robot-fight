@@ -38,8 +38,7 @@ The part-to-bone map lives in `js/config.js` (`DAMAGE.bind`) so a later Mixamo-r
 
 The fight takes place on the raised octagon mat inside the cage (`js/arena.js`). The surround is a dark, spotlit void — there is no stadium bowl, seats, crowd, truss, jumbotron or LED boards. HDRI (Settings, on by default) feeds robot and mat reflections only; it is not used as a backdrop.
 
-- **Broadcast** (`js/arena/broadcast.js`): the C-key / Settings camera view is a TV director that auto-cuts between wide, ringside, overhead and close-ups. The same recorder feeds post-fight replays. There is no jumbotron screen feed.
-- **Post-fight** (`js/arena/postfight.js`): after the match-ending KO the results wait ~4 s while the camera blends smoothly from the current view into a slow orbit of the winner over the fallen robot; then the 3-4 biggest moments (KO blow, knockdowns, torn parts, big hits, from the broadcast recorder) replay full-screen in slow motion from different angles with a REPLAY tag. Skip button or Space / Enter / Esc. Then the results box opens, compact at the bottom-right. In VR the camera never moves and the replays are skipped (only the results wait). Auto Rematch counts down after the replays.
+- **Broadcast** (`js/arena/broadcast.js`): the C-key / Settings camera view is a TV director that auto-cuts between wide, ringside, overhead and close-ups. It cuts to a close-up on big hits, knockdowns, torn-off parts and the KO. There is no jumbotron screen feed.
 
 High graphics renders at native DPR (cap 2) with canvas MSAA, no bloom/FXAA, and dynamic resolution disabled, so it stays the sharpest preset.
 

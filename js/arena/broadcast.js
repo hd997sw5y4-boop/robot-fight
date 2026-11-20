@@ -1,18 +1,13 @@
 'use strict';
 /* Broadcast director: auto-cuts between wide / ringside / overhead / fighter close-ups
-   for the main-camera Broadcast view (C key). A ring buffer of fighter node transforms
-   records big hits, knockdowns, torn-off parts and the KO for the post-fight replay
-   package. No jumbotron / screen feed is rendered. */
+   for the main-camera Broadcast view (C key), with a close-up cut on big hits, knockdowns,
+   torn-off parts and the KO. No jumbotron / screen feed is rendered. (The post-fight replay
+   recorder that lived here was removed; last commit with it: cde65e8.) */
 import * as THREE from 'three';
 import { SIZE, ARENA } from '../config.js';
 import { isSettingsOpen } from '../settings.js';
-import { snapshotWires, applyWires, restoreWires } from '../wires.js';
-import { debrisPieces } from '../damage.js';
 
 const CFG = {
-  recordHz: 30,
-  bufferSec: 6,
-  slowMo: 0.4,
   bigHit: 12,         // health lost in one frame that counts as a big hit
 };
 
@@ -22,117 +17,17 @@ export function xrPresenting() {
 
 const SHOTS = ['wide', 'ringside', 'overhead', 'closeP1', 'closeP2'];
 const SHOT_LEN = { wide: [4.5, 7], ringside: [3.2, 5.2], overhead: [2.6, 4], closeP1: [2.2, 3.6], closeP2: [2.2, 3.6] };
-const PRIORITY = { hit: 1, knockdown: 2, detach: 3, ko: 4 };
 
 let ctx = null;
-let lastRecord = 0;
-let now = 0;
 let lastWall = 0;
 
 // Director state
 const live = { shot: 'wide', t: 0, len: 5, seed: Math.random() * 6.28, pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 40, snap: true };
-let replay = null;   // { type, start, end, t, shot, victim, seed }
 let mainOn = false;  // main camera is in 'broadcast' view this frame (set by broadcastMain)
 let mainAt = 0;
-let pending = null;  // { type, at, playAt, victim, liveShot }
-let lastReplayEnd = -99;
 
 // Event watch
 const watch = { p1: null, p2: null, over: false };
-
-// ---------------------------------------------------------------- recording
-
-class FighterTrack {
-  constructor(f) {
-    this.f = f;
-    this.nodes = [];
-    this.parents = [];
-    f.root.traverse((o) => { this.nodes.push(o); this.parents.push(o.parent); });
-    this.cap = Math.ceil(CFG.bufferSec * CFG.recordHz) + 4;
-    const n = this.nodes.length;
-    this.tr = new Float32Array(this.cap * n * 10);
-    this.vis = new Uint8Array(this.cap * n);
-    this.scratch = new Float32Array(n * 10);
-    this.scratchVis = new Uint8Array(n);
-  }
-  valid() {
-    // Rebuilt fighters (new match) or new nodes: start over.
-    let count = 0;
-    this.f.root.traverse(() => { count++; });
-    return count <= this.nodes.length + 2 && this.nodes[0] === this.f.root;
-  }
-  write(buf, vis, base) {
-    const n = this.nodes.length;
-    for (let i = 0; i < n; i++) {
-      const o = this.nodes[i];
-      const k = (base * n + i) * 10;
-      buf[k] = o.position.x; buf[k + 1] = o.position.y; buf[k + 2] = o.position.z;
-      buf[k + 3] = o.quaternion.x; buf[k + 4] = o.quaternion.y; buf[k + 5] = o.quaternion.z; buf[k + 6] = o.quaternion.w;
-      buf[k + 7] = o.scale.x; buf[k + 8] = o.scale.y; buf[k + 9] = o.scale.z;
-      // First-person view hides P1's head for the main camera only; the feed records it visible.
-      const v = o.userData && o.userData.fpWasVisible != null ? o.userData.fpWasVisible : o.visible;
-      vis[base * n + i] = v ? 1 : 0;
-    }
-  }
-  record(slot) { this.write(this.tr, this.vis, slot); }
-  save() { this.write(this.scratch, this.scratchVis, 0); }
-  restore() { this.apply(this.scratch, this.scratchVis, 0, 0, 0); }
-  apply(buf, vis, a, b, t) {
-    const n = this.nodes.length;
-    for (let i = 0; i < n; i++) {
-      const o = this.nodes[i];
-      if (o.parent !== this.parents[i]) continue; // torn-off parts now live in debris pivots
-      const ka = (a * n + i) * 10;
-      const kb = (b * n + i) * 10;
-      o.position.set(lerp(buf[ka], buf[kb], t), lerp(buf[ka + 1], buf[kb + 1], t), lerp(buf[ka + 2], buf[kb + 2], t));
-      _qa.set(buf[ka + 3], buf[ka + 4], buf[ka + 5], buf[ka + 6]);
-      _qb.set(buf[kb + 3], buf[kb + 4], buf[kb + 5], buf[kb + 6]);
-      o.quaternion.slerpQuaternions(_qa, _qb, t);
-      o.scale.set(lerp(buf[ka + 7], buf[kb + 7], t), lerp(buf[ka + 8], buf[kb + 8], t), lerp(buf[ka + 9], buf[kb + 9], t));
-      o.visible = !!vis[(t < 0.5 ? a : b) * n + i];
-    }
-  }
-}
-const _qa = new THREE.Quaternion();
-const _qb = new THREE.Quaternion();
-const lerp = (a, b, t) => a + (b - a) * t;
-const MAX_PIECES = 32; // torn-off parts recorded per frame (bounded)
-const PSTRIDE = 9;     // obj, owner (0 = p1, 1 = p2), position xyz, quaternion xyzw
-
-const rec = {
-  times: null, head: 0, count: 0, tracks: [], debris: [], baseline: null,
-  reset(fighters) {
-    this.tracks = fighters.map((f) => new FighterTrack(f));
-    const cap = this.tracks[0].cap;
-    this.times = new Float64Array(cap);
-    this.debris = new Array(cap).fill(null);
-    this.wires = new Array(cap).fill(null);
-    this.head = 0;
-    this.count = 0;
-  },
-  push(t) {
-    const cap = this.times.length;
-    const slot = this.head;
-    this.times[slot] = t;
-    for (const tr of this.tracks) tr.record(slot);
-    // Torn-off parts (debris pivots, direct scene children): world pose + owner, a few per frame.
-    const list = [];
-    for (const d of debrisPieces()) {
-      if (list.length >= MAX_PIECES * PSTRIDE) break;
-      const o = d.obj;
-      list.push(o, d.owner === 'p2' ? 1 : 0, o.position.x, o.position.y, o.position.z, o.quaternion.x, o.quaternion.y, o.quaternion.z, o.quaternion.w);
-    }
-    this.debris[slot] = list;
-    this.wires[slot] = snapshotWires();
-    this.head = (slot + 1) % cap;
-    this.count = Math.min(cap, this.count + 1);
-  },
-  slotAt(i) { // i-th oldest
-    const cap = this.times.length;
-    return (this.head - this.count + i + cap * 2) % cap;
-  },
-  oldest() { return this.count ? this.times[this.slotAt(0)] : 0; },
-};
 
 // ---------------------------------------------------------------- director framing
 const _a = new THREE.Vector3();
@@ -214,9 +109,7 @@ function fighterPositions(fighters) {
 
 function snapshotState(f) {
   let det = 0;
-  // Whole limbs and torn-off sub-parts (hands, feet, fingers) both count as a tear.
   if (f.parts) for (const k in f.parts) if (f.parts[k] && f.parts[k].detached) det++;
-  if (f.subs) for (const k in f.subs) if (f.subs[k] && f.subs[k].detached) det++;
   return { health: f.health, state: f.state, det };
 }
 
@@ -227,11 +120,11 @@ function detectEvents(fighters, match) {
   const evs = [];
   const check = (id, prev, cur) => {
     if (!prev) return;
-    if (cur.health > prev.health + 30) { rec.count = 0; pendingClips.length = 0; return; } // new round / rematch
+    if (cur.health > prev.health + 30) return; // new round / rematch
     if (cur.state === 'ko' && prev.state !== 'ko') evs.push(['ko', id]);
     else if (cur.det > prev.det) evs.push(['detach', id]);
     else if (cur.state === 'down' && prev.state !== 'down') evs.push(['knockdown', id]);
-    else if (prev.health - cur.health >= CFG.bigHit) evs.push(['hit', id, prev.health - cur.health]);
+    else if (prev.health - cur.health >= CFG.bigHit) evs.push(['hit', id]);
   };
   check('p1', watch.p1, s1);
   check('p2', watch.p2, s2);
@@ -241,34 +134,10 @@ function detectEvents(fighters, match) {
   watch.p1 = s1;
   watch.p2 = s2;
   watch.over = !!(match && match.over);
-  for (const [type, victim, drop] of evs) {
-    queueReplay(type, victim, drop);
+  for (const [type, victim] of evs) {
     // Main-screen Broadcast view: cut to a close-up of whoever just took the big moment.
     if (mainOn && !match?.over) { live.shot = victim === 'p1' ? 'closeP1' : 'closeP2'; live.t = 0; live.len = type === 'hit' ? 1.6 : 2.4; live.snap = true; }
   }
-}
-
-function queueReplay(type, victim, drop) {
-  noteMoment(type, victim, drop);
-  const pr = PRIORITY[type];
-  if (replay && PRIORITY[replay.type] >= pr && type !== 'ko') return;
-  if (pending && PRIORITY[pending.type] >= pr) return;
-  const since = now - lastReplayEnd;
-  if (type === 'hit' && since < 6) return;
-  if ((type === 'knockdown' || type === 'detach') && since < 1.5) return;
-  pending = { type, at: now, playAt: now + (type === 'ko' ? 1.3 : 0.8), victim, liveShot: live.shot };
-}
-
-function startReplay() {
-  const p = pending;
-  pending = null;
-  const pre = p.type === 'ko' ? 2.4 : p.type === 'hit' ? 1.4 : 1.9;
-  const start = Math.max(rec.oldest(), p.at - pre);
-  const end = Math.min(now, p.at + 0.8);
-  if (end - start < 0.5 || !rec.count) return;
-  // Always a different angle from the live shot at the moment of the event.
-  const shot = pickShot([p.liveShot, live.shot], { closeP1: 1.4, closeP2: 1.4, ringside: 1.3 });
-  replay = { type: p.type, start, end, t: 0, shot, victim: p.victim, seed: Math.random() * 6.28 };
 }
 
 function stepLive(dt, fighters) {
@@ -302,9 +171,7 @@ export function initBroadcast(c) {
     try { c.renderer.xr.setReferenceSpaceType('local'); } catch (_) {}
   }
   window.__rfBroadcast = {
-    state: () => ({ shot: live.shot, replay: replay ? { type: replay.type, shot: replay.shot, t: +replay.t.toFixed(2) } : null, pending: pending && pending.type, samples: rec.count }),
-    moments: () => moments.map((m) => ({ type: m.type, victim: m.victim, score: m.score, frames: m.times.length })),
-    trigger: (type = 'hit', victim = 'p2') => { lastReplayEnd = -99; pending = null; replay = null; queueReplay(type, victim, 20); if (pending) pending.playAt = now + 0.05; },
+    state: () => ({ shot: live.shot }),
     cut: (shot) => { if (SHOTS.includes(shot)) { live.shot = shot; live.t = 0; live.len = 99; live.snap = true; } },
   };
 }
@@ -331,193 +198,12 @@ export function updateBroadcast() {
   lastWall = wall;
   const fighters = ctx.getFighters ? ctx.getFighters() : [];
   mainOn = wall - mainAt < 0.25 && !!(fighters[0] && fighters[1]);
-  if (!fighters[0] || !fighters[1]) { replay = null; pending = null; return; }
+  if (!fighters[0] || !fighters[1]) return;
+  if (watch.f1 !== fighters[0] || watch.f2 !== fighters[1]) { watch.f1 = fighters[0]; watch.f2 = fighters[1]; watch.p1 = watch.p2 = null; }
 
-  // Game time for recording/replay runs only while the game clock runs.
+  // Events only while the game clock runs.
   const paused = isSettingsOpen() || !!(window.RFShell && window.RFShell.state && window.RFShell.state.paused);
-  const gdt = paused ? 0 : dt;
-  now += gdt;
-  if (!rec.tracks.length || rec.tracks[0].f !== fighters[0] || rec.tracks[1].f !== fighters[1] || !rec.tracks.every((t) => t.valid())) {
-    rec.reset(fighters);
-    rec.baseline = new Set(ctx.scene.children);
-    watch.p1 = watch.p2 = null;
-  }
-  const match = ctx.getMatch ? ctx.getMatch() : null;
-  if (gdt > 0) {
-    detectEvents(fighters, match);
-    if (now - lastRecord >= 1 / CFG.recordHz) { lastRecord = now; rec.push(now); }
-  }
-  captureClips();
-  if (feedHold) { replay = null; pending = null; }
-  else {
-    if (pending && now >= pending.playAt) startReplay();
-    if (replay) {
-      replay.t += dt;
-      if (replay.start + replay.t * CFG.slowMo >= replay.end) { replay = null; lastReplayEnd = now; live.t = live.len; }
-    }
-  }
+  if (!paused && dt > 0) detectEvents(fighters, ctx.getMatch ? ctx.getMatch() : null);
   // Always keep the director warm so Broadcast view has a shot as soon as it is selected.
   stepLive(dt, fighters);
 }
-
-// ---------------------------------------------------------------- [postfight] moment archive
-// Each big moment is copied out of the 6 s ring buffer shortly after it happens (pre-roll +
-// aftermath), scored, and kept (best few per match) for the post-fight replay package.
-
-const SCORE = { ko: 100, detach: 60, knockdown: 50 };
-const CLIP_PRE = { ko: 1.9, detach: 1.4, knockdown: 1.4, hit: 1.1 };
-const CLIP_POST = { ko: 0.9, detach: 0.7, knockdown: 0.8, hit: 0.5 };
-const MAX_MOMENTS = 6;
-const moments = [];
-const pendingClips = [];
-let feedHold = false;
-
-function noteMoment(type, victim, drop) {
-  const score = SCORE[type] || Math.min(40, 10 + (drop || 0));
-  pendingClips.push({ type, victim, at: now, score, captureAt: now + CLIP_POST[type] });
-}
-
-function captureClips() {
-  for (let i = pendingClips.length - 1; i >= 0; i--) {
-    const p = pendingClips[i];
-    if (now < p.captureAt) continue;
-    pendingClips.splice(i, 1);
-    const t0 = p.at - CLIP_PRE[p.type];
-    const idx = [];
-    for (let k = 0; k < rec.count; k++) {
-      const s = rec.slotAt(k);
-      if (rec.times[s] >= t0 && rec.times[s] <= p.captureAt) idx.push(s);
-    }
-    if (idx.length < 3) continue;
-    const tracks = rec.tracks.map((tr) => {
-      const n = tr.nodes.length;
-      const buf = new Float32Array(idx.length * n * 10);
-      const vis = new Uint8Array(idx.length * n);
-      idx.forEach((s, j) => {
-        buf.set(tr.tr.subarray(s * n * 10, (s + 1) * n * 10), j * n * 10);
-        vis.set(tr.vis.subarray(s * n, (s + 1) * n), j * n);
-      });
-      return { tr, buf, vis };
-    });
-    const clip = {
-      type: p.type, victim: p.victim, score: p.score, at: p.at,
-      times: idx.map((s) => rec.times[s]), debris: idx.map((s) => rec.debris[s] || []), wires: idx.map((s) => rec.wires[s] || []), tracks,
-    };
-    // One clip per moment; a KO supersedes the hit that caused it (same instant).
-    let dup = false;
-    for (let j = moments.length - 1; j >= 0; j--) if (Math.abs(moments[j].at - clip.at) < 0.6) {
-      if (moments[j].score >= clip.score) { dup = true; break; }
-      moments.splice(j, 1);
-    }
-    if (dup) continue;
-    moments.push(clip);
-    moments.sort((a, b) => b.score - a.score);
-    if (moments.length > MAX_MOMENTS) moments.length = MAX_MOMENTS;
-  }
-}
-
-/** Best moments of this match (KO blow first if any), newest data. */
-export function getMoments() { captureClips(); return moments.slice(); }
-export function clearMoments() { moments.length = 0; pendingClips.length = 0; }
-/** Pause in-camera replays while the post-fight package plays. */
-export function setFeedHold(on) { feedHold = !!on; }
-/** Flush pending captures now (used when the match ends before a clip's aftermath elapsed). */
-export function flushMoments() { for (const p of pendingClips) p.captureAt = Math.min(p.captureAt, now); captureClips(); }
-
-
-function keepDuringReplay(o) {
-  if (!o) return true;
-  if (o.isLight) return true;
-  if (rec.baseline && rec.baseline.has(o)) return true;
-  const n = o.name || '';
-  if (/arena|octagon|cage|mat|floor|fence|platform|void|spot|light|reflection|rim/i.test(n)) return true;
-  if (o.userData && o.userData.wire) return true;
-  if (n === 'stumpWire') return true;
-  return false;
-}
-
-const clipSaved = { active: false, hidden: [], debris: new Map() };
-const _pm = new THREE.Matrix4();
-const _pr = new THREE.Matrix4();
-const _pp = new THREE.Vector3();
-const _ps = new THREE.Vector3();
-const _pq = new THREE.Quaternion();
-const _rq = new THREE.Quaternion();
-const _rp = new THREE.Vector3();
-const _rs = new THREE.Vector3();
-// A fighter root's recorded world matrix in clip frame fi (the root is node 0 of its track).
-function rootMatrix(track, fi, out) {
-  const n = track.tr.nodes.length;
-  const b = track.buf;
-  const k = fi * n * 10;
-  return out.compose(_rp.set(b[k], b[k + 1], b[k + 2]), _rq.set(b[k + 3], b[k + 4], b[k + 5], b[k + 6]), _rs.set(b[k + 7], b[k + 8], b[k + 9]));
-}
-/** Pose the fighters (and torn-off parts) as they were at clip time t (seconds from clip start).
-    Returns the two fighter root positions. Call restoreClipPose() after the render. */
-export function applyClipPose(clip, t) {
-  const tt = clip.times[0] + t;
-  let a = 0;
-  while (a < clip.times.length - 2 && clip.times[a + 1] <= tt) a++;
-  const b = Math.min(clip.times.length - 1, a + 1);
-  const k = Math.max(0, Math.min(1, (tt - clip.times[a]) / Math.max(1e-6, clip.times[b] - clip.times[a])));
-  for (const { tr, buf, vis } of clip.tracks) { tr.save(); tr.apply(buf, vis, a, b, k); }
-  // Torn-off parts: their recorded flight from the frame they tore off. Before that they ride
-  // along with their robot (kept at the tear-frame offset from its root), since the robot's
-  // skin already has the hole. Parts cleared since (new round, faded) are put back for the render.
-  const first = new Map();
-  clip.debris.forEach((list, fi) => { for (let j = 0; j < list.length; j += PSTRIDE) if (!first.has(list[j])) first.set(list[j], [fi, list, j]); });
-  const fi = k < 0.5 ? a : b;
-  clipSaved.debris.clear();
-  for (const [o, [f0, l0, j0]] of first) {
-    clipSaved.debris.set(o, [o.position.clone(), o.quaternion.clone(), o.visible, o.parent]);
-    if (!o.parent) ctx.scene.add(o);
-    o.visible = true;
-    let ref = null;
-    for (let g = fi; g >= f0 && !ref; g--) { const l = clip.debris[g]; for (let j = 0; j < l.length; j += PSTRIDE) if (l[j] === o) { ref = [l, j]; break; } }
-    if (ref) {
-      const [l, j] = ref;
-      o.position.set(l[j + 2], l[j + 3], l[j + 4]);
-      o.quaternion.set(l[j + 5], l[j + 6], l[j + 7], l[j + 8]);
-    } else {
-      const track = clip.tracks[l0[j0 + 1]];
-      _pm.compose(_pp.set(l0[j0 + 2], l0[j0 + 3], l0[j0 + 4]), _pq.set(l0[j0 + 5], l0[j0 + 6], l0[j0 + 7], l0[j0 + 8]), _ps.set(1, 1, 1));
-      _pm.premultiply(rootMatrix(track, f0, _pr).invert()).premultiply(rootMatrix(track, fi, _pr));
-      _pm.decompose(o.position, o.quaternion, _ps);
-    }
-  }
-  clipSaved.hidden.length = 0;
-  for (const o of ctx.scene.children) {
-    if (keepDuringReplay(o) || first.has(o) || !o.visible) continue;
-    if (!(o.isGroup || o.isMesh) || o.isInstancedMesh) continue;
-    if (clip.tracks.some((x) => x.tr.f.root === o)) continue;
-    o.visible = false;
-    clipSaved.hidden.push(o);
-  }
-  const wa = (clip.wires && clip.wires[a]) || [];
-  const wb = (clip.wires && clip.wires[b]) || wa;
-  applyWires(wa, wb, k);
-  clipSaved.active = true;
-  const r = clip.tracks.map(({ tr }) => tr.f.root.position.clone());
-  return r;
-}
-
-export function restoreClipPose(clip) {
-  if (!clipSaved.active) return;
-  for (const { tr } of clip.tracks) tr.restore();
-  for (const [o, [p, q, v, parent]] of clipSaved.debris) {
-    o.position.copy(p); o.quaternion.copy(q); o.visible = v;
-    if (!parent && o.parent) o.parent.remove(o);
-  }
-  restoreWires();
-  for (const o of clipSaved.hidden) o.visible = true;
-  clipSaved.debris.clear();
-  clipSaved.hidden.length = 0;
-  clipSaved.active = false;
-}
-
-/** Broadcast framing for a shot (wide / ringside / overhead / closeP1 / closeP2). */
-export function shotFraming(shot, a, b, t, seed, victim) {
-  const fov = frameShot(shot, a, b, t, seed, victim);
-  return { pos: _tp.clone(), look: _tl.clone(), fov };
-}
-export const SHOT_NAMES = SHOTS.slice();
