@@ -194,6 +194,7 @@ const PAD_SVG = `<svg viewBox="0 0 760 390" class="ps-svg" role="img" aria-label
       <p class="rfs-lead"><b>Robot Fight</b> — a Window Workshop Games production.</p>
       <ul>
         <li><b>Robot fighter model:</b> “Robot character” by assetfactory on Sketchfab, Sketchfab Free Standard license (recolored in-game).</li>
+        <li><b>Teal fighter model:</b> “Teal” by Lagst on Sketchfab, Sketchfab Standard license.</li>
         <li><b>Animations:</b> Mixamo (Adobe) — fighting idle, walks, strafes, punches, kicks, blocks, hits, knockouts, get-ups, dodges, flips, and victory/taunt clips.</li>
         <li><b>Arena textures:</b> Metal009, Metal008 (scratched metal), and Rust004 from ambientCG, CC0 1.0 — mixed into the chrome mat.</li>
         <li><b>HDRI environment:</b> Industrial Pipe and Valve 01 2K from Poly Haven, CC0 1.0.</li>
