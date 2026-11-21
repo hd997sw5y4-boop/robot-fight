@@ -18,7 +18,7 @@
 
   /* Six CPU opponents, easiest first. `prof` feeds the game's own AI knobs (think window,
      reaction-block chance, punch/kick/special/block mix) via api.js fighter config. */
-  // Eleven fighters. `skin` names a js/config.js SKINS body (null = the standard robot); a
+  // Thirteen fighters. `skin` names a js/config.js SKINS body (null = the standard robot); a
   // skinned fighter keeps its own textures, so its primary / accent only colour the HUD. `profile` is a js/config.js FIGHTER_PROFILES id and
   // actually drives damage, speed, armor, reach, and recovery in a fight.
   S.ROSTER = [
@@ -30,6 +30,10 @@
       skin: 'teal', primary: '#2ec4b6', accent: '#1b1e26',
       blurb: 'Long legs, quick hands, and a grin on its screen. Light plating.',
       prof: { think: [0.42, 0.56], react: 0.22, punch: 0.4, kick: 0.18, special: 0.08, block: 0.12 } },
+    { id: 'ginger', name: 'Ginger', title: 'The Alley Cat', style: 'Evasive', profile: 'ginger',
+      skin: 'ginger', primary: '#e8782e', accent: '#2fae5b',
+      blurb: 'Small, bouncy, and always moving. Light hands, but it gets right back up.',
+      prof: { think: [0.4, 0.52], react: 0.26, punch: 0.36, kick: 0.22, special: 0.08, block: 0.1 } },
     { id: 'hexwren', name: 'Hex Wren', title: 'The Ghost Step', style: 'Evasive', profile: 'hexwren',
       skin: null, primary: '#3fd6a6', accent: '#3a2340',
       blurb: 'Circles, slips, and pokes when you overreach.',
@@ -38,6 +42,10 @@
       skin: null, primary: '#2f74ff', accent: '#dfe6ff',
       blurb: 'Darts in on a long reach, pokes, and is gone before you can plant a heavy shot.',
       prof: { think: [0.22, 0.3], react: 0.28, punch: 0.5, kick: 0.22, special: 0.16, block: 0.1 } },
+    { id: 'blix', name: 'Blix', title: 'The Goblin', style: 'Trickster', profile: 'blix',
+      skin: 'blix', primary: '#3aa7c9', accent: '#8a5a32',
+      blurb: 'Long arms and quick, sneaky hands. Hit it clean and it wobbles.',
+      prof: { think: [0.26, 0.34], react: 0.3, punch: 0.5, kick: 0.16, special: 0.14, block: 0.12 } },
     { id: 'fixer', name: 'Fixer', title: 'The Mechanic', style: 'Guard', profile: 'fixer',
       skin: 'fixer', primary: '#b33a3a', accent: '#f2c230',
       blurb: 'Stocky, armored, and quick to reset. Has to walk in close to land.',

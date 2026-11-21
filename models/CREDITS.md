@@ -18,3 +18,11 @@
 # Rivet fighter asset
 
 - **Mesh and textures:** [Robot](https://sketchfab.com/3d-models/robot-435566387be94cbfbc623c3d45241769) by Lagst, Sketchfab Standard license (called Rivet in the game). Rebound onto the Robot fighter's Mixamo skeleton using only its deform bones (it plays the same Mixamo clips listed above) and textures resized for the web; its own animation and control rig are not used and the original source files are not redistributed.
+
+# Blix fighter asset
+
+- **Mesh and textures:** Mixamo character "Ch19" from [Mixamo](https://www.mixamo.com) (Adobe), used under the Mixamo terms (called Blix in the game). Baked onto the Robot fighter's Mixamo skeleton by bone name with its own skin weights (its rig uses the `mixamorig1:` prefix), so it plays the same Mixamo clips listed above; textures resized to 1024 px for the web (specular / gloss maps dropped). The original FBX is not redistributed.
+
+# Ginger fighter asset
+
+- **Mesh and textures:** Mixamo character "Ch14" from [Mixamo](https://www.mixamo.com) (Adobe), used under the Mixamo terms (called Ginger in the game). Baked onto the Robot fighter's Mixamo skeleton by bone name with its own skin weights, so it plays the same Mixamo clips listed above; textures resized to 1024 px for the web (specular / gloss maps dropped). The original FBX is not redistributed.

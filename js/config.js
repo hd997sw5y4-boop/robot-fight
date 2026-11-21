@@ -116,7 +116,9 @@ export const MODEL = {
 // Alternate bodies. Each GLB holds only a mesh rebound onto RobotFighter's exact Mixamo
 // skeleton (same 65 bone names and rest rotations), so it plays the robot's clips, joint
 // limits, footwork and damage as is. `paint: false` keeps the model's own textures (no team
-// tint, no shell paint, no chrome mask); `visor: false` skips the neon eyes (Teal, Draugr, Fixer and Rivet have their own faces).
+// tint, no shell paint, no chrome mask); `visor: false` skips the neon eyes (Teal, Draugr, Fixer, Rivet,
+// Blix and Ginger have their own faces). Blix and Ginger are Mixamo characters (Ch19 / Ch14; Ch19's
+// rig is prefixed mixamorig1:), baked onto the same skeleton by bone name with their own weights.
 export const SKINS = {
   teal: {
     url: './models/TealFighter.glb',
@@ -133,6 +135,18 @@ export const SKINS = {
   rivet: {
     url: './models/RivetFighter.glb',
     source: 'Robot by Lagst (Sketchfab Standard), named Rivet in game; animations from Mixamo',
+    paint: false,
+    visor: false,
+  },
+  blix: {
+    url: './models/BlixFighter.glb',
+    source: 'Mixamo character Ch19 (Adobe), named Blix in game; animations from Mixamo',
+    paint: false,
+    visor: false,
+  },
+  ginger: {
+    url: './models/GingerFighter.glb',
+    source: 'Mixamo character Ch14 (Adobe), named Ginger in game; animations from Mixamo',
     paint: false,
     visor: false,
   },
@@ -306,6 +320,12 @@ export const FIGHTER_PROFILES = {
   rivet: { id: 'rivet', name: 'Rivet', blurb: 'A wide-shouldered loader frame. Long arms and a crushing swing, but it takes a long time to reset after one.',
     strengths: ['Huge Power', 'Long Reach'], weaknesses: ['Slow Recovery'],
     stats: { speed: 5, power: 9, armor: 7, reach: 7, recovery: 3, toughness: 5 } },
+  ginger: { id: 'ginger', name: 'Ginger', blurb: 'A pint-sized alley cat. Never stops moving and bounces straight back up, but short arms and a light frame.',
+    strengths: ['Fast Feet', 'Quick Recovery'], weaknesses: ['Short Reach', 'Light Frame'],
+    stats: { speed: 9, power: 4, armor: 4, reach: 3, recovery: 9, toughness: 6 } },
+  blix: { id: 'blix', name: 'Blix', blurb: 'A wiry goblin scrapper with a mean streak. Sneaky quick hands and long arms, but one clean shot rattles it.',
+    strengths: ['Quick Hands', 'Long Reach'], weaknesses: ['Glass Jaw'],
+    stats: { speed: 7, power: 6, armor: 4, reach: 8, recovery: 7, toughness: 3 } },
   // Kept as aliases so older configs that name these ids still resolve.
   striker: null,
   bruiser: null,
