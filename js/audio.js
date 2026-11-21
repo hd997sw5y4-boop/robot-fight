@@ -8,36 +8,152 @@ const BASE = './sounds/';
 const announcerFiles = new Set();
 const ANN_VER = 'excited-d-1';
 
+export const SOUND_CATEGORIES = [
+  { id: 'hits', label: 'Hits' },
+  { id: 'blocks', label: 'Blocks' },
+  { id: 'footsteps', label: 'Footsteps' },
+  { id: 'movement', label: 'Movement' },
+  { id: 'crashes', label: 'Crashes & debris' },
+  { id: 'sparks', label: 'Sparks' },
+  { id: 'crowd', label: 'Crowd' },
+  { id: 'ui', label: 'UI' },
+];
+
+export const SOUND_LAB_MAX_BYTES = 5 * 1024 * 1024;
+
+const SLOT_DEFS = [
+  { id: 'punch_0', category: 'hits', label: 'Punch 1 (armor)', file: 'punch_0.ogg' },
+  { id: 'punch_1', category: 'hits', label: 'Punch 2 (armor)', file: 'punch_1.ogg' },
+  { id: 'punch_2', category: 'hits', label: 'Punch 3 (armor)', file: 'punch_2.ogg' },
+  { id: 'punch_3', category: 'hits', label: 'Punch 4 (armor)', file: 'punch_3.ogg' },
+  { id: 'punch_4', category: 'hits', label: 'Punch 5 (sword clash)', file: 'punch_4.ogg' },
+  { id: 'punch_5', category: 'hits', label: 'Punch 6 (sword clash)', file: 'punch_5.ogg' },
+  { id: 'punch_6', category: 'hits', label: 'Punch 7 (sword clash)', file: 'punch_6.ogg' },
+  { id: 'plate_m_0', category: 'hits', label: 'Plate medium 1', file: 'plate_m_0.ogg' },
+  { id: 'plate_m_1', category: 'hits', label: 'Plate medium 2', file: 'plate_m_1.ogg' },
+  { id: 'plate_m_2', category: 'hits', label: 'Plate medium 3', file: 'plate_m_2.ogg' },
+  { id: 'plate_m_3', category: 'hits', label: 'Plate medium 4', file: 'plate_m_3.ogg' },
+  { id: 'plate_m_4', category: 'hits', label: 'Plate medium 5', file: 'plate_m_4.ogg' },
+  { id: 'plate_h_0', category: 'hits', label: 'Plate heavy 1', file: 'plate_h_0.ogg' },
+  { id: 'plate_h_1', category: 'hits', label: 'Plate heavy 2', file: 'plate_h_1.ogg' },
+  { id: 'plate_h_2', category: 'hits', label: 'Plate heavy 3', file: 'plate_h_2.ogg' },
+  { id: 'plate_h_3', category: 'hits', label: 'Plate heavy 4', file: 'plate_h_3.ogg' },
+  { id: 'plate_h_4', category: 'hits', label: 'Plate heavy 5', file: 'plate_h_4.ogg' },
+  { id: 'thud_0', category: 'hits', label: 'Thud 1', file: 'thud_0.ogg' },
+  { id: 'thud_1', category: 'hits', label: 'Thud 2', file: 'thud_1.ogg' },
+  { id: 'thud_2', category: 'hits', label: 'Thud 3', file: 'thud_2.ogg' },
+  { id: 'thud_3', category: 'hits', label: 'Thud 4', file: 'thud_3.ogg' },
+  { id: 'thud_4', category: 'hits', label: 'Thud 5', file: 'thud_4.ogg' },
+  { id: 'metal_m_0', category: 'hits', label: 'Metal medium 1', file: 'metal_m_0.ogg' },
+  { id: 'metal_m_1', category: 'hits', label: 'Metal medium 2', file: 'metal_m_1.ogg' },
+  { id: 'metal_m_2', category: 'hits', label: 'Metal medium 3', file: 'metal_m_2.ogg' },
+  { id: 'metal_m_3', category: 'hits', label: 'Metal medium 4', file: 'metal_m_3.ogg' },
+  { id: 'metal_m_4', category: 'hits', label: 'Metal medium 5', file: 'metal_m_4.ogg' },
+  { id: 'metal_m_5', category: 'hits', label: 'Metal medium 6', file: 'metal_m_5.ogg' },
+  { id: 'metal_h_0', category: 'hits', label: 'Metal heavy 1', file: 'metal_h_0.ogg' },
+  { id: 'metal_h_1', category: 'hits', label: 'Metal heavy 2', file: 'metal_h_1.ogg' },
+  { id: 'metal_h_2', category: 'hits', label: 'Metal heavy 3', file: 'metal_h_2.ogg' },
+  { id: 'metal_h_3', category: 'hits', label: 'Metal heavy 4', file: 'metal_h_3.ogg' },
+  { id: 'metal_h_4', category: 'hits', label: 'Metal heavy 5', file: 'metal_h_4.ogg' },
+  { id: 'metal_h_5', category: 'hits', label: 'Metal heavy 6', file: 'metal_h_5.ogg' },
+  { id: 'metal_h_6', category: 'hits', label: 'Metal heavy 7', file: 'metal_h_6.ogg' },
+  { id: 'rattle_0', category: 'hits', label: 'Rattle 1', file: 'rattle_0.ogg' },
+  { id: 'rattle_1', category: 'hits', label: 'Rattle 2', file: 'rattle_1.ogg' },
+  { id: 'rattle_2', category: 'hits', label: 'Rattle 3', file: 'rattle_2.ogg' },
+  { id: 'rattle_3', category: 'hits', label: 'Rattle 4', file: 'rattle_3.ogg' },
+  { id: 'rattle_4', category: 'hits', label: 'Rattle 5', file: 'rattle_4.ogg' },
+  { id: 'clank_h_0', category: 'hits', label: 'Clank 1', file: 'clank_h_0.ogg' },
+  { id: 'clank_h_1', category: 'hits', label: 'Clank 2', file: 'clank_h_1.ogg' },
+  { id: 'clank_h_2', category: 'hits', label: 'Clank 3', file: 'clank_h_2.ogg' },
+  { id: 'clank_h_3', category: 'hits', label: 'Clank 4', file: 'clank_h_3.ogg' },
+  { id: 'clank_h_4', category: 'hits', label: 'Clank 5', file: 'clank_h_4.ogg' },
+  { id: 'block_0', category: 'blocks', label: 'Block 1 (metal slam)', file: 'block_0.ogg' },
+  { id: 'block_1', category: 'blocks', label: 'Block 2 (metal slam)', file: 'block_1.ogg' },
+  { id: 'block_2', category: 'blocks', label: 'Block 3 (shield)', file: 'block_2.ogg' },
+  { id: 'block_3', category: 'blocks', label: 'Block 4 (shield)', file: 'block_3.ogg' },
+  { id: 'step_0', category: 'footsteps', label: 'Footstep 1', file: 'step_0.ogg' },
+  { id: 'step_1', category: 'footsteps', label: 'Footstep 2', file: 'step_1.ogg' },
+  { id: 'step_2', category: 'footsteps', label: 'Footstep 3', file: 'step_2.ogg' },
+  { id: 'step_3', category: 'footsteps', label: 'Footstep 4', file: 'step_3.ogg' },
+  { id: 'step_4', category: 'footsteps', label: 'Footstep 5', file: 'step_4.ogg' },
+  { id: 'step_5', category: 'footsteps', label: 'Footstep 6', file: 'step_5.ogg' },
+  { id: 'step_6', category: 'footsteps', label: 'Footstep 7', file: 'step_6.ogg' },
+  { id: 'step_7', category: 'footsteps', label: 'Footstep 8', file: 'step_7.ogg' },
+  { id: 'land_0', category: 'footsteps', label: 'Heavy landing 1', file: 'land_0.ogg' },
+  { id: 'land_1', category: 'footsteps', label: 'Heavy landing 2', file: 'land_1.ogg' },
+  { id: 'move_0', category: 'movement', label: 'Movement 1 (arm flick)', file: 'move_0.ogg' },
+  { id: 'move_1', category: 'movement', label: 'Movement 2 (arm swing)', file: 'move_1.ogg' },
+  { id: 'move_2', category: 'movement', label: 'Movement 3 (body turn)', file: 'move_2.ogg' },
+  { id: 'move_3', category: 'movement', label: 'Movement 4 (smooth turn)', file: 'move_3.ogg' },
+  { id: 'move_4', category: 'movement', label: 'Movement 5 (arm whine)', file: 'move_4.ogg' },
+  { id: 'move_5', category: 'movement', label: 'Movement 6 (heavy swing)', file: 'move_5.ogg' },
+  { id: 'move_6', category: 'movement', label: 'Movement 7 (soft turn)', file: 'move_6.ogg' },
+  { id: 'move_7', category: 'movement', label: 'Movement 8 (sharp swing)', file: 'move_7.ogg' },
+  { id: 'crash_0', category: 'crashes', label: 'Crash 1', file: 'crash_0.ogg' },
+  { id: 'crash_1', category: 'crashes', label: 'Crash 2', file: 'crash_1.ogg' },
+  { id: 'crash_2', category: 'crashes', label: 'Crash 3', file: 'crash_2.ogg' },
+  { id: 'debris_0', category: 'crashes', label: 'Debris 1', file: 'debris_0.ogg' },
+  { id: 'debris_1', category: 'crashes', label: 'Debris 2', file: 'debris_1.ogg' },
+  { id: 'debris_2', category: 'crashes', label: 'Debris 3', file: 'debris_2.ogg' },
+  { id: 'cage_0', category: 'crashes', label: 'Cage 1', file: 'cage_0.ogg' },
+  { id: 'cage_1', category: 'crashes', label: 'Cage 2', file: 'cage_1.ogg' },
+  { id: 'cage_2', category: 'crashes', label: 'Cage 3', file: 'cage_2.ogg' },
+  { id: 'spark_0', category: 'sparks', label: 'Spark 1', file: 'spark_0.ogg' },
+  { id: 'spark_1', category: 'sparks', label: 'Spark 2', file: 'spark_1.ogg' },
+  { id: 'spark_2', category: 'sparks', label: 'Spark 3', file: 'spark_2.ogg' },
+  { id: 'spark_3', category: 'sparks', label: 'Spark 4', file: 'spark_3.ogg' },
+  { id: 'sparkarc_0', category: 'sparks', label: 'Spark arc 1', file: 'sparkarc_0.ogg' },
+  { id: 'sparkarc_1', category: 'sparks', label: 'Spark arc 2', file: 'sparkarc_1.ogg' },
+  { id: 'sparkarc_2', category: 'sparks', label: 'Spark arc 3', file: 'sparkarc_2.ogg' },
+  { id: 'crowd_loop', category: 'crowd', label: 'Crowd loop (arena bed)', file: 'crowd_loop.ogg' },
+  { id: 'crowd_hit_0', category: 'crowd', label: 'Crowd hit 1', file: 'crowd_hit_0.ogg' },
+  { id: 'crowd_hit_1', category: 'crowd', label: 'Crowd hit 2', file: 'crowd_hit_1.ogg' },
+  { id: 'crowd_hit_2', category: 'crowd', label: 'Crowd hit 3', file: 'crowd_hit_2.ogg' },
+  { id: 'crowd_ko_0', category: 'crowd', label: 'Crowd KO', file: 'crowd_ko_0.ogg' },
+  { id: 'arena_hum', category: 'crowd', label: 'Arena hum', file: 'arena_hum.ogg' },
+  { id: 'buzz_loop', category: 'crowd', label: 'Damage buzz loop', file: 'buzz_loop.ogg' },
+  { id: 'ui_tick', category: 'ui', label: 'UI tick', file: 'ui_tick.ogg' },
+  { id: 'ui_click', category: 'ui', label: 'UI click', file: 'ui_click.ogg' },
+  { id: 'ui_click_2', category: 'ui', label: 'UI click 2', file: 'ui_click_2.ogg' },
+  { id: 'ui_confirm', category: 'ui', label: 'UI confirm', file: 'ui_confirm.ogg' },
+  { id: 'ui_close', category: 'ui', label: 'UI close', file: 'ui_close.ogg' },
+  { id: 'bell_000', category: 'ui', label: 'Fight bell 1', file: 'bell_000.ogg' },
+  { id: 'bell_001', category: 'ui', label: 'Fight bell 2', file: 'bell_001.ogg' },
+  { id: 'bell_002', category: 'ui', label: 'Fight bell 3', file: 'bell_002.ogg' },
+];
+
+export const SLOTS = Object.fromEntries(SLOT_DEFS.map((s) => [s.id, s]));
+const FILE_TO_SLOT = Object.fromEntries(SLOT_DEFS.map((s) => [s.file, s.id]));
+
+// Banks list slot ids. Playback looks up each slot's current buffer (default, remapped, or custom).
 const BANK = {
-  tick: ['ui_tick.ogg'],
-  click: ['ui_click.ogg', 'ui_click_2.ogg'],
-  confirm: ['ui_confirm.ogg'],
-  close: ['ui_close.ogg'],
-  servo: ['servo_0.ogg', 'servo_1.ogg', 'servo_2.ogg', 'servo_3.ogg', 'servo_4.ogg', 'servo_5.ogg'],
-  hydro: ['hydro_0.ogg', 'hydro_1.ogg', 'hydro_2.ogg', 'hydro_3.ogg'],
-  // Heavy-robot layers (Kenney Impact Sounds, CC0; pitched down ~30% with a low-shelf boost).
-  plateM: ['plate_m_0.ogg', 'plate_m_1.ogg', 'plate_m_2.ogg', 'plate_m_3.ogg', 'plate_m_4.ogg'],
-  plateH: ['plate_h_0.ogg', 'plate_h_1.ogg', 'plate_h_2.ogg', 'plate_h_3.ogg', 'plate_h_4.ogg'],
-  clank: ['clank_h_0.ogg', 'clank_h_1.ogg', 'clank_h_2.ogg', 'clank_h_3.ogg', 'clank_h_4.ogg'],
-  thud: ['thud_0.ogg', 'thud_1.ogg', 'thud_2.ogg', 'thud_3.ogg', 'thud_4.ogg'],
-  rattle: ['rattle_0.ogg', 'rattle_1.ogg', 'rattle_2.ogg', 'rattle_3.ogg', 'rattle_4.ogg'],
-  metalM: ['metal_m_0.ogg', 'metal_m_1.ogg', 'metal_m_2.ogg', 'metal_m_3.ogg', 'metal_m_4.ogg', 'metal_m_5.ogg'],
-  metalH: ['metal_h_0.ogg', 'metal_h_1.ogg', 'metal_h_2.ogg', 'metal_h_3.ogg', 'metal_h_4.ogg', 'metal_h_5.ogg', 'metal_h_6.ogg'],
-  punchM: ['punch_0.ogg', 'punch_1.ogg', 'punch_2.ogg'],
-  punchH: ['punch_2.ogg', 'punch_3.ogg', 'punch_4.ogg'],
-  block: ['block_0.ogg', 'block_1.ogg', 'block_2.ogg', 'block_3.ogg'],
-  // Legacy stomp banks (no longer used for walking; kept on disk / in the bank).
-  stompM: ['stomp_m_01.ogg', 'stomp_m_05.ogg', 'stomp_m_09.ogg', 'stomp_m_14.ogg', 'stomp_m_20.ogg'],
-  stompK: ['stomp_k_0.ogg', 'stomp_k_1.ogg', 'stomp_k_2.ogg', 'stomp_k_3.ogg', 'stomp_k_4.ogg'],
-  fall: ['crash_0.ogg', 'crash_2.ogg', 'crash_4.ogg'],
-  tear: ['tear_0.ogg', 'tear_1.ogg', 'tear_2.ogg', 'tear_3.ogg', 'tear_4.ogg'],
-  spark: ['spark_0.ogg', 'spark_1.ogg', 'spark_2.ogg'],
-  cage: ['cage_0.ogg', 'cage_1.ogg', 'cage_2.ogg'],
-  crash: ['crash_0.ogg', 'crash_1.ogg', 'crash_2.ogg', 'crash_3.ogg', 'crash_4.ogg'],
-  bell: ['bell_000.ogg', 'bell_001.ogg', 'bell_002.ogg'],
-  crowdHit: ['crowd_short.ogg'],
-  crowdBig: ['crowd_whistle.ogg'],
-  crowdKo: ['crowd_win.ogg', 'crowd_whistle.ogg'],
+  tick: ['ui_tick'],
+  click: ['ui_click', 'ui_click_2'],
+  confirm: ['ui_confirm'],
+  close: ['ui_close'],
+  move: ['move_0', 'move_1', 'move_2', 'move_3', 'move_4', 'move_5', 'move_6', 'move_7'],
+  plateM: ['plate_m_0', 'plate_m_1', 'plate_m_2', 'plate_m_3', 'plate_m_4'],
+  plateH: ['plate_h_0', 'plate_h_1', 'plate_h_2', 'plate_h_3', 'plate_h_4'],
+  clank: ['clank_h_0', 'clank_h_1', 'clank_h_2', 'clank_h_3', 'clank_h_4'],
+  thud: ['thud_0', 'thud_1', 'thud_2', 'thud_3', 'thud_4'],
+  rattle: ['rattle_0', 'rattle_1', 'rattle_2', 'rattle_3', 'rattle_4'],
+  metalM: ['metal_m_0', 'metal_m_1', 'metal_m_2', 'metal_m_3', 'metal_m_4', 'metal_m_5'],
+  metalH: ['metal_h_0', 'metal_h_1', 'metal_h_2', 'metal_h_3', 'metal_h_4', 'metal_h_5', 'metal_h_6'],
+  punchM: ['punch_0', 'punch_1', 'punch_2', 'punch_3', 'punch_4', 'punch_5', 'punch_6'],
+  punchH: ['punch_0', 'punch_1', 'punch_2', 'punch_3', 'punch_4', 'punch_5', 'punch_6'],
+  block: ['block_0', 'block_1', 'block_2', 'block_3'],
+  step: ['step_0', 'step_1', 'step_2', 'step_3', 'step_4', 'step_5', 'step_6', 'step_7'],
+  land: ['land_0', 'land_1'],
+  fall: ['crash_0', 'crash_1', 'crash_2'],
+  crash: ['crash_0', 'crash_1', 'crash_2'],
+  debris: ['debris_0', 'debris_1', 'debris_2'],
+  spark: ['spark_0', 'spark_1', 'spark_2', 'spark_3'],
+  sparkArc: ['sparkarc_0', 'sparkarc_1', 'sparkarc_2'],
+  cage: ['cage_0', 'cage_1', 'cage_2'],
+  bell: ['bell_000', 'bell_001', 'bell_002'],
+  crowdHit: ['crowd_hit_0', 'crowd_hit_1', 'crowd_hit_2'],
+  crowdBig: ['crowd_hit_1', 'crowd_hit_2'],
+  crowdKo: ['crowd_ko_0'],
 };
 
 let ctx = null;
@@ -67,6 +183,268 @@ let voiceSrc = null;   // the one voice channel: a new line replaces the old one
 let voiceUntil = 0;
 const lastPick = new Map();
 
+const LS_SLOTS = 'rf_sound_lab_v1';
+const DB_NAME = 'rf-sound-lab';
+const DB_STORE = 'files';
+let assignments = {};
+const customBuffers = new Map();
+const customDecoding = new Map();
+
+function loadAssignments() {
+  try {
+    const raw = localStorage.getItem(LS_SLOTS);
+    assignments = raw ? (JSON.parse(raw) || {}) : {};
+  } catch (_) { assignments = {}; }
+}
+function saveAssignments() {
+  try { localStorage.setItem(LS_SLOTS, JSON.stringify(assignments)); } catch (_) {}
+}
+loadAssignments();
+
+function defaultFile(id) {
+  return (SLOTS[id] && SLOTS[id].file) || null;
+}
+
+function assignmentOf(id) {
+  const a = assignments[id];
+  if (!a || !a.type) return { type: 'default' };
+  return a;
+}
+
+function isDefaultAssignment(id) {
+  const a = assignmentOf(id);
+  if (a.type === 'default' || !a.type) return true;
+  if (a.type === 'bundled' && a.file === defaultFile(id)) return true;
+  return false;
+}
+
+function slotBuffer(id) {
+  const a = assignmentOf(id);
+  if (a.type === 'custom') return customBuffers.get(a.id) || null;
+  const file = (a.type === 'bundled' && a.file) ? a.file : defaultFile(id);
+  return file ? buffers.get(file) || null : null;
+}
+
+function openSlotDb() {
+  return new Promise((resolve, reject) => {
+    if (!('indexedDB' in window)) { reject(new Error('IndexedDB unavailable')); return; }
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE, { keyPath: 'id' });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error('IndexedDB open failed'));
+  });
+}
+
+async function idbGet(id) {
+  const db = await openSlotDb();
+  try {
+    return await new Promise((resolve, reject) => {
+      const r = db.transaction(DB_STORE, 'readonly').objectStore(DB_STORE).get(id);
+      r.onsuccess = () => resolve(r.result || null);
+      r.onerror = () => reject(r.error);
+    });
+  } finally { try { db.close(); } catch (_) {} }
+}
+
+async function idbPut(rec) {
+  const db = await openSlotDb();
+  try {
+    await new Promise((resolve, reject) => {
+      const r = db.transaction(DB_STORE, 'readwrite').objectStore(DB_STORE).put(rec);
+      r.onsuccess = () => resolve();
+      r.onerror = () => reject(r.error);
+    });
+  } finally { try { db.close(); } catch (_) {} }
+}
+
+async function idbDelete(id) {
+  const db = await openSlotDb();
+  try {
+    await new Promise((resolve, reject) => {
+      const r = db.transaction(DB_STORE, 'readwrite').objectStore(DB_STORE).delete(id);
+      r.onsuccess = () => resolve();
+      r.onerror = () => reject(r.error);
+    });
+  } finally { try { db.close(); } catch (_) {} }
+}
+
+async function idbClear() {
+  const db = await openSlotDb();
+  try {
+    await new Promise((resolve, reject) => {
+      const r = db.transaction(DB_STORE, 'readwrite').objectStore(DB_STORE).clear();
+      r.onsuccess = () => resolve();
+      r.onerror = () => reject(r.error);
+    });
+  } finally { try { db.close(); } catch (_) {} }
+}
+
+async function decodeArrayBuffer(raw) {
+  if (!ctx) makeCtx();
+  if (!ctx) throw new Error('Audio is not ready');
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  return await ctx.decodeAudioData(raw.slice(0));
+}
+
+async function decodeCustomId(cid) {
+  if (customBuffers.has(cid)) return customBuffers.get(cid);
+  if (customDecoding.has(cid)) return customDecoding.get(cid);
+  const p = (async () => {
+    const rec = await idbGet(cid);
+    if (!rec || !rec.blob) throw new Error('Saved file is missing');
+    const raw = await rec.blob.arrayBuffer();
+    const buf = await decodeArrayBuffer(raw);
+    customBuffers.set(cid, buf);
+    return buf;
+  })();
+  customDecoding.set(cid, p);
+  try { return await p; }
+  finally { customDecoding.delete(cid); }
+}
+
+export async function ensureSlotBuffer(id) {
+  const buf = slotBuffer(id);
+  if (buf) return buf;
+  const a = assignmentOf(id);
+  if (a.type === 'custom' && a.id) {
+    try { return await decodeCustomId(a.id); }
+    catch (_) { return null; }
+  }
+  const file = (a.type === 'bundled' && a.file) ? a.file : defaultFile(id);
+  if (file) {
+    await decodeSound(file);
+    return buffers.get(file) || null;
+  }
+  return null;
+}
+
+function restartLoopingSounds(id) {
+  if (!id || id === 'crowd_loop') { stopCrowd(); ensureCrowd(); }
+  if (!id || id === 'arena_hum') { stopHum(); ensureHum(); }
+  if (!id || id === 'buzz_loop') {
+    if (buzzSrc) {
+      try { buzzSrc.stop(); } catch (_) {}
+      try { buzzSrc.disconnect(); } catch (_) {}
+      buzzSrc = null;
+      buzzGain = null;
+    }
+    applyBuzz();
+  }
+}
+
+function currentLabelFor(id) {
+  const slot = SLOTS[id];
+  const a = assignmentOf(id);
+  if (a.type === 'custom') return a.name || 'Custom file';
+  if (a.type === 'bundled' && a.file && a.file !== (slot && slot.file)) {
+    const other = SLOTS[FILE_TO_SLOT[a.file]];
+    return other ? other.label : a.file.replace(/\.ogg$/, '');
+  }
+  return 'Default';
+}
+
+export function listSoundSlots() {
+  return SOUND_CATEGORIES.map((cat) => ({
+    id: cat.id,
+    label: cat.label,
+    slots: SLOT_DEFS.filter((s) => s.category === cat.id).map((s) => ({
+      id: s.id,
+      label: s.label,
+      category: s.category,
+      defaultFile: s.file,
+      isDefault: isDefaultAssignment(s.id),
+      current: currentLabelFor(s.id),
+      assignment: assignmentOf(s.id),
+    })),
+  }));
+}
+
+export function listBundledSounds() {
+  return SLOT_DEFS.map((s) => ({ id: s.id, label: s.label, category: s.category, file: s.file }));
+}
+
+export function playSlotPreview(id, opts = {}) {
+  unlockAudio();
+  const go = async () => {
+    const buf = await ensureSlotBuffer(id);
+    if (!buf) return false;
+    const bus = (id === 'crowd_loop' || id === 'crowd_hit_0' || id === 'crowd_hit_1' || id === 'crowd_hit_2' || id === 'crowd_ko_0' || id === 'arena_hum') ? crowd : sfx;
+    playBuf(buf, { bus, vol: opts.vol == null ? 0.9 : opts.vol, rate: opts.rate || 1, rateVar: 0, volVar: 0 });
+    return true;
+  };
+  return go();
+}
+
+export function playBundledPreview(file, opts = {}) {
+  unlockAudio();
+  const go = async () => {
+    if (!buffers.has(file)) await decodeSound(file);
+    const buf = buffers.get(file);
+    if (!buf) return false;
+    playBuf(buf, { vol: opts.vol == null ? 0.9 : opts.vol, rate: opts.rate || 1 });
+    return true;
+  };
+  return go();
+}
+
+export function setSlotBundled(id, file) {
+  if (!SLOTS[id] || !file || !FILE_TO_SLOT[file]) return false;
+  if (file === defaultFile(id)) delete assignments[id];
+  else assignments[id] = { type: 'bundled', file };
+  saveAssignments();
+  restartLoopingSounds(id);
+  return true;
+}
+
+export async function setSlotCustom(id, file) {
+  if (!SLOTS[id]) throw new Error('Unknown sound slot');
+  if (!file) throw new Error('No file selected');
+  const size = file.size || 0;
+  if (size > SOUND_LAB_MAX_BYTES) throw new Error('File is over 5 MB');
+  const name = (file.name || 'custom').slice(0, 80);
+  const raw = await file.arrayBuffer();
+  const buf = await decodeArrayBuffer(raw);
+  const cid = 'c_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+  const blob = file instanceof Blob ? file : new Blob([raw], { type: file.type || 'audio/mpeg' });
+  await idbPut({ id: cid, name, type: blob.type || file.type || '', size, blob });
+  const prev = assignmentOf(id);
+  assignments[id] = { type: 'custom', id: cid, name };
+  saveAssignments();
+  customBuffers.set(cid, buf);
+  if (prev.type === 'custom' && prev.id && prev.id !== cid) await dropCustomIfUnused(prev.id);
+  restartLoopingSounds(id);
+  return { id: cid, name };
+}
+
+async function dropCustomIfUnused(cid) {
+  const used = Object.values(assignments).some((a) => a && a.type === 'custom' && a.id === cid);
+  if (used) return;
+  customBuffers.delete(cid);
+  try { await idbDelete(cid); } catch (_) {}
+}
+
+export async function resetSlot(id) {
+  if (!SLOTS[id]) return false;
+  const prev = assignmentOf(id);
+  delete assignments[id];
+  saveAssignments();
+  if (prev.type === 'custom' && prev.id) await dropCustomIfUnused(prev.id);
+  restartLoopingSounds(id);
+  return true;
+}
+
+export async function resetAllSlots() {
+  assignments = {};
+  saveAssignments();
+  customBuffers.clear();
+  try { await idbClear(); } catch (_) {}
+  restartLoopingSounds();
+}
+
+
 const clamp = (x) => Math.max(0, Math.min(1, Math.round(x * 100) / 100));
 const taper = (v) => v * v;
 const jitter = (amt) => 1 - amt + Math.random() * amt * 2;
@@ -92,15 +470,56 @@ function applyGains() {
   if (voice) set(voice, taper(voiceLevel));
 }
 
+// Safari / iOS WebKit historically cannot decode Vorbis (.ogg). Prefer a sibling
+// .mp3 when present, but still store the buffer under the original .ogg BANK key.
+function mp3Sibling(name) {
+  // Only request a .mp3 sibling when one was actually encoded, so ogg-only
+  // banks (UI, Kenney layers, announcer) do not 404 in the console.
+  if (!name || !name.endsWith('.ogg')) return null;
+  const stem = name.slice(0, -4);
+  if (/^(move_|punch_|block_|step_|land_|crash_|debris_|spark|crowd_hit_|crowd_ko_|crowd_loop$)/.test(stem)) {
+    return stem + '.mp3';
+  }
+  return null;
+}
+
+function preferMp3() {
+  try {
+    const ua = navigator.userAgent || '';
+    if (/iP(hone|ad|od)/i.test(ua)) return true;
+    const isSafari = /Safari/i.test(ua) && !/Chrome|Chromium|Android|CriOS|FxiOS|EdgiOS|Edg/i.test(ua);
+    if (isSafari) return true;
+    const a = document.createElement('audio');
+    const ogg = a.canPlayType('audio/ogg; codecs="vorbis"');
+    const mp3 = a.canPlayType('audio/mpeg');
+    if ((!ogg || ogg === 'no') && mp3 && mp3 !== 'no') return true;
+  } catch (_) {}
+  return false;
+}
+
+async function fetchDecode(path) {
+  const res = await fetch(path);
+  if (!res.ok) return null;
+  const raw = await res.arrayBuffer();
+  try {
+    return await ctx.decodeAudioData(raw.slice(0));
+  } catch (_) {
+    return null;
+  }
+}
+
 async function decodeSound(name) {
   if (!ctx || buffers.has(name)) return;
   try {
     const cache = name.startsWith('announcer/') ? '?v=' + ANN_VER : '';
-    const res = await fetch(BASE + name + cache);
-    if (!res.ok) return;
-    const raw = await res.arrayBuffer();
-    const buf = await ctx.decodeAudioData(raw.slice(0));
-    buffers.set(name, buf);
+    const mp3Name = mp3Sibling(name);
+    const order = (mp3Name && preferMp3()) ? [mp3Name, name] : (mp3Name ? [name, mp3Name] : [name]);
+    let buf = null;
+    for (const file of order) {
+      buf = await fetchDecode(BASE + file + cache);
+      if (buf) break;
+    }
+    if (buf) buffers.set(name, buf);
   } catch (_) {}
 }
 
@@ -124,8 +543,8 @@ async function loadAll() {
   if (loaded) return;
   if (loading) return loading;
   if (!ctx) return;
-  const files = new Set(['crowd_loop.ogg', 'buzz_loop.ogg', 'arena_hum.ogg']);
-  for (const list of Object.values(BANK)) for (const f of list) files.add(f);
+  const files = new Set();
+  for (const s of SLOT_DEFS) files.add(s.file);
   for (const f of announcerFiles) files.add(f);
   loading = Promise.all([...files].map((name) => decodeSound(name))).then(() => {
     loaded = true;
@@ -299,12 +718,17 @@ function playBuf(buf, opts = {}) {
 function playGroup(name, opts = {}) {
   const list = BANK[name];
   if (!list) return false;
-  const files = list.filter((f) => buffers.has(f));
-  if (!files.length) return false;
-  const chosen = pick(files, name);
+  const ready = [];
+  for (const id of list) {
+    const buf = slotBuffer(id);
+    if (buf) ready.push(id);
+    else ensureSlotBuffer(id);
+  }
+  if (!ready.length) return false;
+  const chosen = pick(ready, name);
   const rateVar = opts.rateVar == null ? 0.08 : opts.rateVar;
   const volVar = opts.volVar == null ? 0.12 : opts.volVar;
-  playBuf(buffers.get(chosen), {
+  playBuf(slotBuffer(chosen), {
     bus: opts.bus,
     delay: opts.delay,
     dry: opts.dry,
@@ -356,10 +780,18 @@ export function playHit(opts = {}) {
   playGroup(metal, { vol: Math.min(1, 0.85 * impact + (heavy ? 0.12 : 0)), rate: kick ? 0.68 : 0.76, rateVar: 0.08 });
   playGroup(heavy || kick ? 'plateH' : 'plateM', { vol: (heavy ? 0.9 : 0.65) * impact, rateVar: 0.08, delay: 0.004 });
   playGroup('thud', { vol: (heavy ? 0.95 : 0.7) * impact, rateVar: 0.06, delay: 0.008 });
-  playGroup(heavy || kick ? 'punchH' : 'punchM', { vol: (heavy ? 0.55 : 0.35) * impact, rate: 0.72, delay: 0.012, rateVar: 0.06 });
+  playGroup(heavy || kick ? 'punchH' : 'punchM', {
+    vol: (heavy ? 0.82 : 0.5) * impact,
+    rate: (heavy || kick) ? 0.62 : 0.82,
+    delay: 0.012,
+    rateVar: 0.06,
+  });
   subThump({ vol: heavy ? 1 : 0.55 + hard * 0.35, f0: heavy ? 76 : 95, f1: heavy ? 30 : 42, dur: heavy ? 0.38 : 0.22 });
   if ((heavy || hard > 0.55) && limited('rattle', 120)) playGroup('rattle', { vol: 0.42 + hard * 0.12, delay: 0.06, rateVar: 0.1 });
-  if (limited('spark', 40)) playGroup('spark', { vol: heavy ? 0.5 : 0.26 + hard * 0.12, rate: 0.85, rateVar: 0.14 });
+  if (limited('spark', 40)) {
+    playGroup('spark', { vol: heavy ? 0.5 : 0.26 + hard * 0.12, rate: 0.85, rateVar: 0.14 });
+    if (heavy && Math.random() < 0.45) playGroup('sparkArc', { vol: 0.32, rate: 0.9, rateVar: 0.12, delay: 0.02 });
+  }
   if (heavy && limited('crowdHit', 420)) {
     playGroup(Math.random() < 0.55 ? 'crowdBig' : 'crowdHit', { bus: crowd, vol: 0.78, rateVar: 0.03, volVar: 0.08 });
   }
@@ -371,27 +803,26 @@ export function playSfx(kind, opts = {}) {
   if (kind === 'hit') { playHit({ blocked: false, heavy: !!opts.heavy, kick: !!opts.kick }); return; }
   if (kind === 'block') { playHit({ blocked: true }); return; }
   if (kind === 'whoosh' || kind === 'servo') {
-    if (!limited('servo', opts.limit || 90)) return;
+    if (!limited('move', opts.limit || 90)) return;
     const vol = opts.vol == null ? 0.55 : opts.vol;
-    playGroup('servo', { vol, rate: (opts.rate || 1) * 0.78, rateVar: 0.1 });
-    if (Math.random() < 0.45 && limited('hydro', 160)) {
-      playGroup('hydro', { vol: vol * 0.7, rate: (opts.rate || 1) * 0.72, rateVar: 0.08, delay: 0.02 });
-    }
+    // Pitch and level follow the caller’s move/attack speed; no hydraulic overlay.
+    playGroup('move', { vol, rate: opts.rate || 1, rateVar: 0.08 });
     return;
   }
   if (kind === 'step') {
-    // Metal foot on the metal mat: a weighty thud plus a slight clank / servo.
-    // Variations come from the thud/clank/metal/servo banks plus random pitch.
-    // The old concrete stomp_m / stomp_k layers are no longer used for walking.
+    // Mech foot plants synced to foot contacts, plus a light thud/sub for weight.
+    // Heavy / landing plants use the bigger robot-footstep layer.
     if (!limited('step', 80)) return;
     const v = opts.vol == null ? 0.4 : opts.vol;
     const r = opts.rate || 1;
-    playGroup('thud', { vol: v, rate: r * 0.86, rateVar: 0.1 });
-    playGroup('clank', { vol: v * 0.36, rate: r * 1.02, rateVar: 0.12, delay: 0.008 });
-    if (Math.random() < 0.55) playGroup('metalM', { vol: v * 0.2, rate: r * 0.92, rateVar: 0.1, delay: 0.012 });
-    subThump({ vol: v * 0.38, f0: 78, f1: 36, dur: 0.14 });
-    if (Math.random() < 0.55 && limited('servo', 180)) {
-      playGroup('servo', { vol: v * 0.2, rate: 0.62 + Math.random() * 0.2, rateVar: 0.08, delay: 0.02 });
+    const heavy = !!(opts.heavy || opts.land || v >= 0.7);
+    if (heavy) {
+      playGroup('land', { vol: Math.min(1, v * 1.15), rate: r * 0.9, rateVar: 0.08 });
+      subThump({ vol: v * 0.7, f0: 70, f1: 30, dur: 0.22 });
+    } else {
+      playGroup('step', { vol: v, rate: r, rateVar: 0.08 });
+      if (Math.random() < 0.4) playGroup('thud', { vol: v * 0.32, rate: r * 0.86, rateVar: 0.1, delay: 0.006 });
+      subThump({ vol: v * 0.38, f0: 78, f1: 36, dur: 0.14 });
     }
     return;
   }
@@ -412,22 +843,28 @@ export function playSfx(kind, opts = {}) {
     playGroup('clank', { vol, rate: r, rateVar: 0.08 });
     playGroup('plateH', { vol: vol * (0.35 + heavyness * 0.5), rate: r * 0.95, rateVar: 0.08, delay: 0.004 });
     if (heavyness > 0.35) subThump({ vol: vol * heavyness * 0.8, f0: 90 - heavyness * 30, f1: 38, dur: 0.12 + heavyness * 0.18 });
+    if (vol >= 0.65 && ((opts.rate || 1) <= 0.7 || heavyness > 0.55)) {
+      playGroup('land', { vol: vol * 0.7, rate: r * 0.9, rateVar: 0.08, delay: 0.01 });
+    }
     if (vol > 0.5) playGroup('rattle', { vol: vol * 0.3, rate: r, delay: 0.05, rateVar: 0.1 });
     return;
   }
   if (kind === 'tear') {
-    // Tear-off: shearing metal, a big plate impact, sub, sparks and a debris rattle.
-    playGroup('tear', { vol: 1, rate: 0.74, rateVar: 0.06 });
+    // Tear-off: iron smash, debris tail, plate impact, sub, sparks and a rattle.
+    playGroup('crash', { vol: 0.95, rate: 0.74, rateVar: 0.06 });
+    playGroup('debris', { vol: 0.7, delay: 0.08, rateVar: 0.08 });
     playGroup('metalH', { vol: 0.6, rate: 0.7, delay: 0.03 });
     playGroup('plateH', { vol: 0.75, delay: 0.035, rateVar: 0.06 });
     subThump({ vol: 0.9, f0: 75, f1: 30, dur: 0.4, delay: 0.03 });
     playGroup('spark', { vol: 0.6, rate: 0.85, rateVar: 0.12 });
+    if (Math.random() < 0.5) playGroup('sparkArc', { vol: 0.35, rate: 0.9, rateVar: 0.12, delay: 0.03 });
     playGroup('rattle', { vol: 0.5, delay: 0.09, rateVar: 0.1 });
     return;
   }
   if (kind === 'spark') {
     if (!limited('spark', 50)) return;
     playGroup('spark', { vol: opts.vol == null ? 0.45 : opts.vol, rateVar: 0.16 });
+    if (Math.random() < 0.3) playGroup('sparkArc', { vol: (opts.vol == null ? 0.45 : opts.vol) * 0.55, rateVar: 0.14, delay: 0.02 });
     return;
   }
   if (kind === 'eyePop') {
@@ -452,6 +889,7 @@ export function playSfx(kind, opts = {}) {
   }
   if (kind === 'fall') {
     playGroup('crash', { vol: 1, rate: 0.8, rateVar: 0.07 });
+    playGroup('debris', { vol: 0.65, delay: 0.1, rateVar: 0.08 });
     playGroup('thud', { vol: 0.9, delay: 0.02 });
     subThump({ vol: 1, f0: 70, f1: 28, dur: 0.5, delay: 0.02 });
     playGroup('rattle', { vol: 0.45, delay: 0.1 });
@@ -468,6 +906,7 @@ export function playSfx(kind, opts = {}) {
   }
   if (kind === 'ko') {
     playGroup('crash', { vol: 1, rate: 0.8, rateVar: 0.06 });
+    playGroup('debris', { vol: 0.7, delay: 0.08, rateVar: 0.08 });
     playGroup('metalH', { vol: 0.7, rate: 0.7, delay: 0.05 });
     subThump({ vol: 1, f0: 70, f1: 26, dur: 0.6, delay: 0.04 });
     playGroup('fall', { vol: 0.8, delay: 0.04, rateVar: 0.06 });
@@ -546,11 +985,13 @@ function stopHum() {
 }
 
 function ensureCrowd() {
-  if (!ctx || !loaded || crowdLevel <= 0 || !buffers.has('crowd_loop.ogg')) return;
+  const buf = slotBuffer('crowd_loop');
+  if (!buf) { if (loaded) ensureSlotBuffer('crowd_loop').then((b) => { if (b) ensureCrowd(); }); }
+  if (!ctx || !loaded || crowdLevel <= 0 || !buf) return;
   if (crowdSrc) return;
   if (ctx.state === 'suspended') return;
   const src = ctx.createBufferSource();
-  src.buffer = buffers.get('crowd_loop.ogg');
+  src.buffer = buf;
   src.loop = true;
   const g = ctx.createGain();
   g.gain.value = 0.2;
@@ -563,11 +1004,13 @@ function ensureCrowd() {
 }
 
 function ensureHum() {
-  if (!ctx || !loaded || crowdLevel <= 0 || !buffers.has('arena_hum.ogg') || !humGain) return;
+  const buf = slotBuffer('arena_hum');
+  if (!buf) { if (loaded) ensureSlotBuffer('arena_hum').then((b) => { if (b) ensureHum(); }); }
+  if (!ctx || !loaded || crowdLevel <= 0 || !buf || !humGain) return;
   if (humSrc) return;
   if (ctx.state === 'suspended') return;
   const src = ctx.createBufferSource();
-  src.buffer = buffers.get('arena_hum.ogg');
+  src.buffer = buf;
   src.loop = true;
   src.connect(humGain);
   try { src.start(); } catch (_) { return; }
@@ -586,10 +1029,11 @@ function applyBuzz() {
     }
     return;
   }
-  if (!buffers.has('buzz_loop.ogg')) return;
+  const buzzBuf = slotBuffer('buzz_loop');
+  if (!buzzBuf) { ensureSlotBuffer('buzz_loop').then((b) => { if (b) applyBuzz(); }); return; }
   if (!buzzSrc) {
     const src = ctx.createBufferSource();
-    src.buffer = buffers.get('buzz_loop.ogg');
+    src.buffer = buzzBuf;
     src.loop = true;
     const g = ctx.createGain();
     g.gain.value = 0.0001;

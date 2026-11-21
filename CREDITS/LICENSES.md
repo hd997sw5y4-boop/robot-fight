@@ -8,26 +8,17 @@ No attribution required. Optional credit is appreciated.
 
 - **100 CC0 metal and wood SFX** — rubberduck, https://opengameart.org/content/100-cc0-metal-and-wood-sfx  
   Hammer and metal hits, sheet metal, slams, falling scrap, springs, and tools.  
-  Game files: `metal_m_0`–`metal_m_2`, `metal_h_2`, `tear_*`, `cage_0`, `hydro_3`.
+  Game files: `metal_m_0`–`metal_m_2`, `metal_h_2`, `cage_0`.
 
 - **100 CC0 SFX** — rubberduck, https://opengameart.org/content/100-cc0-sfx  
-  Additional metal hits and slams, recorded machine/spring bursts used as servo and hydraulic layers, noise crackles, and a crash/explosion.  
-  Game files: `metal_m_5`, `metal_h_3`, `metal_h_4`, `metal_h_6`, `punch_*`, `servo_0`–`servo_2`, `servo_4`, `hydro_0`–`hydro_2`, `spark_1`, `spark_2`, `crash_1`, `crash_3`, `crash_4`, `tear_3`, `cage_1`.
+  Additional metal hits and slams.  
+  Game files: `metal_m_5`, `metal_h_3`, `metal_h_4`, `metal_h_6`, `cage_1`.
 
 - **Wood and Metal Sound Effects: Volume 2** — Ogrebane, https://opengameart.org/content/wood-and-metal-sound-effects-volume-2  
   Recorded metal impacts. Game files: `metal_m_3`, `metal_m_4`, `metal_h_5`, `cage_2`.
 
-- **Metal Interactions** — Iwan “qubodup” Gabovitch, https://opengameart.org/content/metal-interactions  
-  Recorded metal contacts, buttons, and a swing. Game files: `block_0`–`block_2`, `servo_5`.
-
 - **Metal Impact Sounds** — Brian MacIntosh, https://opengameart.org/content/metal-impact-sounds  
-  Recorded thuds and a long bong. Game files: `metal_h_0`, `metal_h_1`, `punch_3`.
-
-- **Metal footsteps on concrete** — Thimras, https://opengameart.org/content/metal-footsteps-on-concrete  
-  Recorded metal-foot steps, 48 kHz, pitched down ~34% with a low-shelf boost for heavy servo stomps. Game files: `stomp_m_*`.
-
-- **Mech Stomp / Step Sound** — hc, based on a recording by qubodup, https://opengameart.org/content/mech-stomp-step-sound  
-  Game files: `crash_2`.
+  Recorded thuds and a long bong. Game files: `metal_h_0`, `metal_h_1`.
 
 - **Factory ambiance** — yd, https://opengameart.org/content/factory-ambiance  
   A mid section was looped, filtered, and ducked as the arena hum. Game file: `arena_hum.ogg`.
@@ -46,29 +37,35 @@ No attribution required. Optional credit is appreciated: [Kenney](https://kenney
   low-shelf boost (ffmpeg) so they read as human-size machines: `impactMetal_heavy` → `clank_h_*`
   (debris on the mat), `impactPlate_heavy` / `impactPlate_medium` → `plate_h_*` / `plate_m_*`
   (big metal impact), `impactPunch_heavy` → `thud_*` (body thud), `impactMining` → `rattle_*`
-  (short debris rattle), `footstep_concrete` → `stomp_k_*` (stomp body).  
-  Game files: `bell_*`, `clank_h_*`, `plate_h_*`, `plate_m_*`, `thud_*`, `rattle_*`, `stomp_k_*`.
+  (short debris rattle).  
+  Game files: `bell_*`, `clank_h_*`, `plate_h_*`, `plate_m_*`, `thud_*`, `rattle_*`.
 
 ## Brian MacIntosh (BMacZero) — CC0 1.0
 
 [Electricity Sound Effects](https://opengameart.org/content/electricity-sound-effects-0) on OpenGameArt. Recorded from a small Tesla generator. Credit is optional.
 
-- `spark.wav` → `spark_0.ogg` (spark crackle)
 - `continuousspark.wav` → `buzz_loop.ogg` (looped electrical buzz on damaged parts)
 
-## Mixkit — Mixkit License (royalty-free, no attribution required)
+## Pixabay — Pixabay Content License
 
-[Mixkit License](https://mixkit.co/license/): free for commercial and non-commercial use; attribution not required. Clips from the [crowd sound-effects](https://mixkit.co/free-sound-effects/crowd/) library.
+[Pixabay Content License](https://pixabay.com/service/license-summary/): free for commercial and non-commercial use, including in games. Attribution is optional but appreciated. Files must not be sold or redistributed as a standalone sound pack. Clips were trimmed, faded, loudness-normalized, and recompressed to mono OGG (with MP3 fallbacks for Safari) for the game.
 
-| Mixkit title | ID | Game file |
-| --- | --- | --- |
-| Big crowd talking loop | 364 | `crowd_loop.ogg` (quiet ambience bed) |
-| Huge crowd cheering victory | 462 | `crowd_win.ogg` |
-| Cheering crowd loud whistle | 610 | `crowd_whistle.ogg` |
-| Male crowd cheering short | 459 | `crowd_short.ogg` |
+A movement recording from Pixabay (author and original title were not stored with the source file provided for this project) was cut into `move_0`–`move_7` (arm flicks, swings, and body turns). Pitch and volume follow move speed in-game.
 
-Full-quality WAV masters were downloaded from Mixkit and recompressed to mono OGG for the game.
-
+| Title | Author | Page | Game files |
+| --- | --- | --- | --- |
+| Armor Impact From Sword | Dragon Studio | https://pixabay.com/sound-effects/film-special-effects-armor-impact-from-sword-393843/ | `punch_0`–`punch_3` |
+| Sword Block (The Ballad of Blades) | VoiceBosch | https://pixabay.com/sound-effects/sword-block-the-ballad-of-blades-257226/ | `punch_4`–`punch_6` (hit landings, not blocks) |
+| Metal Slam 2 | floraphonic | https://pixabay.com/sound-effects/film-special-effects-metal-slam-2-189784/ | `block_0`, `block_1` |
+| shield_impact (3) | Yodguard | https://pixabay.com/sound-effects/film-special-effects-shield-impact-3-382411/ | `block_2`, `block_3` |
+| Robot Heavy Mechanical Footsteps | DavidDumaisAudio | https://pixabay.com/sound-effects/film-special-effects-robot-heavy-mechanical-footsteps-194039/ | `step_0`–`step_7` |
+| Big robot footstep 002 | AudioPapkin | https://pixabay.com/sound-effects/film-special-effects-big-robot-footstep-002-331037/ | `land_0`, `land_1` |
+| Iron Smash with Debris | Soumages | https://pixabay.com/sound-effects/film-special-effects-iron-smash-with-debris-351841/ | `crash_0`–`crash_2` |
+| Debris On Metal HQ | TanwerAman | https://pixabay.com/sound-effects/film-special-effects-debris-on-metal-hq-275769/ | `debris_0`–`debris_2` |
+| sparks | Marregheriti (via freesound_community) | https://pixabay.com/sound-effects/film-special-effects-sparks-84897/ | `spark_0`–`spark_3` |
+| Electric Sparks | kev_durr (via freesound_community) | https://pixabay.com/sound-effects/film-special-effects-electric-sparks-6130/ | `sparkarc_0`–`sparkarc_2` |
+| Crowd Cheering | storegraphic | https://pixabay.com/sound-effects/people-crowd-cheering-312831/ | `crowd_hit_0`–`crowd_hit_2`, `crowd_ko_0` |
+| Crowd - Cheering - Ambience and cheering | GregorQuendel_SoundDesign | https://pixabay.com/sound-effects/people-crowd-cheering-ambience-and-cheering-137247/ | `crowd_loop` |
 
 ## Announcer voice
 
@@ -78,7 +75,7 @@ Original lines written for the game (Window Workshop Games). 97 of the 108 clips
 
 The arena reverb impulse (~1.6 s, early reflections plus a darkening tail) is generated in code at startup (`hookConvolver` in `js/audio.js`); no recording is used. The sub "thump" layer under impacts, falls and footsteps is a synthesized Web Audio sine sweep.
 
-Walking footsteps layer existing CC0 Kenney `thud_*` + `clank_h_*` (and sometimes `metal_m_*`) with a light rubberduck `servo_*` and a short sub thump, pitched per plant, synced to foot contacts. The older Thimras `stomp_m_*` and Kenney `stomp_k_*` concrete-stomp layers are no longer used for walking.
+Walking footsteps use DavidDumaisAudio mech plants (`step_*`) synced to foot contacts, with a light Kenney thud and a synthesized sub thump. Heavy landings and body falls can layer AudioPapkin `land_*`. Movement whooshes use the Pixabay motor/servo clips (`move_*`), pitched and leveled with move speed.
 
 ## ambientCG textures — CC0 1.0
 

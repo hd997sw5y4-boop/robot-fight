@@ -3008,7 +3008,6 @@ function tryAttack(f, kind, clipName, exact = false) {
   let fadeAtk = Math.max(0.16, Math.min(0.22, ((st0 && st0.gap0) || 0) / (6 * SIZE)));
   setAnim(f, clip, fadeAtk);
   setFighterMove(f, 0, 0); // no walking velocity carried into the strike
-  playSfx('whoosh');
   const action = f.actions[clip] || f.actions[kind];
   if (action) {
     // Faster strikes: punches ~1.3x, kicks ~1.15x (damage slows them again), starting just
@@ -3037,6 +3036,8 @@ function tryAttack(f, kind, clipName, exact = false) {
       ? punchPlan(clip, st, action.time, base, cap, mods.timeScale * statOf(f, 'speed')) : null;
     if (f.strikePlan) { action.time = f.strikePlan.t0; action.timeScale = f.strikePlan.rW; }
   }
+  const whooshRate = (f.strikePlan && f.strikePlan.rW) || (action && action.timeScale) || 1;
+  playSfx('whoosh', { rate: whooshRate, vol: 0.4 + Math.min(0.3, Math.abs(whooshRate) * 0.2) });
   f.strikeWork = strikeFootwork(f, other, kind, clip);
   return true;
 }
@@ -3301,7 +3302,7 @@ function tryDodge(f, other, kind) {
   startAir(f, clip, dir, dist);
   f.dodge = { kind, clip };
   f.dodgeCD = D.cooldown / statOf(f, 'recovery');
-  playSfx('whoosh');
+  playSfx('whoosh', { rate: 1.05, vol: 0.55 });
   return true;
 }
 function stepDodge(f, other, dt) {
@@ -3976,7 +3977,7 @@ function tryGroundAttack(f, def) {
     act.timeScale = stomp ? 1.15 : 1.1;
     if (st) act.time = st.start;
   }
-  playSfx('whoosh');
+  playSfx('whoosh', { rate: stomp ? 1.15 : 1.1, vol: 0.6 });
   return true;
 }
 
@@ -4909,7 +4910,8 @@ function stepFighter(f, other, inp, dt) {
     f.servoT = (f.servoT || 0) + dt;
     if (f.servoT > 0.72) {
       f.servoT = 0;
-      playSfx('servo', { vol: 0.28, rate: 1.05, limit: 200 });
+      const moveAmt = Math.min(1.5, Math.abs(inp.sidestep) + Math.abs(inp.inout));
+      playSfx('servo', { vol: 0.16 + 0.22 * moveAmt, rate: 0.72 + 0.5 * moveAmt, limit: 200 });
     }
     if (!f.blocking) {
       f.state = 'walk';

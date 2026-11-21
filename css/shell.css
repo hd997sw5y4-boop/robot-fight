@@ -256,3 +256,48 @@ body.rfs-versus .rfs-vbar { display: flex; }
   .rfs-screen, .rfs-screen.on > *, .rfs-call b, .rfs-press { animation: none !important; transition: none !important; }
 }
 body.rfs-training #roundLabel { visibility: hidden; }
+
+/* ---------- Sound Lab ---------- */
+.rfs-screen[data-screen="soundlab"] { align-items: flex-start; padding: 18px 12px 32px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.rfs-soundlab { width: min(720px, 96vw); margin: 0 auto; }
+.rfs-soundlab-card { width: 100%; display: flex; flex-direction: column; gap: 12px; padding: 18px 18px 22px; }
+.rfs-sl-top { justify-content: space-between; }
+.rfs-sl-list { display: flex; flex-direction: column; gap: 16px; }
+.rfs-sl-cat h3 {
+  margin: 0 0 8px; font: 600 12px var(--ww-font); letter-spacing: .22em;
+  text-transform: uppercase; color: var(--ww-text-2, #9aa3b2);
+}
+.rfs-sl-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 0; border-top: 1px solid rgba(255,255,255,.06); flex-wrap: wrap;
+}
+.rfs-sl-cat .rfs-sl-row:first-of-type { border-top: 0; }
+.rfs-sl-meta { min-width: 140px; flex: 1; }
+.rfs-sl-meta b { display: block; font-size: 15px; }
+.rfs-sl-meta small { color: var(--ww-text-2, #9aa3b2); font-size: 12.5px; }
+.rfs-sl-row.is-custom .rfs-sl-meta small { color: #9aabff; }
+.rfs-sl-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.rfs-sl-actions .rfs-btn,
+.rfs-sl-top .rfs-btn,
+.rfs-sl-upload {
+  min-height: 44px; min-width: 72px; justify-content: center; align-items: center;
+}
+.rfs-sl-upload {
+  display: flex; position: relative; overflow: hidden; margin: 8px 0 4px; text-align: center;
+}
+.rfs-sl-upload input[type="file"] {
+  position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer;
+}
+.rfs-sl-err { color: #ff8d8d; font-size: 13px; margin: 4px 0 8px; }
+.rfs-sl-sheet {
+  position: fixed; inset: 0; z-index: 40; background: rgba(6,8,14,.72);
+  display: flex; align-items: flex-end; justify-content: center; padding: 12px;
+}
+.rfs-sl-sheet[hidden] { display: none; }
+.rfs-sl-sheet-inner {
+  width: min(680px, 100%); max-height: min(86vh, 820px); overflow: auto;
+  -webkit-overflow-scrolling: touch; background: var(--ww-glass-strong, #141824);
+  border: 1px solid rgba(154,171,255,.35); border-radius: 16px 16px 8px 8px;
+  padding: 16px 16px 20px;
+}
+.rfs-sl-pick-list { margin: 10px 0 12px; }

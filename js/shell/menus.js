@@ -4,7 +4,7 @@
   'use strict';
   const S = window.RFShell;
   const esc = S.esc;
-  const MENU_SCREENS = ['title', 'main', 'select', 'ladder', 'results', 'ending', 'pause', 'credits', 'tourney', 'tourney-results'];
+  const MENU_SCREENS = ['title', 'main', 'select', 'ladder', 'results', 'ending', 'pause', 'credits', 'soundlab', 'tourney', 'tourney-results'];
   const ORBIT_SCREENS = ['title', 'main', 'credits'];
   const SELECT_SCREEN = 'select';
 
@@ -162,6 +162,7 @@ const PAD_SVG = `<svg viewBox="0 0 760 390" class="ps-svg" role="img" aria-label
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="watch" data-loop="1"><b>CPU vs CPU</b><small>Back-to-back CPU fights, looping, with a fight log</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="tournament"><b>AI Tournament</b><small>Round-robin API brains, Elo and results</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="settings"><b>Settings</b><small>Graphics, sound, CPU difficulty, round time</small></button>
+          <button type="button" class="rfs-f rfs-btn" data-act="soundlab"><b>Sound Lab</b><small>Preview and swap punches, footsteps, crowd, and more</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="credits"><b>Credits</b></button>
         </nav>
       </div>
@@ -189,6 +190,7 @@ const PAD_SVG = `<svg viewBox="0 0 760 390" class="ps-svg" role="img" aria-label
   const resultsEl = screen('results', '<div class="rfs-card rfs-results"></div>', 'rfs-center rfs-dim');
   const endingEl = screen('ending', '<div class="rfs-card rfs-results rfs-ending"></div>', 'rfs-center rfs-dim');
   const pauseEl = screen('pause', '<div class="rfs-card rfs-pause"></div>', 'rfs-center rfs-dim');
+  const soundLabEl = screen('soundlab', '<div class="rfs-soundlab"></div>', 'rfs-center rfs-dim');
   screen('credits', `
     <div class="rfs-card rfs-credits">
       <h2>Credits</h2>
@@ -205,7 +207,7 @@ const PAD_SVG = `<svg viewBox="0 0 760 390" class="ps-svg" role="img" aria-label
         <li><b>HDRI environment:</b> Industrial Pipe and Valve 01 2K from Poly Haven, CC0 1.0.</li>
         <li><b>3D engine:</b> three.js r187, MIT license.</li>
         <li><b>Physics:</b> cannon-es, MIT license.</li>
-        <li><b>Sound effects:</b> CC0 and royalty-free recordings (no credit required). Metal impacts, tools, slams, and machine/spring hydraulics from rubberduck and Ogrebane on OpenGameArt; metal interactions from Iwan “qubodup” Gabovitch; metal footsteps on concrete from Thimras; mech stomp from hc / qubodup; additional metal hits from Brian MacIntosh; electrical sparks and buzz from Brian MacIntosh / BMacZero; fight bells, UI and heavy impact layers (pitched down) from Kenney; crowd ambience and reactions from Mixkit; announcer lines are original, voiced with Kokoro TTS (Apache-2.0); arena hum looped from yd’s Factory ambiance (OpenGameArt, CC0). Arena reverb and the sub-thump layer are synthesized in the game. Full sources are in CREDITS/LICENSES.md.</li>
+        <li><b>Sound effects:</b> Movement, punches, blocks, footsteps, crashes, sparks, and crowd beds from Pixabay (Content License), including Armor Impact From Sword by Dragon Studio, Sword Block (The Ballad of Blades) by VoiceBosch, and clips by floraphonic, Yodguard, DavidDumaisAudio, AudioPapkin, Soumages, TanwerAman, Marregheriti, kev_durr, storegraphic, and GregorQuendel_SoundDesign. Remaining metal impact layers, UI, and fight bells from rubberduck, Ogrebane, Brian MacIntosh, and Kenney (CC0); electrical buzz from Brian MacIntosh / BMacZero; announcer lines are original, voiced with Kokoro TTS (Apache-2.0) and Chatterbox TTS; arena hum looped from yd’s Factory ambiance (OpenGameArt, CC0). Arena reverb and the sub-thump layer are synthesized in the game. Full sources are in CREDITS/LICENSES.md.</li>
         <li><b>Settings panel look and volume taper:</b> adapted from Window Workshop Games UI.</li>
       </ul>
       <p class="rfs-note">CPU fighters, names, and paint schemes are original to this game. Full license notes are in README.md, models/CREDITS.md, and CREDITS/LICENSES.md.</p>
@@ -232,10 +234,10 @@ const PAD_SVG = `<svg viewBox="0 0 760 390" class="ps-svg" role="img" aria-label
     S.$$('.rfs-screen', root).forEach((el) => el.classList.toggle('on', el.dataset.screen === name));
     const b = document.body.classList;
     b.add('rfs-on');
-    b.toggle('rfs-menu', MENU_SCREENS.includes(name) && name !== 'pause' && name !== 'results');
-    b.toggle('rfs-versus', S.state.mode === 'versus' && (name === 'fight' || name === 'pause'));
+    b.toggle('rfs-menu', MENU_SCREENS.includes(name) && name !== 'pause' && name !== 'results' && name !== 'soundlab');
+    b.toggle('rfs-versus', S.state.mode === 'versus' && (name === 'fight' || name === 'pause' || name === 'soundlab'));
     b.toggle('rfs-training', S.state.mode === 'training' && name === 'fight');
-    b.toggle('rfs-dimmed', name === 'pause' || name === 'results');
+    b.toggle('rfs-dimmed', name === 'pause' || name === 'results' || name === 'soundlab');
     b.toggle('rfs-matchhud', !!S.state.mode && S.state.mode !== 'training');
     if (name === 'fight') {
       if (document.activeElement && root.contains(document.activeElement)) document.activeElement.blur();
@@ -296,6 +298,7 @@ const PAD_SVG = `<svg viewBox="0 0 760 390" class="ps-svg" role="img" aria-label
     if (s === 'title') return;
     if (s === 'main') return S.showScreen('title');
     if (s === 'credits' || s === 'select' || s === 'tourney' || s === 'tourney-results') return S.showScreen('main');
+    if (s === 'soundlab') return S.showScreen(soundLabReturn === 'pause' ? 'pause' : 'main');
     if (s === 'ladder') return S.showScreen('select');
     if (s === 'pause') return resume();
     if (s === 'results' || s === 'ending') return toMain();
@@ -320,6 +323,7 @@ const PAD_SVG = `<svg viewBox="0 0 760 390" class="ps-svg" role="img" aria-label
     else if (act === 'tournament') { if (S.openTournament) S.openTournament(); }
     else if (act === 'settings') S.openSettings();
     else if (act === 'credits') S.showScreen('credits');
+    else if (act === 'soundlab' || act === 'pauseSoundLab') openSoundLab();
     else if (act === 'back') back();
     else if (act === 'menu') toMain();
     else if (act === 'go') startFromSelect();
@@ -657,6 +661,29 @@ const PAD_SVG = `<svg viewBox="0 0 760 390" class="ps-svg" role="img" aria-label
     S.showScreen('ending');
   }
 
+  /* ---------- sound lab (UI module is lazy-loaded on open) ---------- */
+  let soundLabReturn = 'main';
+  let soundLabMod = null;
+  let soundLabLoading = null;
+  function openSoundLab() {
+    soundLabReturn = (S.state.screen === 'pause') ? 'pause' : 'main';
+    const mount = S.$('.rfs-soundlab', soundLabEl);
+    if (mount && !soundLabMod && !soundLabLoading) {
+      mount.innerHTML = '<div class="rfs-card rfs-soundlab-card"><header class="rfs-selhead"><small>Audio</small><b>Sound Lab</b></header><p class="rfs-note">Loading Sound Lab…</p></div>';
+    }
+    S.showScreen('soundlab');
+    const run = (mod) => { soundLabMod = mod; if (S.state.screen === 'soundlab') mod.mount(mount); };
+    if (soundLabMod) { run(soundLabMod); return; }
+    if (soundLabLoading) { soundLabLoading.then(run); return; }
+    soundLabLoading = import(new URL('js/sound-lab.js', document.baseURI).href)
+      .then((mod) => { soundLabLoading = null; run(mod); return mod; })
+      .catch((e) => {
+        soundLabLoading = null;
+        console.error('[sound-lab]', e);
+        if (mount) mount.innerHTML = '<div class="rfs-card rfs-soundlab-card"><header class="rfs-selhead"><b>Sound Lab</b></header><p class="rfs-note">Could not load Sound Lab.</p><div class="rfs-row"><button type="button" class="rfs-f rfs-btn rfs-small" data-act="back">Back</button></div></div>';
+      });
+  }
+
   /* ---------- pause ---------- */
   function renderPause() {
     const mode = S.state.mode;
@@ -666,6 +693,7 @@ const PAD_SVG = `<svg viewBox="0 0 760 390" class="ps-svg" role="img" aria-label
         <button type="button" class="rfs-f rfs-btn" data-act="resume" data-autofocus><b>Resume</b></button>
         ${mode === 'training' ? '<button type="button" class="rfs-f rfs-btn" data-act="reset"><b>Reset dummy</b></button>' : '<button type="button" class="rfs-f rfs-btn" data-act="restart"><b>Restart match</b></button>'}
         <button type="button" class="rfs-f rfs-btn" data-act="pauseSettings"><b>Settings</b></button>
+        <button type="button" class="rfs-f rfs-btn" data-act="pauseSoundLab"><b>Sound Lab</b></button>
         <button type="button" class="rfs-f rfs-btn" data-act="menu"><b>Quit to main menu</b></button>
       </nav>
       <ul class="rfs-keys">${mode === 'versus' ? `<li><em>P1</em> ${KEYS_P1}</li><li><em>P2</em> ${KEYS_P2}</li>` : KEYS_SOLO}${PAD}</ul>`;
