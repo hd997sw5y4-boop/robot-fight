@@ -359,6 +359,7 @@ export function startFight({ p1, p2, mode, labels } = {}) {
     summary: null,
   };
   current._t0 = performance.now();
+  checkpointAt = current._t0; // first checkpoint 20 s in
   current._pathAt = 0;
   current._prev = { p1: null, p2: null, cam: null, vis: { p1: 0, p2: 0 }, mats: { p1: 0, p2: 0 }, shadow: null, work: [] };
   current._stuck = { p1: 0, p2: 0 };
@@ -401,7 +402,21 @@ function addFps(s, fps) {
   if (fps < 20) s.drops += 1;
 }
 
+// The open fight is also written to storage as "in-progress" every 20 s and whenever the page is
+// hidden or closed, so a reload, a closed tab or a crash mid-fight still leaves it in the log
+// (it used to be saved only on match end / quit). The final commit replaces it by id.
+const CHECKPOINT_MS = 20000;
+let checkpointAt = 0;
+function checkpoint(force) {
+  if (!current) return;
+  const now = performance.now();
+  if (!force && now - checkpointAt < CHECKPOINT_MS) return;
+  checkpointAt = now;
+  try { upsertFight(snapshotCurrent('in-progress')); } catch (err) { setSaveError(err && err.message); }
+}
+
 export function logFps(fps) {
+  if (current && performance.now() - checkpointAt >= CHECKPOINT_MS) checkpoint(false);
   if (!current || !(fps > 0) || !Number.isFinite(fps)) return;
   addFps(current.fps, fps);
   const g = (getSettings() || {}).gfx || 'high';
@@ -828,5 +843,8 @@ export function clearLog() {
 }
 
 if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => checkpoint(true));
+  window.addEventListener('beforeunload', () => checkpoint(true));
+  document.addEventListener('visibilitychange', () => { if (document.hidden) checkpoint(true); });
   window.RFFightLog = { startFight, endFight, abandonFight, logFps, logGlitch, logStrike, logRound, getLog, downloadLog, copyLog, clearLog, sanitizeLog, noteFrameWork, setFightLearning, logHeldRepeat, logSaveError, hasOpenFight, logSetting };
 }
