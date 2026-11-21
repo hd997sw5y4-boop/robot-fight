@@ -4034,23 +4034,42 @@ function applyPunchReach(f) {
     if (clipBend > 1e-6) _ikPole.divideScalar(clipBend); else _ikPole.copy(_ikNat);
     _ikPole.lerp(_ikNat, 1 - k);
   }
-  _ikAxis.crossVectors(_ikD, _ikPole);
-  if (_ikAxis.lengthSq() < 1e-8) {
-    _ikAxis.set(0, 1, 0).cross(_ikD);
-    if (_ikAxis.lengthSq() < 1e-8) _ikAxis.set(1, 0, 0).cross(_ikD);
+  // Solve with this pole; if the elbow then bends the wrong way (far outside its hinge range,
+  // which the joint limits would snap back as a "jointFlip"), solve again on the natural side.
+  const elbow = hingeOf(f, arm.lower);
+  _ikQu.copy(arm.upper.quaternion);
+  _ikQl.copy(arm.lower.quaternion);
+  for (let pass = 0; pass < 2; pass++) {
+    if (pass === 1) {
+      arm.upper.quaternion.copy(_ikQu);
+      arm.lower.quaternion.copy(_ikQl);
+      arm.upper.updateMatrixWorld(true);
+      if (_ikNat.lengthSq() < 1e-8) return;
+      _ikPole.copy(_ikNat);
+    }
+    _ikAxis.crossVectors(_ikD, _ikPole);
+    if (_ikAxis.lengthSq() < 1e-8) {
+      _ikAxis.set(0, 1, 0).cross(_ikD);
+      if (_ikAxis.lengthSq() < 1e-8) _ikAxis.set(1, 0, 0).cross(_ikD);
+    }
+    _ikAxis.normalize();
+    // Upper-arm direction: rotate the shoulder→target line by angA around the pole axis.
+    const upperDir = _ikD.clone().normalize().applyAxisAngle(_ikAxis, angA);
+    const elbowPos = _ikA.clone().addScaledVector(upperDir, len1);
+    const lowerDir = _ikA.clone().add(_ikD).sub(elbowPos);
+    if (lowerDir.lengthSq() < 1e-8) return;
+    lowerDir.normalize();
+    aimBoneY(arm.upper, upperDir, w);
+    arm.upper.updateMatrixWorld(true);
+    aimBoneY(arm.lower, lowerDir, w);
+    arm.lower.updateMatrixWorld(true);
+    if (!elbow || !elbow.axis || !elbow.lim) return;
+    const th = hingeAngle(elbow) / DEG;
+    if (th > elbow.lim.min - 60 && th < elbow.lim.max + 60) return;
   }
-  _ikAxis.normalize();
-  // Upper-arm direction: rotate the shoulder→target line by angA around the pole axis.
-  const upperDir = _ikD.clone().normalize().applyAxisAngle(_ikAxis, angA);
-  const elbowPos = _ikA.clone().addScaledVector(upperDir, len1);
-  const lowerDir = _ikA.clone().add(_ikD).sub(elbowPos);
-  if (lowerDir.lengthSq() < 1e-8) return;
-  lowerDir.normalize();
-  aimBoneY(arm.upper, upperDir, w);
-  arm.upper.updateMatrixWorld(true);
-  aimBoneY(arm.lower, lowerDir, w);
-  arm.lower.updateMatrixWorld(true);
 }
+const _ikQu = new THREE.Quaternion();
+const _ikQl = new THREE.Quaternion();
 
 // Structural damage (not tiredness): a torso past 70% damage folds on any heavy blow.
 function torsoWrecked(f) {
