@@ -70,6 +70,7 @@ function clampSwing(maxDeg) {
 }
 
 function twistQ(a, ang) { return _t.setFromAxisAngle(a, ang); }
+function wrapPi(a) { return Math.atan2(Math.sin(a), Math.cos(a)); }
 
 export function applyJointLimits(f) {
   if (!f.joints) return;
@@ -82,9 +83,16 @@ export function applyJointLimits(f) {
       let changed = clampSwing(j.lim.side);
       const lo = j.lim.min * D;
       const hi = j.lim.max * D;
+      // The flex angle wraps at +-180: an elbow folded past ~180 (Uppercut / ElbowPunching plus
+      // the punch IK) reads as a large negative angle and was clamped to the far end of the
+      // range, a half-turn snap (the jointFlip events). Out of range, take the limit that is
+      // nearer around the circle.
       let th2 = th;
-      if (th < lo) th2 = lo; else if (th > hi) th2 = hi;
-      const fold = Math.abs(th2 - th);
+      if (th < lo || th > hi) {
+        const dLo = wrapPi(lo - th), dHi = wrapPi(th - hi);
+        th2 = Math.abs(dLo) <= Math.abs(dHi) ? lo : hi;
+      }
+      const fold = Math.abs(wrapPi(th2 - th));
       if (th2 !== th) changed = true;
       if (!changed) continue;
       if (fold > 75 * D) { f.jointStats.flips++; f.jointStats.flipBones.push(j.key); }
@@ -102,6 +110,7 @@ export function applyJointLimits(f) {
       _swHold.copy(_s);
       _r.copy(_swHold).multiply(twistQ(Y, th2));
     }
+    if (!Number.isFinite(_r.x + _r.y + _r.z + _r.w)) continue; // never write a NaN pose
     b.quaternion.copy(j.rest).multiply(_r);
     f.jointStats.clamped++;
   }

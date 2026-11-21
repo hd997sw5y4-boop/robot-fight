@@ -495,22 +495,24 @@ export function logSpecial(side, kind, result, damage) {
   logStrike(side, kind, result === 'land' || result === 'hit' ? 'land' : result === 'block' ? 'block' : 'miss', damage);
 }
 
-export function logCpuIdle(side, inRange, canThrow = true) {
+// A CPU that could strike (in range, free to act) but has thrown nothing for 8 s of fight time.
+// Counted in game time (dt), so a pause, a hidden tab or a slow frame never adds to it (the
+// old wall-clock count flagged every 8 s while a fight sat paused).
+export function logCpuIdle(side, inRange, canThrow = true, dt = 0) {
   if (!current) return;
-  current.lastEligibleAt = current.lastEligibleAt || { p1: 0, p2: 0 };
-  const now = performance.now();
-  if (!inRange || !canThrow) {
-    current.lastEligibleAt[side] = 0;
-    return;
+  const idle = current._cpuIdle || (current._cpuIdle = { p1: 0, p2: 0, act: { p1: 0, p2: 0 } });
+  const act = current.lastActAt[side] || 0;
+  if (!inRange || !canThrow || act !== idle.act[side]) {
+    idle[side] = 0;
+    idle.act[side] = act;
+    if (!inRange || !canThrow) return;
   }
-  if (!current.lastEligibleAt[side]) current.lastEligibleAt[side] = now;
-  const last = Math.max(current.lastActAt[side] || 0, current.lastEligibleAt[side]);
-  if (now - last > 8000) {
-    const t = +((now - current._t0) / 1000).toFixed(2);
-    const already = current.cpuFlags.some((f) => f.kind === 'cpuStuck' && f.side === side && t - f.t < 8);
-    if (!already) current.cpuFlags.push({ t, kind: 'cpuStuck', side });
-    current.lastActAt[side] = now;
-    current.lastEligibleAt[side] = now;
+  if (!(dt > 0)) return;
+  idle[side] += Math.min(dt, 0.1);
+  if (idle[side] > 8) {
+    const t = +((performance.now() - current._t0) / 1000).toFixed(2);
+    current.cpuFlags.push({ t, kind: 'cpuStuck', side });
+    idle[side] = 0;
   }
 }
 

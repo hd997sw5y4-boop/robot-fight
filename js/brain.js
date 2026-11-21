@@ -54,6 +54,7 @@ export function createPacedBrain(getProfile) {
     oppWasAtk: false,
     punishOk: false,
     inRangeT: 0,
+    sinceAtk: 0,      // s free to strike without trying one (watchdog)
   };
 
   function setMode(mode, len) {
@@ -133,6 +134,21 @@ export function createPacedBrain(getProfile) {
 
     const punchR = snap.strikeRange.punch / SIZE;
     const kickR = snap.strikeRange.kick / SIZE;
+
+    // Watchdog: a CPU that is free to act never goes more than a few seconds without trying a
+    // strike (circle / read / approach loops, a range it can't quite close, a blocked path).
+    // Time only counts while a strike is possible and the opponent is up.
+    if (nowAttacking || opp.down || !(self.canPunch || self.canKick)) s.sinceAtk = 0;
+    else s.sinceAtk = (s.sinceAtk || 0) + snap.dt;
+    if (s.sinceAtk > 4.5 && s.mode !== 'strike') {
+      s.sinceAtk = 0;
+      s.plan = planStrike(prof, self) || 'punch';
+      s.combo = 1;
+      s.guardUntil = 0;
+      s.burst = true;
+      if (dist <= kickR + 0.6) setMode('strike', 2.2);
+      else setMode('approach', 0);
+    }
 
     // If the CPU has been able to act inside kick range for too long without throwing,
     // force a strike so it cannot stall in circle / read / approach.

@@ -381,6 +381,16 @@ function syncDebris(dt) {
       if (out > 0) { d.body.velocity.x -= nx * out * 1.35; d.body.velocity.z -= nz * out * 1.35; }
       d.body.velocity.x *= 0.6;
       d.body.velocity.z *= 0.6;
+    } else {
+      // Look one frame ahead: a fast piece that would cross the wall plane next step bounces
+      // off it now, so it never tunnels out of the cage (the old check only caught it after).
+      const la = Math.max(dt || 0, 1 / 60) * 1.5;
+      const fx = px + d.body.velocity.x * la, fz = pz + d.body.velocity.z * la;
+      if (wallDist(fx, fz) < pad) {
+        const [nx, nz] = wallOutward(fx, fz);
+        const out = d.body.velocity.x * nx + d.body.velocity.z * nz;
+        if (out > 0) { d.body.velocity.x -= nx * out * 1.35; d.body.velocity.z -= nz * out * 1.35; }
+      }
     }
     const v = d.body.velocity.length();
     const w = d.body.angularVelocity.length();

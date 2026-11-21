@@ -329,6 +329,21 @@ function setMirrorRes(m) {
   const tx = u && u.texel;
   if (tx) tx.value.set(1 / w, 1 / h);
 }
+// Medium re-rendered all three shadow maps (two spots + the fill) over every caster each frame:
+// three extra scene passes, most of Medium's ~840 draw calls a frame (Low ~190). The key spot
+// still updates every frame; the other two take turns (30 Hz each), so two passes a frame.
+// High keeps every map live.
+let shadowLights = [];
+let shadowTurn = 0;
+function scheduleShadows() {
+  if (gfxKey !== 'medium' || !renderer.shadowMap.enabled || shadowLights.length < 3) return;
+  shadowTurn ^= 1;
+  for (let i = 1; i < shadowLights.length; i++) {
+    const sh = shadowLights[i].shadow;
+    sh.autoUpdate = false;
+    sh.needsUpdate = !sh.map || ((i + shadowTurn) & 1) === 0;
+  }
+}
 function applyGfx(key) {
   gfxKey = normGfx(key);
   if (floorMirror) { floorMirror.visible = gfxKey !== 'low'; setMirrorRes(floorMirror); }
@@ -341,9 +356,12 @@ function applyGfx(key) {
   applyPixelRatio();
   renderer.toneMappingExposure = p.exposure * lightMul;
   renderer.shadowMap.enabled = p.shadows;
+  shadowLights = [];
   scene.traverse((o) => {
     if (o.isLight && o.shadow) {
       o.castShadow = !!(p.shadows && o.userData.wantsShadow);
+      if (o.castShadow) shadowLights.push(o);
+      o.shadow.autoUpdate = true;
       o.shadow.mapSize.set(p.shadowSize, p.shadowSize);
       if (o.shadow.map) {
         o.shadow.map.dispose();
@@ -1108,10 +1126,62 @@ function applyFighterConfig(f, cfg) {
   if (el) el.textContent = f.config.name;
 }
 
+// One Skeleton per robot. The GLB binds each of a robot's ~74 skinned parts to its own subset
+// of the rig (51 skins), so every frame three.js recomputed and uploaded ~50 bone-matrix
+// textures per robot and rebound a different one for nearly every draw, in the main, shadow and
+// mirror passes alike. All parts now share one Skeleton over every bone: each part's skin
+// indices are remapped to it and its bind matrix re-expressed against the shared bind inverses
+// (bone world at load), which leaves boneInverse x bindMatrix, and so the skinning, unchanged.
+// A part whose bind doesn't fit (it would have to move) keeps its own skeleton.
+const _shX = new THREE.Matrix4();
+const _shT = new THREE.Matrix4();
+function shareSkeleton(model) {
+  model.updateMatrixWorld(true);
+  const meshes = [];
+  model.traverse((m) => { if (m.isSkinnedMesh && m.skeleton && m.bindMode === 'attached' && m.geometry && m.geometry.attributes.skinIndex) meshes.push(m); });
+  if (meshes.length < 2) return 0;
+  const bones = [];
+  const index = new Map();
+  for (const m of meshes) for (const b of m.skeleton.bones) if (b && !index.has(b)) { index.set(b, bones.length); bones.push(b); }
+  const inverses = bones.map((b) => b.matrixWorld.clone().invert());
+  const shared = new THREE.Skeleton(bones, inverses);
+  let n = 0;
+  for (const m of meshes) {
+    const sk = m.skeleton;
+    let X = null, ok = true;
+    for (let j = 0; j < sk.bones.length && ok; j++) {
+      const b = sk.bones[j];
+      if (!b || !sk.boneInverses[j]) { ok = false; break; }
+      _shT.multiplyMatrices(b.matrixWorld, sk.boneInverses[j]).multiply(m.bindMatrix);
+      if (!X) { X = _shX.copy(_shT); continue; }
+      const a = _shT.elements, c = X.elements;
+      for (let k = 0; k < 16; k++) if (Math.abs(a[k] - c[k]) > 1e-4 * (1 + Math.abs(c[k]))) { ok = false; break; }
+    }
+    if (!ok || !X) continue;
+    const g = m.geometry.clone(); // the GLB's geometry is shared with the source scene and the other robot
+    const si = g.attributes.skinIndex;
+    const out = new Uint16Array(si.count * 4);
+    for (let i = 0; i < si.count; i++) {
+      for (let c = 0; c < 4; c++) {
+        const b = sk.bones[si.getComponent(i, c)];
+        out[i * 4 + c] = b ? index.get(b) : 0;
+      }
+    }
+    g.setAttribute('skinIndex', new THREE.BufferAttribute(out, 4));
+    m.geometry = g;
+    m.bindMatrix.copy(X);
+    m.bindMatrixInverse.copy(X).invert();
+    m.skeleton = shared;
+    n++;
+  }
+  return n;
+}
+
 function makeFighter(gltf, color, side, skinId) {
   const skinDef = (skinId && SKINS[skinId]) || null;
   const root = new THREE.Group();
   const model = cloneSkinned(gltf.scene);
+  shareSkeleton(model);
   const box = meshBox(model);
   const height = box ? box.getSize(new THREE.Vector3()).y : 0;
   const scale = height > 0.001 ? (MODEL.targetHeight / height) : (MODEL.scale || 1);
@@ -1558,6 +1628,72 @@ function updateContactShadows(f) {
   }
 }
 const _sl = new THREE.Vector3();
+// Skinned-vertex sampling for grounding and contact shadows. three's getVertexPosition re-skins
+// every sampled vertex with two 4x4 matrix products per bone influence; the game sampled ~1,800
+// sole vertices several times a frame per robot and ~17,000 body vertices twice a frame while a
+// robot was down (the 20+ ms knockdown frames in the fight log). Each sampled vertex now keeps
+// its bind-space offset per influence (boneInverse x bindMatrix x v), so its world position is
+// sum(w x boneWorld x offset): the same result for an attached bind, at a fraction of the cost.
+// Rebuilt when the damage code rewrites positions or skin weights (attribute versions).
+const _skinCache = new WeakMap();
+const _skV = new THREE.Vector3();
+const _skW = new THREE.Vector3();
+function skinSample(mesh, idx) {
+  const g = mesh.geometry;
+  const a = g && g.attributes;
+  const pos = a && a.position, si = a && a.skinIndex, sw = a && a.skinWeight;
+  if (!mesh.isSkinnedMesh || !pos || !si || !sw || !mesh.skeleton || mesh.bindMode !== 'attached') return null;
+  if (g.morphAttributes && g.morphAttributes.position && g.morphAttributes.position.length) return null;
+  const ver = pos.version + ':' + si.version + ':' + sw.version;
+  let c = _skinCache.get(idx);
+  if (c && c.mesh === mesh && c.ver === ver && c.sk === mesh.skeleton && c.pos === pos && c.si === si && c.sw === sw) return c;
+  const sk = mesh.skeleton;
+  const n = idx.length;
+  const start = new Uint32Array(n + 1);
+  const bones = [];
+  const L = [];
+  for (let k = 0; k < n; k++) {
+    start[k] = bones.length;
+    const i = idx[k];
+    _skV.fromBufferAttribute(pos, i).applyMatrix4(mesh.bindMatrix);
+    for (let j = 0; j < 4; j++) {
+      const w = sw.getComponent(i, j);
+      if (w === 0) continue;
+      const bi = si.getComponent(i, j);
+      const b = sk.bones[bi];
+      if (!b || !sk.boneInverses[bi]) continue;
+      _skW.copy(_skV).applyMatrix4(sk.boneInverses[bi]);
+      bones.push(b);
+      L.push(_skW.x, _skW.y, _skW.z, w);
+    }
+  }
+  start[n] = bones.length;
+  c = { mesh, ver, sk, pos, si, sw, start, bones, L: new Float64Array(L) };
+  _skinCache.set(idx, c);
+  return c;
+}
+function skinY(c, k) {
+  const L = c.L;
+  let y = 0;
+  for (let j = c.start[k], e = c.start[k + 1]; j < e; j++) {
+    const m = c.bones[j].matrixWorld.elements;
+    const o = j * 4;
+    y += L[o + 3] * (m[1] * L[o] + m[5] * L[o + 1] + m[9] * L[o + 2] + m[13]);
+  }
+  return y;
+}
+function skinXYZ(c, k, out) {
+  const L = c.L;
+  let x = 0, y = 0, z = 0;
+  for (let j = c.start[k], e = c.start[k + 1]; j < e; j++) {
+    const m = c.bones[j].matrixWorld.elements;
+    const o = j * 4, w = L[o + 3], lx = L[o], ly = L[o + 1], lz = L[o + 2];
+    x += w * (m[0] * lx + m[4] * ly + m[8] * lz + m[12]);
+    y += w * (m[1] * lx + m[5] * ly + m[9] * lz + m[13]);
+    z += w * (m[2] * lx + m[6] * ly + m[10] * lz + m[14]);
+  }
+  return out.set(x, y, z);
+}
 function soleLow(f, side) {
   const sv = f.soleVerts && f.soleVerts[side];
   if (!sv || !sv.length) return null;
@@ -1565,11 +1701,12 @@ function soleLow(f, side) {
   for (const { mesh, idx } of sv) {
     if (!mesh.visible) continue;
     const hidden = mesh.userData.hiddenVerts;
+    const c = skinSample(mesh, idx);
     for (let k = 0; k < idx.length; k += Math.max(1, Math.floor(idx.length / 12))) {
       const i = idx[k];
       if (hidden && hidden[i]) continue;
-      mesh.getVertexPosition(i, _sl);
-      _sl.applyMatrix4(mesh.matrixWorld);
+      if (c) skinXYZ(c, k, _sl);
+      else { mesh.getVertexPosition(i, _sl); _sl.applyMatrix4(mesh.matrixWorld); }
       if (!best || _sl.y < best.y) best = (best || new THREE.Vector3()).copy(_sl);
     }
   }
@@ -1643,7 +1780,7 @@ function cacheFeet(f) {
       const stride = Math.max(1, Math.ceil(list.length / 90));
       const idx = [];
       for (let j = 0; j < list.length; j += stride) idx.push(list[j]);
-      if (idx.length) f.soleVerts[side].push({ mesh: m, idx });
+      if (idx.length) { f.soleVerts[side].push({ mesh: m, idx }); skinSample(m, idx); }
     }
   });
 }
@@ -1697,10 +1834,19 @@ function lowestFootY(f) {
         if (!mesh.visible) continue;
         // updateWorldMatrix() skips SkinnedMesh's bind refresh; without it the root offset is
         // counted twice and the robots ratchet upward.
-        if (mesh.bindMode === 'attached') mesh.bindMatrixInverse.copy(mesh.matrixWorld).invert();
         const hidden = mesh.userData.hiddenVerts;
+        const c = skinSample(mesh, idx);
+        if (c) {
+          for (let k = 0; k < idx.length; k++) {
+            if (hidden && hidden[idx[k]]) continue; // torn-off foot / toes: not on the robot any more
+            const y = skinY(c, k);
+            if (y < minY) minY = y;
+          }
+          continue;
+        }
+        if (mesh.bindMode === 'attached') mesh.bindMatrixInverse.copy(mesh.matrixWorld).invert();
         for (const i of idx) {
-          if (hidden && hidden[i]) continue; // torn-off foot / toes: not on the robot any more
+          if (hidden && hidden[i]) continue;
           mesh.getVertexPosition(i, _footY);
           _footY.applyMatrix4(mesh.matrixWorld);
           if (_footY.y < minY) minY = _footY.y;
@@ -1722,6 +1868,7 @@ function cacheBody(f) {
     const idx = [];
     for (let i = 0; i < n; i += stride) idx.push(i);
     f.bodyVerts.push({ mesh: m, idx });
+    skinSample(m, idx); // built at load, not on the first knockdown frame
   });
   // Strike points (fists, forearms, feet, shins) and the spine chain for hit flinches.
   const want = {
@@ -1752,8 +1899,17 @@ function lowestBodyY(f) {
   let minY = Infinity;
   for (const { mesh, idx } of f.bodyVerts) {
     if (!mesh.visible) continue;
-    if (mesh.bindMode === 'attached') mesh.bindMatrixInverse.copy(mesh.matrixWorld).invert();
     const vp = mesh.userData.vertPart;
+    const c = skinSample(mesh, idx);
+    if (c) {
+      for (let k = 0; k < idx.length; k++) {
+        if (vp && partCodeDetached(f, vp[idx[k]])) continue;
+        const y = skinY(c, k);
+        if (y < minY) minY = y;
+      }
+      continue;
+    }
+    if (mesh.bindMode === 'attached') mesh.bindMatrixInverse.copy(mesh.matrixWorld).invert();
     for (const i of idx) {
       if (vp && partCodeDetached(f, vp[i])) continue;
       mesh.getVertexPosition(i, _footY);
@@ -1870,9 +2026,23 @@ const _fwQ2 = new THREE.Quaternion();
 const _fwQ3 = new THREE.Quaternion();
 const _fwUp = new THREE.Vector3(0, 1, 0);
 const FW_SWING_V = 1.6 * SIZE; // m/s: a hand-off swing is never faster than this on average
+const FW_SHUFFLE = 0.03 * SIZE; // a hand-off shorter than this may slide; longer ones step
+const FW_UP = 0.2;              // share of a step spent lifting (and setting down) in place
 function fwSwing(p, x, y, z, dur, lift, cx, cz) {
+  const d = cx == null ? 0 : Math.hypot(x - cx, z - cz);
+  // A hand-off with no lift dragged a planted sole across the mat (plantSlide): anything longer
+  // than a shuffle is a small step instead.
+  if (!(lift > 0) && d > FW_SHUFFLE) lift = Math.min(FW_LIFT * 0.6, 0.3 * d + 0.015 * SIZE);
   p.mode = 'swing'; p.fx = x; p.fz = z; p.t = 0; p.lift = lift;
-  p.dur = cx == null ? dur : Math.max(dur, Math.hypot(x - cx, z - cz) / FW_SWING_V);
+  p.dur = cx == null ? dur : Math.max(dur, d / FW_SWING_V);
+}
+// Step timing: the foot comes up first, travels while it is clear of the mat, then sets down
+// (horizontal progress runs over the middle of the step, height over all of it). An even
+// blend moved the sole sideways while it was still touching the mat at both ends.
+function fwTravel(u, lift) {
+  if (!(lift > 0)) return u * u * (3 - 2 * u);
+  const v = Math.max(0, Math.min(1, (u - FW_UP) / (1 - 2 * FW_UP)));
+  return v * v * (3 - 2 * v);
 }
 function footwork(f, top, dt, off) {
   if (!f.ikLegs) return;
@@ -1933,14 +2103,14 @@ function footwork(f, top, dt, off) {
     if (p.mode === 'lock') { tx = p.ax; tz = p.az; }
     else if (p.mode === 'lead') {
       const u = Math.max(0, Math.min(1, sw.u));
-      const e = u * u * (3 - 2 * u);
+      const e = fwTravel(u, 1);
       tx = p.fx + (_ikC.x - p.fx) * e;
       tz = p.fz + (_ikC.z - p.fz) * e;
       ty += Math.min(FW_LIFT * 1.3, 0.04 * SIZE + 0.25 * sw.S) * Math.sin(Math.PI * u);
     } else if (p.mode === 'swing') {
       p.t += step;
       const u = Math.min(1, p.t / Math.max(1e-3, p.dur));
-      const e = u * u * (3 - 2 * u);
+      const e = fwTravel(u, p.lift);
       tx = p.fx + (_ikC.x - p.fx) * e;
       tz = p.fz + (_ikC.z - p.fz) * e;
       ty += p.lift * Math.sin(Math.PI * u);
@@ -2024,6 +2194,7 @@ function reachFoot(f, leg, target) {
     leg.thigh.parent.getWorldQuaternion(_ikQ2);
     _ikQ.premultiply(_stPQ.copy(_ikQ2).invert()).multiply(_ikQ2);
   }
+  if (!qOk(_ikQ)) return;
   leg.thigh.quaternion.premultiply(_ikQ);
   leg.thigh.updateMatrixWorld(true);
   leg.shin.getWorldQuaternion(_ikQ2);
@@ -2509,6 +2680,7 @@ function chestGap(a, b) {
   chestOf(a, _sepA); chestOf(b, _sepB);
   return Math.hypot(_sepB.x - _sepA.x, _sepB.z - _sepA.z);
 }
+const CLIP_PUSH_MIN = 0.03 * SIZE; // push-out correction (m) past which the bodies are parted
 function separate(a, b, dt = 0) {
   const dx = b.root.position.x - a.root.position.x;
   const dz = b.root.position.z - a.root.position.z;
@@ -2521,6 +2693,10 @@ function separate(a, b, dt = 0) {
   const striking = a.state === 'punch' || a.state === 'kick' || b.state === 'punch' || b.state === 'kick';
   const chestMin = striking ? 0.28 * SIZE : 0.36 * SIZE;
   if (cg < chestMin) push = Math.max(push, (chestMin - cg) / 2);
+  // An arm or head the push-out could not fully clear last frame (limbPushout): part the bodies
+  // by the leftover depth, at the same capped rate, so a strike never stays buried.
+  const buried = Math.max(a._clipPush || 0, b._clipPush || 0);
+  if (buried > 0) push = Math.max(push, buried / 2);
   const cap = 0.7 * Math.max(dt, 0) * SIZE;
   if (push > cap) push = cap;
   if (push > 0 && d > 1e-4) {
@@ -3094,12 +3270,16 @@ function armSelfClear(f) {
       a.arm.parent.getWorldQuaternion(_sqp);
       axis.applyQuaternion(_sqp.invert());
       _sq.setFromAxisAngle(axis, ang);
+      if (!qOk(_sq)) break;
       a.arm.quaternion.premultiply(_sq);
       a.arm.updateWorldMatrix(false, true);
     }
   }
 }
 
+// A procedural turn is applied only when it is a real rotation: a NaN (from a degenerate world
+// matrix, e.g. under a torn-off part's zero scale) would otherwise poison the bone (nanBone).
+const qOk = (q) => Number.isFinite(q.x + q.y + q.z + q.w);
 const TORSO_PARTS = ['torso', 'head'];
 function strikeSideName(f) {
   const bones = f.strikeBones && f.strikeBones[f.state];
@@ -3138,6 +3318,7 @@ function swingOutOfCapsule(f, bone, pts, target, parts, margin, deepOnly) {
     bone.parent.getWorldQuaternion(_sqp);
     axis.applyQuaternion(_sqp.invert());
     _sq.setFromAxisAngle(axis, ang);
+    if (!qOk(_sq)) break; // a torn-off parent's zero scale makes its world rotation NaN
     bone.quaternion.premultiply(_sq);
     bone.updateWorldMatrix(false, true);
     moved = Math.max(moved, margin - worst.d);
@@ -3181,14 +3362,14 @@ function limbPushout(f, other) {
           neck.parent.getWorldQuaternion(_sqp);
           axis.applyQuaternion(_sqp.invert());
           _sq.setFromAxisAngle(axis, Math.min(0.4, (margin - pr.d) / len));
-          neck.quaternion.premultiply(_sq);
+          if (qOk(_sq)) neck.quaternion.premultiply(_sq);
           neck.updateWorldMatrix(false, true);
           clipAmt = Math.max(clipAmt, margin - pr.d);
         }
       }
     }
   }
-  if (clipAmt > 0.04 * SIZE) logGlitch('clipping', { id: f.id, d: +clipAmt.toFixed(3), clip: f.current });
+  return clipAmt;
 }
 
 function clampRootMotion(f, dt) {
@@ -3777,6 +3958,7 @@ function aimBoneY(bone, worldDir, weight) {
   _ikQ.setFromUnitVectors(_ikB, _ikC);
   _ikWant.copy(_ikQ).multiply(_ikWQ);
   _ikWant.copy(_ikPQ).invert().multiply(_ikWant);
+  if (!qOk(_ikWant)) return;
   bone.quaternion.slerp(_ikWant, weight);
 }
 
@@ -5409,7 +5591,9 @@ function yawBoneWorld(b, ang) {
   if (!b || !b.parent || !(Math.abs(ang) > 1e-5)) return;
   b.parent.getWorldQuaternion(_twP);
   _twQ.setFromAxisAngle(_twY, ang);
-  b.quaternion.premultiply(_twP.clone().invert().multiply(_twQ).multiply(_twP)).normalize();
+  const q = _twP.clone().invert().multiply(_twQ).multiply(_twP);
+  if (!qOk(q)) return;
+  b.quaternion.premultiply(q).normalize();
   b.updateMatrixWorld(true);
 }
 function applyStrikeTwist(f) {
@@ -5455,6 +5639,7 @@ function rotateBoneWorldAxis(bone, axis, angle) {
   if (!bone || !bone.parent || Math.abs(angle) < 1e-4) return;
   bone.parent.getWorldQuaternion(_stPQ);
   _stQ.setFromAxisAngle(_bp.copy(axis).applyQuaternion(_stPQ.invert()).normalize(), angle);
+  if (!qOk(_stQ)) return;
   bone.quaternion.premultiply(_stQ);
   bone.updateMatrixWorld(true);
 }
@@ -5617,10 +5802,11 @@ function fighterLogPose(f) {
   for (const side of ['L', 'R']) {
     const leg = f.ikLegs && f.ikLegs[side];
     if (!leg || !leg.foot) { feet.push(null); continue; }
+    // The contact point: the ankle, or the toe when it is lower (a heel coming up on the ball of
+    // the foot pivots the ankle over a planted toe; that is not a slide).
     leg.foot.getWorldPosition(_logFt);
-    let y = _logFt.y;
-    if (leg.toe) { leg.toe.getWorldPosition(_logH); y = Math.min(y, _logH.y); }
-    feet.push([_logFt.x, y, _logFt.z]);
+    if (leg.toe) { leg.toe.getWorldPosition(_logH); if (_logH.y < _logFt.y) _logFt.copy(_logH); }
+    feet.push([_logFt.x, _logFt.y, _logFt.z]);
   }
   const cap = f.phys && f.phys.body && f.phys.body.position;
   const act = f.current && f.actions[f.current];
@@ -5711,7 +5897,9 @@ function tick() {
     }
   }
   if (match.phase === 'fight' && !match.over) stepRound(dt);
-  canAct = match.phase === 'fight' && !match.over && !inBell() && !isSettingsOpen();
+  // dt is 0 while the shell pause or Settings holds the clock: nobody decides or acts then (a
+  // CPU used to start strikes into a frozen frame, and the log counted it as stuck).
+  canAct = match.phase === 'fight' && !match.over && !inBell() && !isSettingsOpen() && dt > 0;
   const watch = !!shellCall('cpuControls', 'p1'); // Bot vs Bot: P1 is a CPU too
   p1.isCpu = watch;
   const pin = canAct ? (watch ? updateAI(p1, p2, dt) : consumeAttacks(rawInput(), dt)) : consumeAttacks({ sidestep: 0, inout: 0, punch: false, kick: false, block: false }, 1);
@@ -5741,7 +5929,11 @@ function tick() {
     if (window.__rfDiag) diagFootStage(f, 1);
     applyMalfunctions(f, dt);
     armSelfClear(f);
-    limbPushout(f, f === p1 ? p2 : p1);
+    const clipAmt = limbPushout(f, f === p1 ? p2 : p1);
+    // A strike still pressed into the other body after the push-out (the hook that stayed
+    // buried for seconds in the log): ease the two bodies apart next frame.
+    f._clipPush = dt > 0 && clipAmt > CLIP_PUSH_MIN ? clipAmt : 0;
+    if (dt > 0 && clipAmt > 0.04 * SIZE) logGlitch('clipping', { id: f.id, d: +clipAmt.toFixed(3), clip: f.current });
     if (f.koTip) stepKoTip(f, dt);
     stepEyes(f, dt);
     if (window.__rfDiag) diagFootStage(f, 2);
@@ -5749,7 +5941,7 @@ function tick() {
     if (f.jointStats) f.jointStats.flipBones.length = 0;
     applyJointLimits(f);
     const jf = f.jointStats ? f.jointStats.flips - jf0 : 0;
-    if (jf > 0) logGlitch('jointFlip', { id: f.id, n: jf, state: f.state, clip: f.current, bones: f.jointStats.flipBones.join(',') });
+    if (jf > 0 && dt > 0) logGlitch('jointFlip', { id: f.id, n: jf, state: f.state, clip: f.current, bones: f.jointStats.flipBones.join(',') });
     blendLegPose(f, dt);
     if (window.__rfDiag) diagFootStage(f, 3);
     groundFeet(f, dt);
@@ -5770,9 +5962,11 @@ function tick() {
   if (canAct) {
     const reach = (COMBAT.kick && COMBAT.kick.reach) || (COMBAT.punch && COMBAT.punch.reach) || 1.7 * SIZE;
     const gap = p1.root.position.distanceTo(p2.root.position);
-    const canThrow = (f) => !DOWN_STATES.has(f.state) && f.state !== 'hit' && f.state !== 'punch' && f.state !== 'kick' && f.state !== 'ground';
-    if (usesCpuBrain(p1)) logCpuIdle('p1', gap < reach * 1.25, canThrow(p1));
-    if (usesCpuBrain(p2)) logCpuIdle('p2', gap < reach * 1.25, canThrow(p2));
+    const canThrow = (f) => !DOWN_STATES.has(f.state) && f.state !== 'hit' && f.state !== 'punch' && f.state !== 'kick' && f.state !== 'ground'
+      && ((canPunch(f) && punchClipsFor(f).length > 0) || canKick(f)); // no limb left to strike with is not "stuck"
+    // A robot waiting for the other to get up is not stuck.
+    if (usesCpuBrain(p1)) logCpuIdle('p1', gap < reach * 1.25 && !DOWN_STATES.has(p2.state), canThrow(p1), dt);
+    if (usesCpuBrain(p2)) logCpuIdle('p2', gap < reach * 1.25 && !DOWN_STATES.has(p1.state), canThrow(p2), dt);
   }
   updateContactShadows(p1);
   updateContactShadows(p2);
@@ -5804,6 +5998,7 @@ function tick() {
   syncHud(dt);
   try { updateBroadcast(); } catch (e) { console.warn('[broadcast]', e); }
   updateCageFade(cagePanels, camera, rawDt);
+  scheduleShadows();
   const renderT0 = performance.now();
   renderFrame();
   const renderMs = performance.now() - renderT0;
