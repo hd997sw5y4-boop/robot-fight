@@ -18,7 +18,7 @@
 
   /* Six CPU opponents, easiest first. `prof` feeds the game's own AI knobs (think window,
      reaction-block chance, punch/kick/special/block mix) via api.js fighter config. */
-  // Thirteen fighters. `skin` names a js/config.js SKINS body (null = the standard robot); a
+  // Fourteen fighters. `skin` names a js/config.js SKINS body (null = the standard robot); a
   // skinned fighter keeps its own textures, so its primary / accent only colour the HUD. `profile` is a js/config.js FIGHTER_PROFILES id and
   // actually drives damage, speed, armor, reach, and recovery in a fight.
   S.ROSTER = [
@@ -54,6 +54,10 @@
       skin: null, primary: '#5d6b4a', accent: '#b08a6a',
       blurb: 'Walks forward behind a raised guard and hits heavy.',
       prof: { think: [0.3, 0.38], react: 0.5, punch: 0.28, kick: 0.32, special: 0.22, block: 0.32 } },
+    { id: 'ghoul', name: 'Ghoul', title: 'The Parasite', style: 'Tank', profile: 'ghoul',
+      skin: 'ghoul', primary: '#b85c5c', accent: '#3b3f45',
+      blurb: 'Slow, relentless, and hard to drop. Celebrates with a pounce.',
+      prof: { think: [0.28, 0.36], react: 0.32, punch: 0.42, kick: 0.18, special: 0.16, block: 0.14 } },
     { id: 'draugr', name: 'Draugr', title: 'The Grinder', style: 'Brawler', profile: 'draugr',
       skin: 'draugr', primary: '#b08a6a', accent: '#e23b3b',
       blurb: 'Tall, heavy-handed, and hard to break. Keeps coming, slow to reset.',

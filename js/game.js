@@ -598,7 +598,11 @@ function fighterFor(side, skinId) {
   let src = fighterGltf;
   if (skinId) {
     prepFootworkClips(fighterGltf); // shared clips: prep once, on the robot's list
-    src = { scene: skinGltf[skinId].scene, animations: fighterGltf.animations, __footworkPrepped: true };
+    // A body may bring its own take of a clip (same name, e.g. Ghoul's Victory / Taunt); it
+    // replaces the shared one for that fighter only. Everything else plays the shared clips.
+    const own = new Map((skinGltf[skinId].animations || []).map((c) => [c.name, c]));
+    const anims = own.size ? fighterGltf.animations.map((c) => own.get(c.name) || c) : fighterGltf.animations;
+    src = { scene: skinGltf[skinId].scene, animations: anims, __footworkPrepped: true };
   }
   const f = makeFighter(src, side === 'p1' ? MODEL.colors.p1 : MODEL.colors.p2, side, skinId || null);
   fighterCache[side][key] = f;

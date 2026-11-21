@@ -26,3 +26,7 @@
 # Ginger fighter asset
 
 - **Mesh and textures:** Mixamo character "Ch14" from [Mixamo](https://www.mixamo.com) (Adobe), used under the Mixamo terms (called Ginger in the game). Baked onto the Robot fighter's Mixamo skeleton by bone name with its own skin weights, so it plays the same Mixamo clips listed above; textures resized to 1024 px for the web (specular / gloss maps dropped). The original FBX is not redistributed.
+
+# Ghoul fighter asset
+
+- **Mesh, textures and one animation:** Mixamo character "Parasite" and the Mixamo animation that came with it, from [Mixamo](https://www.mixamo.com) (Adobe), used under the Mixamo terms (called Ghoul in the game). Baked onto the Robot fighter's Mixamo skeleton by bone name with its own skin weights; textures resized to 1024 px for the web (specular maps dropped). Its leap-and-crouch animation is retargeted onto the same skeleton (kept in place) and used only as Ghoul's Victory / Taunt; every other move plays the shared Mixamo clips listed above. The original FBX is not redistributed.

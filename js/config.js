@@ -117,8 +117,10 @@ export const MODEL = {
 // skeleton (same 65 bone names and rest rotations), so it plays the robot's clips, joint
 // limits, footwork and damage as is. `paint: false` keeps the model's own textures (no team
 // tint, no shell paint, no chrome mask); `visor: false` skips the neon eyes (Teal, Draugr, Fixer, Rivet,
-// Blix and Ginger have their own faces). Blix and Ginger are Mixamo characters (Ch19 / Ch14; Ch19's
-// rig is prefixed mixamorig1:), baked onto the same skeleton by bone name with their own weights.
+// Blix, Ginger and Ghoul have their own faces). Blix, Ginger and Ghoul are Mixamo characters (Ch19 /
+// Ch14 / Parasite; Ch19's rig is prefixed mixamorig1:), baked onto the same skeleton by bone name with
+// their own weights. A body GLB may carry its own take of a shared clip by name (Ghoul's Victory and
+// Taunt are the Parasite's own pounce); it replaces that clip for this fighter only.
 export const SKINS = {
   teal: {
     url: './models/TealFighter.glb',
@@ -147,6 +149,12 @@ export const SKINS = {
   ginger: {
     url: './models/GingerFighter.glb',
     source: 'Mixamo character Ch14 (Adobe), named Ginger in game; animations from Mixamo',
+    paint: false,
+    visor: false,
+  },
+  ghoul: {
+    url: './models/GhoulFighter.glb',
+    source: 'Mixamo character Parasite (Adobe) and its Mixamo animation, named Ghoul in game; other animations from Mixamo',
     paint: false,
     visor: false,
   },
@@ -326,6 +334,9 @@ export const FIGHTER_PROFILES = {
   blix: { id: 'blix', name: 'Blix', blurb: 'A wiry goblin scrapper with a mean streak. Sneaky quick hands and long arms, but one clean shot rattles it.',
     strengths: ['Quick Hands', 'Long Reach'], weaknesses: ['Glass Jaw'],
     stats: { speed: 7, power: 6, armor: 4, reach: 8, recovery: 7, toughness: 3 } },
+  ghoul: { id: 'ghoul', name: 'Ghoul', blurb: 'A lurching parasite host. Slow on its feet, but it soaks up punishment and hits like a falling wall.',
+    strengths: ['Iron Chin', 'Heavy Hands'], weaknesses: ['Slow Feet'],
+    stats: { speed: 3, power: 8, armor: 6, reach: 6, recovery: 5, toughness: 9 } },
   // Kept as aliases so older configs that name these ids still resolve.
   striker: null,
   bruiser: null,
