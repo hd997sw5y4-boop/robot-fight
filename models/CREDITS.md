@@ -14,3 +14,7 @@
 # Fixer fighter asset
 
 - **Mesh and textures:** [Fixer Robot](https://sketchfab.com/3d-models/fixer-robot-b33d3ccdce18447fbe21b428659edb08) by Lagst, Sketchfab Standard license. Rebound onto the Robot fighter's Mixamo skeleton (it plays the same Mixamo clips listed above) and textures resized for the web; its own animation is not used and the original source files are not redistributed.
+
+# Rivet fighter asset
+
+- **Mesh and textures:** [Robot](https://sketchfab.com/3d-models/robot-435566387be94cbfbc623c3d45241769) by Lagst, Sketchfab Standard license (called Rivet in the game). Rebound onto the Robot fighter's Mixamo skeleton using only its deform bones (it plays the same Mixamo clips listed above) and textures resized for the web; its own animation and control rig are not used and the original source files are not redistributed.

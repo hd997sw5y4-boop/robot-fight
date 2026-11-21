@@ -1,5 +1,5 @@
 /* Robot Fight shell: fighter select over the real arena.
-   Both chosen robots stand on glowing pads in the ring. Side panels list the ten
+   Both chosen robots stand on glowing pads in the ring. Side panels list the eleven
    fighters (data-driven paint / skin body / stats). Portraits are snapshots
    rendered once offscreen and cached — no per-card live 3D. */
 import { getFighterStats, STAT_BAR_KEYS, FIGHTER_PROFILES } from '../config.js';
@@ -220,7 +220,7 @@ function sidePanel(side) {
 function vsHalf(id) {
   if (id === 'random') {
     return `<div class="fs-vsbox">
-      <p class="fs-trait up"><b>Strengths</b><span>Any of the ten</span></p>
+      <p class="fs-trait up"><b>Strengths</b><span>Any of the eleven</span></p>
       <p class="fs-trait down"><b>Weaknesses</b><span>A surprise pick</span></p>
     </div>`;
   }

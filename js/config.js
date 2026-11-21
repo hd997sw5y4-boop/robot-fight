@@ -116,7 +116,7 @@ export const MODEL = {
 // Alternate bodies. Each GLB holds only a mesh rebound onto RobotFighter's exact Mixamo
 // skeleton (same 65 bone names and rest rotations), so it plays the robot's clips, joint
 // limits, footwork and damage as is. `paint: false` keeps the model's own textures (no team
-// tint, no shell paint, no chrome mask); `visor: false` skips the neon eyes (Teal, Draugr and Fixer have their own faces).
+// tint, no shell paint, no chrome mask); `visor: false` skips the neon eyes (Teal, Draugr, Fixer and Rivet have their own faces).
 export const SKINS = {
   teal: {
     url: './models/TealFighter.glb',
@@ -127,6 +127,12 @@ export const SKINS = {
   fixer: {
     url: './models/FixerFighter.glb',
     source: 'Fixer Robot by Lagst (Sketchfab Standard); animations from Mixamo',
+    paint: false,
+    visor: false,
+  },
+  rivet: {
+    url: './models/RivetFighter.glb',
+    source: 'Robot by Lagst (Sketchfab Standard), named Rivet in game; animations from Mixamo',
     paint: false,
     visor: false,
   },
@@ -297,6 +303,9 @@ export const FIGHTER_PROFILES = {
   fixer: { id: 'fixer', name: 'Fixer', blurb: 'A stocky repair frame with oversized tool arms. Shrugs off hits and resets fast, but has to walk in close to land.',
     strengths: ['Heavy Armor', 'Quick Recovery'], weaknesses: ['Short Reach', 'Slow Feet'],
     stats: { speed: 4, power: 6, armor: 8, reach: 4, recovery: 8, toughness: 6 } },
+  rivet: { id: 'rivet', name: 'Rivet', blurb: 'A wide-shouldered loader frame. Long arms and a crushing swing, but it takes a long time to reset after one.',
+    strengths: ['Huge Power', 'Long Reach'], weaknesses: ['Slow Recovery'],
+    stats: { speed: 5, power: 9, armor: 7, reach: 7, recovery: 3, toughness: 5 } },
   // Kept as aliases so older configs that name these ids still resolve.
   striker: null,
   bruiser: null,

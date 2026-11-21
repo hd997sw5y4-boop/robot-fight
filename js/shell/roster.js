@@ -18,7 +18,7 @@
 
   /* Six CPU opponents, easiest first. `prof` feeds the game's own AI knobs (think window,
      reaction-block chance, punch/kick/special/block mix) via api.js fighter config. */
-  // Ten fighters. `skin` names a js/config.js SKINS body (null = the standard robot); a
+  // Eleven fighters. `skin` names a js/config.js SKINS body (null = the standard robot); a
   // skinned fighter keeps its own textures, so its primary / accent only colour the HUD. `profile` is a js/config.js FIGHTER_PROFILES id and
   // actually drives damage, speed, armor, reach, and recovery in a fight.
   S.ROSTER = [
@@ -54,6 +54,10 @@
       skin: null, primary: '#ff7a2f', accent: '#1b1e26',
       blurb: 'Never backs up. Throws hands until something breaks.',
       prof: { think: [0.16, 0.2], react: 0.2, punch: 0.62, kick: 0.26, special: 0.26, block: 0.04 } },
+    { id: 'rivet', name: 'Rivet', title: 'The Wrecker', style: 'Slugger', profile: 'rivet',
+      skin: 'rivet', primary: '#d9a441', accent: '#1b1e26',
+      blurb: 'Long arms, a crushing swing, and a slow reset. Make it miss.',
+      prof: { think: [0.2, 0.26], react: 0.36, punch: 0.52, kick: 0.16, special: 0.24, block: 0.16 } },
     { id: 'mirrorjack', name: 'Mirrorjack', title: 'The Counter', style: 'Counter', profile: 'mirrorjack',
       skin: null, primary: '#dde8f5', accent: '#8b5cf6',
       blurb: 'Waits for your swing, blocks it, and answers instantly.',
