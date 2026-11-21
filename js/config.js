@@ -116,11 +116,17 @@ export const MODEL = {
 // Alternate bodies. Each GLB holds only a mesh rebound onto RobotFighter's exact Mixamo
 // skeleton (same 65 bone names and rest rotations), so it plays the robot's clips, joint
 // limits, footwork and damage as is. `paint: false` keeps the model's own textures (no team
-// tint, no shell paint, no chrome mask); `visor: false` skips the neon eyes (Teal and Draugr have their own faces).
+// tint, no shell paint, no chrome mask); `visor: false` skips the neon eyes (Teal, Draugr and Fixer have their own faces).
 export const SKINS = {
   teal: {
     url: './models/TealFighter.glb',
     source: 'Teal by Lagst (Sketchfab Free Standard); animations from Mixamo',
+    paint: false,
+    visor: false,
+  },
+  fixer: {
+    url: './models/FixerFighter.glb',
+    source: 'Fixer Robot by Lagst (Sketchfab Standard); animations from Mixamo',
     paint: false,
     visor: false,
   },
@@ -288,6 +294,9 @@ export const FIGHTER_PROFILES = {
   draugr: { id: 'draugr', name: 'Draugr', blurb: 'A tall labor frame that keeps walking forward. Heavy hands and parts that refuse to break, but slow to reset after a swing.',
     strengths: ['Heavy Hands', 'Tough Parts'], weaknesses: ['Slow Recovery'],
     stats: { speed: 5, power: 7, armor: 6, reach: 6, recovery: 4, toughness: 8 } },
+  fixer: { id: 'fixer', name: 'Fixer', blurb: 'A stocky repair frame with oversized tool arms. Shrugs off hits and resets fast, but has to walk in close to land.',
+    strengths: ['Heavy Armor', 'Quick Recovery'], weaknesses: ['Short Reach', 'Slow Feet'],
+    stats: { speed: 4, power: 6, armor: 8, reach: 4, recovery: 8, toughness: 6 } },
   // Kept as aliases so older configs that name these ids still resolve.
   striker: null,
   bruiser: null,

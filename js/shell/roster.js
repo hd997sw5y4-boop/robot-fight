@@ -18,7 +18,7 @@
 
   /* Six CPU opponents, easiest first. `prof` feeds the game's own AI knobs (think window,
      reaction-block chance, punch/kick/special/block mix) via api.js fighter config. */
-  // Nine fighters. `skin` names a js/config.js SKINS body (null = the standard robot); a
+  // Ten fighters. `skin` names a js/config.js SKINS body (null = the standard robot); a
   // skinned fighter keeps its own textures, so its primary / accent only colour the HUD. `profile` is a js/config.js FIGHTER_PROFILES id and
   // actually drives damage, speed, armor, reach, and recovery in a fight.
   S.ROSTER = [
@@ -38,6 +38,10 @@
       skin: null, primary: '#2f74ff', accent: '#dfe6ff',
       blurb: 'Darts in on a long reach, pokes, and is gone before you can plant a heavy shot.',
       prof: { think: [0.22, 0.3], react: 0.28, punch: 0.5, kick: 0.22, special: 0.16, block: 0.1 } },
+    { id: 'fixer', name: 'Fixer', title: 'The Mechanic', style: 'Guard', profile: 'fixer',
+      skin: 'fixer', primary: '#b33a3a', accent: '#f2c230',
+      blurb: 'Stocky, armored, and quick to reset. Has to walk in close to land.',
+      prof: { think: [0.28, 0.36], react: 0.4, punch: 0.4, kick: 0.14, special: 0.14, block: 0.26 } },
     { id: 'bulwark', name: 'Bulwark-9', title: 'The Wall', style: 'Tank', profile: 'bulwark',
       skin: null, primary: '#5d6b4a', accent: '#b08a6a',
       blurb: 'Walks forward behind a raised guard and hits heavy.',
