@@ -15,7 +15,7 @@
     if (typeof saved === 'string' && S.fighterOf && S.fighterOf(saved)) return saved;
     if (saved === 'random') return 'random';
     if (saved && typeof saved === 'object') {
-      const map = { cobalt: 'aeropike', crimson: 'voltfang', graphite: 'bulwark', mint: 'hexwren', violet: 'mirrorjack', ember: 'voltfang', arctic: 'sprocket', rose: 'overseer' };
+      const map = { cobalt: 'blix', crimson: 'fixer', graphite: 'draugr', mint: 'teal', violet: 'ghoul', ember: 'ginger', arctic: 'sprocket', rose: 'rivet' };
       if (saved.preset && map[saved.preset] && S.fighterOf(map[saved.preset])) return map[saved.preset];
     }
     return fallback;
@@ -23,12 +23,13 @@
   const sel = {
     p1: Object.assign(fromPreset('cobalt'), S.load('p1', {})),
     p2: Object.assign(fromPreset('crimson'), S.load('p2', {})),
-    p1Id: asFighterId(S.load('p1Id', null) || S.load('p1', {}), 'aeropike'),
+    p1Id: asFighterId(S.load('p1Id', null) || S.load('p1', {}), 'sprocket'),
     p2Id: asFighterId(S.load('p2Id', null), 'sprocket'),
     opp: S.load('opp', 'sprocket'),
     dummyBlock: !!S.load('dummyBlock', false),
   };
   if (sel.opp && sel.opp !== 'random' && !(S.fighterOf && S.fighterOf(sel.opp))) sel.opp = 'sprocket';
+  if (!sel.p1Id || (sel.p1Id !== 'random' && !(S.fighterOf && S.fighterOf(sel.p1Id)))) sel.p1Id = 'sprocket';
   if (!sel.p2Id || (sel.p2Id !== 'random' && !(S.fighterOf && S.fighterOf(sel.p2Id)))) sel.p2Id = (sel.opp && sel.opp !== 'random') ? sel.opp : 'sprocket';
   function syncSelPaint() {
     const a = S.fighterOf && S.fighterOf(sel.p1Id);
@@ -143,7 +144,7 @@ const PAD_SVG = `<svg viewBox="0 0 760 390" class="ps-svg" role="img" aria-label
   screen('title', `
     <div class="rfs-title">
       ${brand}
-      <p class="rfs-tag">Fourteen brawlers. One octagon. Parts fly.</p>
+      <p class="rfs-tag">Eight brawlers. One octagon. Parts fly.</p>
       <button type="button" class="rfs-f rfs-press" data-act="start">Press <kbd>Enter</kbd> · <kbd>A</kbd> · or click to start</button>
     </div>
     <div class="rfs-foot">© Window Workshop Games</div>`, 'rfs-center');
@@ -154,7 +155,7 @@ const PAD_SVG = `<svg viewBox="0 0 760 390" class="ps-svg" role="img" aria-label
         ${brand}
         <nav class="rfs-menu" aria-label="Main menu">
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="fight"><b>Fight</b><small>Quick match vs a CPU robot</small></button>
-          <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="arcade"><b>Arcade</b><small>Climb the fourteen-fighter ladder</small></button>
+          <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="arcade"><b>Arcade</b><small>Climb the eight-fighter ladder</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="versus"><b>Versus</b><small>Two players, one keyboard or two gamepads</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="training"><b>Training</b><small>Practice on a dummy, no timer</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="watch"><b>Bot vs Bot</b><small>Sit back and watch two CPUs fight</small></button>
@@ -359,7 +360,7 @@ const PAD_SVG = `<svg viewBox="0 0 760 390" class="ps-svg" role="img" aria-label
   }
   const MODE_INFO = {
     fight: ['Fight', 'Quick match · best of 3'],
-    arcade: ['Arcade', 'Fourteen opponents · rising difficulty'],
+    arcade: ['Arcade', 'Eight opponents · rising difficulty'],
     versus: ['Versus', 'Local two-player · best of 3'],
     training: ['Training', 'Dummy · no timer'],
     watch: ['Bot vs Bot', 'Watch two CPUs · best of 3'],
@@ -381,7 +382,7 @@ const PAD_SVG = `<svg viewBox="0 0 760 390" class="ps-svg" role="img" aria-label
     else if (mode === 'fight' || mode === 'watch') {
       right = `<section class="rfs-card rfs-panel rfs-opps"><header><small>Opponent</small><b>Choose a CPU</b></header>
         <div class="rfs-opplist">
-          <button type="button" class="rfs-f rfs-opp" data-act="opp" data-opp="random"><i style="--a:#9aabff;--b:#4a505c"></i><span><b>Random</b><small>Any of the fourteen</small></span></button>
+          <button type="button" class="rfs-f rfs-opp" data-act="opp" data-opp="random"><i style="--a:#9aabff;--b:#4a505c"></i><span><b>Random</b><small>Any of the eight</small></span></button>
           ${S.ROSTER.map((o) => `<button type="button" class="rfs-f rfs-opp" data-act="opp" data-opp="${o.id}"><i style="--a:${o.primary};--b:${o.accent}"></i><span><b>${esc(o.name)}</b><small>${esc(o.style)} · ${esc(o.title)}</small></span></button>`).join('')}
         </div>
         <p class="rfs-note">CPU difficulty: <b class="rfs-cpu"></b> (change in Settings)</p></section>`;
@@ -390,7 +391,7 @@ const PAD_SVG = `<svg viewBox="0 0 760 390" class="ps-svg" role="img" aria-label
         <div class="rfs-seg"><button type="button" class="rfs-f" data-act="dummy" data-v="idle">Stand idle</button><button type="button" class="rfs-f" data-act="dummy" data-v="block">Hold block</button></div>
         <p class="rfs-note">No timer. Press <kbd>R</kbd> to reset damage and health, <kbd>B</kbd> to toggle blocking, <kbd>Esc</kbd> for the menu.</p></section>`;
     } else {
-      right = `<section class="rfs-card rfs-panel"><header><small>Arcade ladder</small><b>Fourteen opponents</b></header>
+      right = `<section class="rfs-card rfs-panel"><header><small>Arcade ladder</small><b>Eight opponents</b></header>
         <ol class="rfs-mini">${S.ROSTER.map((o) => `<li><i style="--a:${o.primary};--b:${o.accent}"></i>${esc(o.name)} <small>${esc(o.style)}</small></li>`).join('')}</ol>
         <p class="rfs-note">Lose a fight and you can continue from the same rung.</p></section>`;
     }
@@ -647,7 +648,7 @@ const PAD_SVG = `<svg viewBox="0 0 760 390" class="ps-svg" role="img" aria-label
     const cfg = { p1: p1Cfg(false), p2: { name: 'Ladder', paint: { primary: '#1b1e26', accent: '#e23b3b' } } };
     S.$('.rfs-ending', endingEl).innerHTML = `
       <header class="rfs-selhead"><small>Arcade complete</small><b>Octagon Champion</b></header>
-      <p class="rfs-sub">Overseer Prime is scrap. All fourteen fighters fell to your ${esc(paintName(sel.p1))} brawler${a.continues ? ` after ${a.continues} continue${a.continues > 1 ? 's' : ''}` : ' without a single continue'}.</p>
+      <p class="rfs-sub">Rivet is scrap. All eight fighters fell to your ${esc(paintName(sel.p1))} brawler${a.continues ? ` after ${a.continues} continue${a.continues > 1 ? 's' : ''}` : ' without a single continue'}.</p>
       ${statsTable(a.total, cfg, null)}
       <p class="rfs-note">Thanks for playing — Window Workshop Games</p>
       <div class="rfs-row"><button type="button" class="rfs-f rfs-btn rfs-small" data-act="credits">Credits</button><button type="button" class="rfs-f rfs-btn rfs-go" data-act="menu" data-autofocus>Main menu</button></div>`;

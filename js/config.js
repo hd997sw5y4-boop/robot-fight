@@ -277,6 +277,7 @@ export const GFX_PRESETS = {
   medium: { pixelCap: 1.5, shadows: true, shadowSize: 1536, exposure: 1.14, bloom: false, mirror: 512, minScale: 0.8 },
   high: { pixelCap: 2, shadows: true, shadowSize: 2048, exposure: 1.18, bloom: false, mirror: 1024, minScale: 1 },
   // phones/tablets (js/mobile.js): applied on top of low/high: pixel ratio and shadow caps.
+  // iOS additionally caps pixel ratio at 1.5 and forces shadows off (see gfxPreset in game.js).
   mobile: { pixelCap: 1.25, shadowSize: 1024 }, // phones stay capped; High sharpness is a desktop budget
 };
 
@@ -295,27 +296,9 @@ export const GFX_PRESETS = {
 export const STAT_KEYS = ['speed', 'power', 'armor', 'reach', 'recovery', 'toughness'];
 export const STAT_BUDGET = 36;
 export const FIGHTER_PROFILES = {
-  aeropike: { id: 'aeropike', name: 'Aero Pike', blurb: 'A long-reach striker that darts in, pokes, and is gone before you can plant a heavy shot.',
-    strengths: ['High Speed', 'Long Reach'], weaknesses: ['Thin Armor'],
-    stats: { speed: 8, power: 5, armor: 4, reach: 9, recovery: 7, toughness: 3 } },
   sprocket: { id: 'sprocket', name: 'Sprocket', blurb: 'Fresh off the line. Even stats, no sharp edge, and nothing obvious to exploit.',
     strengths: ['No weak side'], weaknesses: ['No sharp edge'],
     stats: { speed: 6, power: 6, armor: 6, reach: 6, recovery: 6, toughness: 6 } },
-  hexwren: { id: 'hexwren', name: 'Hex Wren', blurb: 'Circles, slips, and pokes when you overreach. Hard to pin, light in a pocket.',
-    strengths: ['High Speed', 'Quick Recovery'], weaknesses: ['Light Hitter', 'Thin Armor'],
-    stats: { speed: 9, power: 4, armor: 4, reach: 6, recovery: 8, toughness: 5 } },
-  bulwark: { id: 'bulwark', name: 'Bulwark-9', blurb: 'Walks forward behind a raised guard and hits heavy. Slow to start and to recover.',
-    strengths: ['Heavy Armor', 'Tough Parts'], weaknesses: ['Slow', 'Slow Recovery'],
-    stats: { speed: 3, power: 6, armor: 9, reach: 5, recovery: 4, toughness: 9 } },
-  voltfang: { id: 'voltfang', name: 'Volt Fang', blurb: 'Never backs up. Throws hands until something breaks, and the plating is thin.',
-    strengths: ['High Power', 'High Speed'], weaknesses: ['Thin Armor', 'Short Reach'],
-    stats: { speed: 8, power: 9, armor: 4, reach: 5, recovery: 5, toughness: 5 } },
-  mirrorjack: { id: 'mirrorjack', name: 'Mirrorjack', blurb: 'Waits for your swing, blocks it, and answers instantly. Heavy legs, short steps.',
-    strengths: ['Quick Recovery', 'Tough Armor'], weaknesses: ['Slow Feet', 'Short Reach'],
-    stats: { speed: 5, power: 6, armor: 7, reach: 5, recovery: 9, toughness: 4 } },
-  overseer: { id: 'overseer', name: 'Overseer Prime', blurb: 'Reads everything and hits hard from range. Slow to recover once the exchange starts.',
-    strengths: ['High Power', 'Long Reach'], weaknesses: ['Slow Recovery'],
-    stats: { speed: 5, power: 8, armor: 6, reach: 8, recovery: 4, toughness: 5 } },
   teal: { id: 'teal', name: 'Teal', blurb: 'A light, long-legged scrapper with a smile on its screen. Quick hands, quick feet, thin plating.',
     strengths: ['Long Legs', 'Quick Recovery'], weaknesses: ['Thin Armor'],
     stats: { speed: 7, power: 6, armor: 5, reach: 7, recovery: 7, toughness: 4 } },
@@ -337,13 +320,15 @@ export const FIGHTER_PROFILES = {
   ghoul: { id: 'ghoul', name: 'Ghoul', blurb: 'A lurching parasite host. Slow on its feet, but it soaks up punishment and hits like a falling wall.',
     strengths: ['Iron Chin', 'Heavy Hands'], weaknesses: ['Slow Feet'],
     stats: { speed: 3, power: 8, armor: 6, reach: 6, recovery: 5, toughness: 9 } },
-  // Kept as aliases so older configs that name these ids still resolve.
-  striker: null,
-  bruiser: null,
+  // Aliases so older configs that name these ids still resolve (stats only; not on the roster).
+  striker: { id: 'striker', name: 'Striker', blurb: 'A long-reach striker that darts in, pokes, and is gone before you can plant a heavy shot.',
+    strengths: ['High Speed', 'Long Reach'], weaknesses: ['Thin Armor'],
+    stats: { speed: 8, power: 5, armor: 4, reach: 9, recovery: 7, toughness: 3 } },
+  bruiser: { id: 'bruiser', name: 'Bruiser', blurb: 'Walks forward behind a raised guard and hits heavy. Slow to start and to recover.',
+    strengths: ['Heavy Armor', 'Tough Parts'], weaknesses: ['Slow', 'Slow Recovery'],
+    stats: { speed: 3, power: 6, armor: 9, reach: 5, recovery: 4, toughness: 9 } },
 };
-FIGHTER_PROFILES.striker = { ...FIGHTER_PROFILES.aeropike, id: 'striker', name: 'Striker' };
-FIGHTER_PROFILES.bruiser = { ...FIGHTER_PROFILES.bulwark, id: 'bruiser', name: 'Bruiser' };
-export const SIDE_PROFILE = { p1: 'aeropike', p2: 'sprocket' };
+export const SIDE_PROFILE = { p1: 'sprocket', p2: 'sprocket' };
 export const STAT_BAR_KEYS = ['power', 'speed', 'armor', 'reach', 'recovery'];
 export const statMul = (rating) => 1 + (rating - 6) * 0.05;
 

@@ -16,11 +16,14 @@
   S.SWATCHES = ['#2f74ff', '#22c3e6', '#3fd6a6', '#7bd04a', '#8b5cf6', '#ff6fa8',
     '#e23b3b', '#ff7a2f', '#b08a6a', '#dde8f5', '#4a505c', '#1b1e26'];
 
-  /* Six CPU opponents, easiest first. `prof` feeds the game's own AI knobs (think window,
+  /* Eight CPU opponents, easiest first. `prof` feeds the game's own AI knobs (think window,
      reaction-block chance, punch/kick/special/block mix) via api.js fighter config. */
-  // Fourteen fighters. `skin` names a js/config.js SKINS body (null = the standard robot); a
-  // skinned fighter keeps its own textures, so its primary / accent only colour the HUD. `profile` is a js/config.js FIGHTER_PROFILES id and
+  // Eight fighters, one of each distinct body. `skin` names a js/config.js SKINS body
+  // (null = the standard robot); a skinned fighter keeps its own textures, so its primary /
+  // accent only colour the HUD. `profile` is a js/config.js FIGHTER_PROFILES id and
   // actually drives damage, speed, armor, reach, and recovery in a fight.
+  // Color-swap copies of the standard robot (Hex Wren, Aero Pike, Bulwark-9, Volt Fang,
+  // Mirrorjack, Overseer Prime) were removed — they shared RobotFighter.glb.
   S.ROSTER = [
     { id: 'sprocket', name: 'Sprocket', title: 'The Rookie', style: 'Balanced', profile: 'sprocket',
       skin: null, primary: '#22c3e6', accent: '#dde8f5',
@@ -34,14 +37,6 @@
       skin: 'ginger', primary: '#e8782e', accent: '#2fae5b',
       blurb: 'Small, bouncy, and always moving. Light hands, but it gets right back up.',
       prof: { think: [0.4, 0.52], react: 0.26, punch: 0.36, kick: 0.22, special: 0.08, block: 0.1 } },
-    { id: 'hexwren', name: 'Hex Wren', title: 'The Ghost Step', style: 'Evasive', profile: 'hexwren',
-      skin: null, primary: '#3fd6a6', accent: '#3a2340',
-      blurb: 'Circles, slips, and pokes when you overreach.',
-      prof: { think: [0.34, 0.45], react: 0.32, punch: 0.34, kick: 0.2, special: 0.1, block: 0.1 } },
-    { id: 'aeropike', name: 'Aero Pike', title: 'The Long Point', style: 'Striker', profile: 'aeropike',
-      skin: null, primary: '#2f74ff', accent: '#dfe6ff',
-      blurb: 'Darts in on a long reach, pokes, and is gone before you can plant a heavy shot.',
-      prof: { think: [0.22, 0.3], react: 0.28, punch: 0.5, kick: 0.22, special: 0.16, block: 0.1 } },
     { id: 'blix', name: 'Blix', title: 'The Goblin', style: 'Trickster', profile: 'blix',
       skin: 'blix', primary: '#3aa7c9', accent: '#8a5a32',
       blurb: 'Long arms and quick, sneaky hands. Hit it clean and it wobbles.',
@@ -50,10 +45,6 @@
       skin: 'fixer', primary: '#b33a3a', accent: '#f2c230',
       blurb: 'Stocky, armored, and quick to reset. Has to walk in close to land.',
       prof: { think: [0.28, 0.36], react: 0.4, punch: 0.4, kick: 0.14, special: 0.14, block: 0.26 } },
-    { id: 'bulwark', name: 'Bulwark-9', title: 'The Wall', style: 'Tank', profile: 'bulwark',
-      skin: null, primary: '#5d6b4a', accent: '#b08a6a',
-      blurb: 'Walks forward behind a raised guard and hits heavy.',
-      prof: { think: [0.3, 0.38], react: 0.5, punch: 0.28, kick: 0.32, special: 0.22, block: 0.32 } },
     { id: 'ghoul', name: 'Ghoul', title: 'The Parasite', style: 'Tank', profile: 'ghoul',
       skin: 'ghoul', primary: '#b85c5c', accent: '#3b3f45',
       blurb: 'Slow, relentless, and hard to drop. Celebrates with a pounce.',
@@ -62,22 +53,10 @@
       skin: 'draugr', primary: '#b08a6a', accent: '#e23b3b',
       blurb: 'Tall, heavy-handed, and hard to break. Keeps coming, slow to reset.',
       prof: { think: [0.26, 0.34], react: 0.3, punch: 0.46, kick: 0.2, special: 0.18, block: 0.18 } },
-    { id: 'voltfang', name: 'Volt Fang', title: 'The Rusher', style: 'Rusher', profile: 'voltfang',
-      skin: null, primary: '#ff7a2f', accent: '#1b1e26',
-      blurb: 'Never backs up. Throws hands until something breaks.',
-      prof: { think: [0.16, 0.2], react: 0.2, punch: 0.62, kick: 0.26, special: 0.26, block: 0.04 } },
     { id: 'rivet', name: 'Rivet', title: 'The Wrecker', style: 'Slugger', profile: 'rivet',
       skin: 'rivet', primary: '#d9a441', accent: '#1b1e26',
       blurb: 'Long arms, a crushing swing, and a slow reset. Make it miss.',
       prof: { think: [0.2, 0.26], react: 0.36, punch: 0.52, kick: 0.16, special: 0.24, block: 0.16 } },
-    { id: 'mirrorjack', name: 'Mirrorjack', title: 'The Counter', style: 'Counter', profile: 'mirrorjack',
-      skin: null, primary: '#dde8f5', accent: '#8b5cf6',
-      blurb: 'Waits for your swing, blocks it, and answers instantly.',
-      prof: { think: [0.13, 0.16], react: 0.74, punch: 0.36, kick: 0.2, special: 0.3, block: 0.2 } },
-    { id: 'overseer', name: 'Overseer Prime', title: 'Final Boss', style: 'Boss', profile: 'overseer',
-      skin: null, primary: '#1b1e26', accent: '#e23b3b',
-      blurb: 'Reads everything. Goes berserk when its armor cracks.',
-      prof: { think: [0.08, 0.12], react: 0.7, punch: 0.56, kick: 0.3, special: 0.45, block: 0.2 } },
   ];
   S.opponent = (id) => S.ROSTER.find((o) => o.id === id) || S.ROSTER[0];
   S.fighterOf = (id) => (id === 'random' ? null : (S.ROSTER.find((o) => o.id === id) || null));

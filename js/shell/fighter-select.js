@@ -1,5 +1,5 @@
 /* Robot Fight shell: fighter select over the real arena.
-   Both chosen robots stand on glowing pads in the ring. Side panels list the fourteen
+   Both chosen robots stand on glowing pads in the ring. Side panels list the eight
    fighters (data-driven paint / skin body / stats). Portraits are snapshots
    rendered once offscreen and cached — no per-card live 3D. */
 import { getFighterStats, STAT_BAR_KEYS, FIGHTER_PROFILES } from '../config.js';
@@ -220,7 +220,7 @@ function sidePanel(side) {
 function vsHalf(id) {
   if (id === 'random') {
     return `<div class="fs-vsbox">
-      <p class="fs-trait up"><b>Strengths</b><span>Any of the fourteen</span></p>
+      <p class="fs-trait up"><b>Strengths</b><span>Any of the eight</span></p>
       <p class="fs-trait down"><b>Weaknesses</b><span>A surprise pick</span></p>
     </div>`;
   }
@@ -358,8 +358,8 @@ function ensurePortraits() {
   const list = roster().map((o) => ({ id: o.id, name: o.name, primary: o.primary, accent: o.accent, profile: o.profile || o.id, skin: o.skin }));
   try {
     const map = S.api.renderRosterPortraits(list) || {};
-    if (map.__pending) { st.painted = false; delete map.__pending; } // a body is still loading: redo on rf-skin-ready
-    st.portraits = map;
+    if (map.__pending) { st.painted = false; delete map.__pending; }
+    st.portraits = Object.assign(st.portraits || {}, map);
     paint();
   } catch (err) {
     console.warn('[fighter-select] portraits', err);
@@ -406,5 +406,5 @@ if (S) {
     baseNav(act);
   };
   S.on('pads', () => { if (st.active) paint(); });
-  window.addEventListener('rf-skin-ready', () => { if (st.active && !st.painted) ensurePortraits(); });
+  window.addEventListener('rf-skin-ready', () => { if (st.active) { st.painted = false; ensurePortraits(); } });
 }

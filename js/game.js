@@ -7,7 +7,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { IS_MOBILE } from './mobile.js';
+import { IS_MOBILE, IS_IOS } from './mobile.js';
 import { SIZE, CAM_SIZE, MODEL, SKINS, ARENA, COMBAT, DAMAGE, GFX_PRESETS, LOOP_CLIPS, UNUSED_CLIPS, getFighterStats, CAGE_PAD, SPECIAL } from './config.js';
 import { CLIP_SPEEDS } from './clip-speeds.js';
 import { applyChrome, setChromeLow } from './chrome.js';
@@ -97,6 +97,7 @@ shellCall('onReady', {
   hideSelectPreview,
   previewSelectFighter,
   renderRosterPortraits,
+  memSnapshot() { return typeof window.__rfMem === 'function' ? window.__rfMem() : null; },
 });
 
 // Phones start on Low (no shadows, no floor mirror, light crowd, pixel ratio <= 1.5); the
@@ -107,9 +108,14 @@ setChromeLow(gfxKey === "low");
 setWiresLow(gfxKey === "low");
 setDebrisLow(gfxKey === "low");
 
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+const renderer = new THREE.WebGLRenderer({
+  canvas,
+  antialias: !IS_IOS,
+  powerPreference: IS_IOS ? 'low-power' : 'high-performance',
+});
 // WebGL context loss (iOS drops it under memory pressure or when the tab is backgrounded):
-// keep the page alive, tell the viewer, and reload cleanly once the GPU is back or on tap.
+// keep the page alive and let the viewer tap to reload. Do not auto-reload on restore —
+// that is a common iOS loop when the tab is already short on memory.
 canvas.addEventListener('webglcontextlost', (e) => {
   e.preventDefault();
   if (document.getElementById('rfGlLost')) return;
@@ -119,7 +125,6 @@ canvas.addEventListener('webglcontextlost', (e) => {
   d.addEventListener('click', () => location.reload());
   document.body.appendChild(d);
 }, false);
-canvas.addEventListener('webglcontextrestored', () => location.reload(), false);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.shadowMap.enabled = true;
@@ -156,9 +161,19 @@ let useBloom = false;
 // Auto resolution: lower the render scale when frames run slow, raise it back when there is headroom.
 const dyn = { scale: 1, acc: 0, n: 0, cooldown: 0 };
 function gfxPreset() {
-  return IS_MOBILE
-    ? { ...GFX_PRESETS[gfxKey], pixelCap: gfxKey === 'low' ? 1 : (GFX_PRESETS.mobile.pixelCap || 1.25), shadowSize: Math.min(GFX_PRESETS[gfxKey].shadowSize, GFX_PRESETS.mobile.shadowSize) }
-    : GFX_PRESETS[gfxKey];
+  const p = { ...GFX_PRESETS[gfxKey] };
+  if (IS_IOS) {
+    p.pixelCap = Math.min(p.pixelCap || 2, gfxKey === 'low' ? 1 : 1.5);
+    p.shadows = false;
+    p.shadowSize = 256;
+    p.mirror = 0;
+    return p;
+  }
+  if (IS_MOBILE) {
+    p.pixelCap = gfxKey === 'low' ? 1 : (GFX_PRESETS.mobile.pixelCap || 1.25);
+    p.shadowSize = Math.min(p.shadowSize, GFX_PRESETS.mobile.shadowSize);
+  }
+  return p;
 }
 function basePixelRatio() {
   return Math.min(window.devicePixelRatio || 1, gfxPreset().pixelCap);
@@ -346,7 +361,7 @@ function scheduleShadows() {
 }
 function applyGfx(key) {
   gfxKey = normGfx(key);
-  if (floorMirror) { floorMirror.visible = gfxKey !== 'low'; setMirrorRes(floorMirror); }
+  if (floorMirror) { floorMirror.visible = gfxKey !== 'low' && !IS_IOS; setMirrorRes(floorMirror); }
   setChromeLow(gfxKey === 'low');
   setWiresLow(gfxKey === 'low');
   setDebrisLow(gfxKey === 'low');
@@ -574,10 +589,161 @@ const skinGltf = {};
 const skinLoads = {};
 const fighterCache = { p1: {}, p2: {} };
 const pendingSkin = {};
+function textureMaxDim() {
+  if (IS_IOS) return 512;
+  if (IS_MOBILE) return 1024;
+  return 0;
+}
+function downscaleTexture(tex, maxDim) {
+  if (!tex || !tex.image || !maxDim) return;
+  const img = tex.image;
+  const w = img.width || 0, h = img.height || 0;
+  if (!w || !h || Math.max(w, h) <= maxDim) return;
+  const scale = maxDim / Math.max(w, h);
+  const nw = Math.max(1, Math.round(w * scale));
+  const nh = Math.max(1, Math.round(h * scale));
+  const c = document.createElement('canvas');
+  c.width = nw; c.height = nh;
+  try { c.getContext('2d').drawImage(img, 0, 0, nw, nh); } catch (_) { return; }
+  tex.image = c;
+  if (tex.source) tex.source.data = c;
+  tex.needsUpdate = true;
+}
+function downscaleGltfTextures(root, maxDim) {
+  if (!root || !maxDim) return;
+  const seen = new Set();
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    for (const mat of [].concat(o.material || [])) {
+      if (!mat) continue;
+      for (const key of Object.keys(mat)) {
+        const v = mat[key];
+        if (v && v.isTexture && !seen.has(v)) { seen.add(v); downscaleTexture(v, maxDim); }
+      }
+    }
+  });
+}
+function usedSkinIds() {
+  const used = new Set();
+  if (p1 && p1.skin) used.add(p1.skin);
+  if (p2 && p2.skin) used.add(p2.skin);
+  for (const side of ['p1', 'p2']) {
+    const cfg = pendingSkin[side];
+    if (cfg && cfg.skin) used.add(cfg.skin);
+  }
+  return used;
+}
+function disposeFighterInstance(f) {
+  if (!f || f === p1 || f === p2) return;
+  if (f.brain && f.brain.kind === 'api' && typeof f.brain.freeze === 'function') f.brain.freeze();
+  f.brain = null;
+  if (f.mixer) { try { f.mixer.stopAllAction(); } catch (_) {} }
+  if (f.phys) detachFighter(f);
+  if (f.root && f.root.parent) f.root.parent.remove(f.root);
+  if (f.root) f.root.traverse((o) => {
+    if (o.geometry && o.geometry.__rfOwn) o.geometry.dispose();
+    for (const mat of [].concat(o.material || [])) if (mat) mat.dispose();
+  });
+}
+function disposeSkinSource(id) {
+  const g = skinGltf[id];
+  if (!g) return;
+  if (g.scene) {
+    g.scene.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      for (const mat of [].concat(o.material || [])) {
+        if (!mat) continue;
+        for (const v of Object.values(mat)) if (v && v.isTexture) v.dispose();
+        mat.dispose();
+      }
+    });
+  }
+  delete skinGltf[id];
+  delete skinLoads[id];
+}
+function disposeUnusedSkins() {
+  const used = usedSkinIds();
+  for (const side of ['p1', 'p2']) {
+    const active = side === 'p1' ? p1 : p2;
+    const activeKey = active ? (active.skin || 'robot') : null;
+    for (const key of Object.keys(fighterCache[side])) {
+      if (key === activeKey) continue;
+      disposeFighterInstance(fighterCache[side][key]);
+      delete fighterCache[side][key];
+    }
+  }
+  for (const id of Object.keys(skinGltf)) if (!used.has(id)) disposeSkinSource(id);
+}
+const memPeak = { jsMB: 0, texMB: 0, texCount: 0, geometries: 0, skins: 0, at: 0 };
+function memSnapshot() {
+  const seen = new Set();
+  let texBytes = 0;
+  const visit = (root) => {
+    if (!root) return;
+    root.traverse((o) => {
+      if (!o.isMesh) return;
+      for (const mat of [].concat(o.material || [])) {
+        if (!mat) continue;
+        for (const v of Object.values(mat)) {
+          if (!v || !v.isTexture || seen.has(v)) continue;
+          seen.add(v);
+          const img = v.image;
+          const w = (img && (img.width || img.videoWidth)) || 0;
+          const h = (img && (img.height || img.videoHeight)) || 0;
+          texBytes += w * h * 4 * (v.generateMipmaps ? 1.33 : 1);
+        }
+      }
+    });
+  };
+  visit(scene);
+  if (fighterGltf && fighterGltf.scene) visit(fighterGltf.scene);
+  for (const id of Object.keys(skinGltf)) if (skinGltf[id] && skinGltf[id].scene) visit(skinGltf[id].scene);
+  for (const side of ['p1', 'p2']) for (const key of Object.keys(fighterCache[side])) {
+    const f = fighterCache[side][key];
+    if (f && f.root && (!f.root.parent || f.root.parent !== scene)) visit(f.root);
+  }
+  const js = (typeof performance !== 'undefined' && performance.memory)
+    ? {
+      usedMB: +(performance.memory.usedJSHeapSize / 1048576).toFixed(1),
+      totalMB: +(performance.memory.totalJSHeapSize / 1048576).toFixed(1),
+      limitMB: +(performance.memory.jsHeapSizeLimit / 1048576).toFixed(1),
+    }
+    : null;
+  const snap = {
+    js,
+    renderer: renderer.info && renderer.info.memory ? { geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures } : null,
+    skinsLoaded: Object.keys(skinGltf),
+    cache: { p1: Object.keys(fighterCache.p1), p2: Object.keys(fighterCache.p2) },
+    texCount: seen.size,
+    texMB: +(texBytes / 1048576).toFixed(2),
+    pixelRatio: renderer.getPixelRatio(),
+    shadows: !!(renderer.shadowMap && renderer.shadowMap.enabled),
+    ios: !!IS_IOS,
+    mobile: !!IS_MOBILE,
+    peak: { ...memPeak },
+  };
+  if (js && js.usedMB > memPeak.jsMB) memPeak.jsMB = js.usedMB;
+  if (snap.texMB > memPeak.texMB) memPeak.texMB = snap.texMB;
+  if (snap.texCount > memPeak.texCount) memPeak.texCount = snap.texCount;
+  if (snap.renderer && snap.renderer.geometries > memPeak.geometries) memPeak.geometries = snap.renderer.geometries;
+  if (snap.skinsLoaded.length > memPeak.skins) memPeak.skins = snap.skinsLoaded.length;
+  memPeak.at = Date.now();
+  snap.peak = { ...memPeak };
+  return snap;
+}
+try { window.__rfMem = memSnapshot; } catch (_) {}
+
 function loadSkin(id) {
   if (!SKINS[id]) return Promise.resolve(null);
   if (!skinLoads[id]) {
     skinLoads[id] = new GLTFLoader().loadAsync(SKINS[id].url).then((g) => {
+      downscaleGltfTextures(g.scene, textureMaxDim());
+      // Keep only body-specific clip takes (Ghoul's Victory / Taunt). Shared robot clips
+      // are wired in fighterFor; carrying a second full Mixamo set bloated the heap.
+      if (g.animations && g.animations.length) {
+        const keep = new Set(['Victory', 'VictoryIdle', 'Taunt']);
+        g.animations = g.animations.filter((c) => keep.has(c.name));
+      }
       skinGltf[id] = g;
       window.dispatchEvent(new CustomEvent('rf-skin-ready', { detail: { id } }));
       for (const side of ['p1', 'p2']) {
@@ -636,6 +802,7 @@ function swapSkin(side, skinId, cfg) {
   if (hadPhys) attachFighter(nf);
   warmedFor = null;
   if (staged) prewarmShaders();
+  disposeUnusedSkins();
   return nf;
 }
 let arenaLoaded = false;
@@ -686,6 +853,7 @@ function unstageFighters() {
   match.phase = 'idle';
   match.over = false;
   match.camLock = false;
+  disposeUnusedSkins();
 }
 
 
@@ -824,6 +992,7 @@ function hideSelectPreview(opts) {
   previewMode = null;
   if (was && !opts.keepStaged) unstageFighters();
   else if (!opts.keepStaged) match.camLock = false;
+  disposeUnusedSkins();
 }
 
 function previewSelectFighter(side, cfg) {
@@ -866,7 +1035,8 @@ function renderRosterPortraits(list, size) {
     fightersStaged = false;
   }
   if (!p1 || !p1.root) return out;
-  for (const item of list) if (item && item.skin && SKINS[item.skin] && !skinGltf[item.skin]) { out.__pending = true; loadSkin(item.skin); }
+  // Do not fetch every body just for a roster thumbnail — that was loading all unique
+  // GLBs at once and is what ran iPhone Safari out of memory. Snapshot only bodies already in memory.
   const studio = new THREE.Scene();
   studio.background = new THREE.Color(0x0b0f18);
   studio.add(new THREE.HemisphereLight(0xc8d6ff, 0x1a1410, 1.15));
@@ -893,8 +1063,11 @@ function renderRosterPortraits(list, size) {
     for (const item of list) {
       if (!item || !item.id) continue;
       const skin = item.skin && SKINS[item.skin] ? item.skin : null;
-      if (skin && !skinGltf[skin]) continue; // still downloading: the shell asks again later
-      const src = skin ? fighterFor('p1', skin) : p1;
+      if (skin && !skinGltf[skin]) continue; // not loaded: leave the card without a photo
+      const src = skin
+        ? (fighterCache.p1[skin] || fighterCache.p2[skin] || (p1 && p1.skin === skin && p1) || (p2 && p2.skin === skin && p2) || null)
+        : (fighterCache.p1.robot || fighterCache.p2.robot || (p1 && !p1.skin && p1) || (p2 && !p2.skin && p2) || null);
+      if (!src) continue;
       const savedPos = src.root.position.clone();
       const savedRot = src.root.rotation.clone();
       const savedParent = src.root.parent;
@@ -982,7 +1155,7 @@ function tint(root, color, ownPaint) {
         m.envMapIntensity = 1.25;
         m.needsUpdate = true;
         for (const map of [m.map, m.normalMap, m.roughnessMap, m.metalnessMap, m.aoMap]) {
-          if (map) map.anisotropy = 16;
+          if (map) map.anisotropy = IS_IOS ? 1 : (IS_MOBILE ? 4 : 16);
         }
       }
       if (m && m.aoMap && o.geometry && o.geometry.attributes.uv && !o.geometry.attributes.uv2) {
@@ -1163,6 +1336,7 @@ function shareSkeleton(model) {
     }
     if (!ok || !X) continue;
     const g = m.geometry.clone(); // the GLB's geometry is shared with the source scene and the other robot
+    g.__rfOwn = true;
     const si = g.attributes.skinIndex;
     const out = new Uint16Array(si.count * 4);
     for (let i = 0; i < si.count; i++) {
@@ -6039,6 +6213,7 @@ function tick() {
   const renderMs = performance.now() - renderT0;
   const simMs = renderT0 - simT0;
   stepDynamicRes(wallDt);
+  if (!tick._memT || now - tick._memT > 1000) { tick._memT = now; try { memSnapshot(); } catch (_) {} }
   if (match.phase === 'fight' && p1 && p2) {
     if (!tick._visT || now - tick._visT > 200) {
       tick._visT = now;
@@ -6221,7 +6396,7 @@ function onLoad(gltf) {
   addFloorReflection(scene).then((m) => {
     floorMirror = m;
     if (floorMirror) {
-      floorMirror.visible = gfxKey !== 'low';
+      floorMirror.visible = gfxKey !== 'low' && !IS_IOS;
       setMirrorRes(floorMirror);
     }
   });
@@ -6243,7 +6418,8 @@ function onLoad(gltf) {
   });
   initArenaPhysics();
   fighterGltf = gltf;
-  setTimeout(() => { for (const id of Object.keys(SKINS)) loadSkin(id); }, 1500); // after first paint
+  downscaleGltfTextures(gltf.scene, textureMaxDim());
+  // Load only the two fighters in the current match / preview, not the whole roster.
   onPhysicsBounce((kind, impact, rec) => {
     const mass = rec && rec.mass != null ? rec.mass : 4;
     // Heavier parts hit harder and lower: loudness grows with impact speed and mass.
@@ -6289,6 +6465,7 @@ function onLoad(gltf) {
     hideSelectPreview,
     previewSelectFighter,
     renderRosterPortraits,
+    memSnapshot,
   });
   applyGfx(gfxKey);
   resize();
