@@ -8,7 +8,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { IS_MOBILE } from './mobile.js';
-import { SIZE, CAM_SIZE, MODEL, ARENA, COMBAT, DAMAGE, GFX_PRESETS, LOOP_CLIPS, UNUSED_CLIPS, getFighterStats, CAGE_PAD, SPECIAL } from './config.js';
+import { SIZE, CAM_SIZE, MODEL, SKINS, ARENA, COMBAT, DAMAGE, GFX_PRESETS, LOOP_CLIPS, UNUSED_CLIPS, getFighterStats, CAGE_PAD, SPECIAL } from './config.js';
 import { CLIP_SPEEDS } from './clip-speeds.js';
 import { applyChrome, setChromeLow } from './chrome.js';
 import { initJointLimits, applyJointLimits, fitJointLimits, hingeOf, hingeAngle, flexHinge } from './joints.js';
@@ -550,6 +550,72 @@ function settleAfterBell(f) {
 }
 
 let fighterGltf = null;
+// Alternate bodies (config SKINS): loaded once, then each side keeps one built fighter per
+// body so switching back and forth in fighter select does not rebuild anything.
+const skinGltf = {};
+const skinLoads = {};
+const fighterCache = { p1: {}, p2: {} };
+const pendingSkin = {};
+function loadSkin(id) {
+  if (!SKINS[id]) return Promise.resolve(null);
+  if (!skinLoads[id]) {
+    skinLoads[id] = new GLTFLoader().loadAsync(SKINS[id].url).then((g) => {
+      skinGltf[id] = g;
+      window.dispatchEvent(new CustomEvent('rf-skin-ready', { detail: { id } }));
+      for (const side of ['p1', 'p2']) {
+        const cfg = pendingSkin[side];
+        if (!cfg || cfg.skin !== id) continue;
+        delete pendingSkin[side];
+        if (previewMode) previewSelectFighter(side, cfg);
+        else if (!fightersStaged || match.phase !== 'fight') swapSkin(side, id);
+      }
+      return g;
+    }).catch((err) => { console.warn('[skin]', id, err); delete skinLoads[id]; return null; });
+  }
+  return skinLoads[id];
+}
+function fighterFor(side, skinId) {
+  const key = skinId || 'robot';
+  if (fighterCache[side][key]) return fighterCache[side][key];
+  let src = fighterGltf;
+  if (skinId) {
+    prepFootworkClips(fighterGltf); // shared clips: prep once, on the robot's list
+    src = { scene: skinGltf[skinId].scene, animations: fighterGltf.animations, __footworkPrepped: true };
+  }
+  const f = makeFighter(src, side === 'p1' ? MODEL.colors.p1 : MODEL.colors.p2, side, skinId || null);
+  fighterCache[side][key] = f;
+  return f;
+}
+// Put `skinId`'s body on a side (null = standard robot). Returns the side's fighter.
+// A body that is still downloading keeps the current one and swaps in when it arrives.
+function swapSkin(side, skinId, cfg) {
+  const cur = side === 'p2' ? p2 : p1;
+  const want = skinId && SKINS[skinId] ? skinId : null;
+  if (!cur || (cur.skin || null) === want) return cur;
+  if (want && !skinGltf[want]) {
+    pendingSkin[side] = { ...(cfg || {}), skin: want };
+    loadSkin(want);
+    return cur;
+  }
+  const nf = fighterFor(side, want);
+  const staged = !!cur.root.parent;
+  const hadPhys = !!cur.phys;
+  if (cur.brain && cur.brain.kind === 'api' && typeof cur.brain.freeze === 'function') cur.brain.freeze();
+  cur.brain = null;
+  if (hadPhys) detachFighter(cur);
+  if (cur.root.parent) cur.root.parent.remove(cur.root);
+  applyFighterConfig(nf, cur.config);
+  nf.root.position.copy(cur.root.position);
+  nf.root.rotation.copy(cur.root.rotation);
+  nf.root.visible = cur.root.visible;
+  if (nf.mixer && cur.mixer) nf.mixer.timeScale = cur.mixer.timeScale;
+  if (side === 'p2') p2 = nf; else p1 = nf;
+  if (staged) scene.add(nf.root);
+  if (hadPhys) attachFighter(nf);
+  warmedFor = null;
+  if (staged) prewarmShaders();
+  return nf;
+}
 let arenaLoaded = false;
 let fightersStaged = false;
 let previewMode = null;
@@ -559,8 +625,8 @@ function stageFighters(opts) {
   opts = opts || {};
   if (!fighterGltf) return;
   if (!p1 || !p2) {
-    p1 = makeFighter(fighterGltf, MODEL.colors.p1, 'p1');
-    p2 = makeFighter(fighterGltf, MODEL.colors.p2, 'p2');
+    p1 = fighterFor('p1', null);
+    p2 = fighterFor('p2', null);
     applyFighterConfig(p1, defaultFighterConfig('p1'));
     applyFighterConfig(p2, defaultFighterConfig('p2'));
   }
@@ -666,7 +732,9 @@ function removeSelectPads() {
 }
 
 function paintPreviewFighter(f, cfg) {
-  if (!f || !cfg) return;
+  if (!f || !cfg) return f;
+  const side = f.id;
+  f = swapSkin(side, cfg.skin || null, cfg);
   applyFighterConfig(f, {
     ...f.config,
     name: cfg.name || (f.config && f.config.name),
@@ -677,6 +745,7 @@ function paintPreviewFighter(f, cfg) {
   if (shell && typeof shell.paint === 'function' && cfg.primary) {
     shell.paint(f, cfg.primary, cfg.accent || cfg.primary);
   }
+  return f;
 }
 
 function poseSelectIdle(f, seed) {
@@ -711,6 +780,8 @@ function showSelectPreview(cfg) {
   stageFighters({ physics: false });
   if (!p1 || !p2) return false;
   ensureSelectPads();
+  if (cfg.p1) paintPreviewFighter(p1, cfg.p1);
+  if (cfg.p2) paintPreviewFighter(p2, cfg.p2);
   for (const f of [p1, p2]) {
     f.root.visible = true;
     f.root.position.set(f.startX, matTopY(), 0);
@@ -718,8 +789,6 @@ function showSelectPreview(cfg) {
     f.groundY = matTopY();
     if (f.shield) f.shield.visible = false;
   }
-  if (cfg.p1) paintPreviewFighter(p1, cfg.p1);
-  if (cfg.p2) paintPreviewFighter(p2, cfg.p2);
   poseSelectIdle(p1, 0.2);
   poseSelectIdle(p2, 1.1);
   faceEachOther(p1, p2, 0, true);
@@ -741,7 +810,15 @@ function previewSelectFighter(side, cfg) {
     if (!showSelectPreview(side === 'p2' ? { p2: cfg } : { p1: cfg })) return;
   }
   const target = side === 'p2' ? p2 : p1;
-  paintPreviewFighter(target, cfg || {});
+  const nf = paintPreviewFighter(target, cfg || {});
+  if (nf && nf !== target) { // new body: stand it on its pad in the guard idle
+    nf.root.visible = true;
+    nf.root.position.set(nf.startX, matTopY(), 0);
+    nf.root.scale.set(1, 1, 1);
+    nf.groundY = matTopY();
+    if (nf.shield) nf.shield.visible = false;
+    poseSelectIdle(nf, side === 'p2' ? 1.1 : 0.2);
+  }
   if (p1 && p2) faceEachOther(p1, p2, 0, true);
 }
 
@@ -760,16 +837,14 @@ function renderRosterPortraits(list, size) {
   if (!fighterGltf || !Array.isArray(list) || !list.length) return out;
   const low = gfxKey === 'low';
   size = Math.max(96, Math.min(256, size || (low ? 128 : 192)));
-  let created = false;
   if (!p1) {
     stageFighters({ physics: false });
-    created = true;
     if (p1 && p1.root && p1.root.parent) p1.root.parent.remove(p1.root);
     if (p2 && p2.root && p2.root.parent) p2.root.parent.remove(p2.root);
     fightersStaged = false;
   }
-  const src = p1;
-  if (!src || !src.root) return out;
+  if (!p1 || !p1.root) return out;
+  for (const item of list) if (item && item.skin && SKINS[item.skin] && !skinGltf[item.skin]) { out.__pending = true; loadSkin(item.skin); }
   const studio = new THREE.Scene();
   studio.background = new THREE.Color(0x0b0f18);
   studio.add(new THREE.HemisphereLight(0xc8d6ff, 0x1a1410, 1.15));
@@ -780,22 +855,6 @@ function renderRosterPortraits(list, size) {
   fill.position.set(-3.0, 1.6, -1.2);
   studio.add(fill);
   const cam = new THREE.PerspectiveCamera(28, 1, 0.1, 20);
-  const savedPos = src.root.position.clone();
-  const savedRot = src.root.rotation.clone();
-  const savedParent = src.root.parent;
-  const savedVis = src.root.visible;
-  if (savedParent) savedParent.remove(src.root);
-  studio.add(src.root);
-  src.root.visible = true;
-  src.root.position.set(0, 0, 0);
-  src.root.rotation.set(0, Math.PI * 0.18, 0);
-  poseSelectIdle(src, 0.35);
-  src.root.updateMatrixWorld(true);
-  const box = new THREE.Box3().setFromObject(src.root);
-  const mid = box.getCenter(new THREE.Vector3());
-  const headY = box.min.y + (box.max.y - box.min.y) * 0.72;
-  cam.position.set(mid.x + 0.55 * SIZE, headY + 0.12 * SIZE, mid.z + 2.35 * SIZE);
-  cam.lookAt(mid.x, headY - 0.02 * SIZE, mid.z);
   const rt = new THREE.WebGLRenderTarget(size, size, { type: THREE.UnsignedByteType });
   rt.texture.colorSpace = THREE.SRGBColorSpace;
   const prev = renderer.getRenderTarget();
@@ -807,10 +866,32 @@ function renderRosterPortraits(list, size) {
   const ctx = canvas2.getContext('2d');
   const buf = new Uint8Array(size * size * 4);
   const pixels = new Uint8ClampedArray(size * size * 4);
+  const posed = new Set();
   try {
     for (const item of list) {
       if (!item || !item.id) continue;
-      paintPreviewFighter(src, item);
+      const skin = item.skin && SKINS[item.skin] ? item.skin : null;
+      if (skin && !skinGltf[skin]) continue; // still downloading: the shell asks again later
+      const src = skin ? fighterFor('p1', skin) : p1;
+      const savedPos = src.root.position.clone();
+      const savedRot = src.root.rotation.clone();
+      const savedParent = src.root.parent;
+      const savedVis = src.root.visible;
+      if (savedParent) savedParent.remove(src.root);
+      studio.add(src.root);
+      src.root.visible = true;
+      src.root.position.set(0, 0, 0);
+      src.root.rotation.set(0, Math.PI * 0.18, 0);
+      if (!posed.has(src)) { poseSelectIdle(src, 0.35); posed.add(src); }
+      src.root.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(src.root);
+      const mid = box.getCenter(new THREE.Vector3());
+      const headY = box.min.y + (box.max.y - box.min.y) * 0.72;
+      cam.position.set(mid.x + 0.55 * SIZE, headY + 0.12 * SIZE, mid.z + 2.35 * SIZE);
+      cam.lookAt(mid.x, headY - 0.02 * SIZE, mid.z);
+      applyFighterConfig(src, { ...src.config, name: item.name || src.config.name, profile: item.profile || item.id, color: item.color != null ? item.color : src.config.color });
+      const shell = window.RFShell;
+      if (shell && typeof shell.paint === 'function' && item.primary) shell.paint(src, item.primary, item.accent || item.primary);
       src.root.updateMatrixWorld(true);
       renderer.setRenderTarget(rt);
       renderer.setClearColor(0x0b0f18, 1);
@@ -825,6 +906,11 @@ function renderRosterPortraits(list, size) {
       }
       ctx.putImageData(new ImageData(pixels, size, size), 0, 0);
       out[item.id] = canvas2.toDataURL('image/png');
+      studio.remove(src.root);
+      if (savedParent) savedParent.add(src.root);
+      src.root.position.copy(savedPos);
+      src.root.rotation.copy(savedRot);
+      src.root.visible = savedVis;
     }
   } catch (err) {
     console.warn('[portraits]', err);
@@ -832,15 +918,7 @@ function renderRosterPortraits(list, size) {
   renderer.setRenderTarget(prev);
   renderer.setClearColor(prevClear, prevAlpha);
   rt.dispose();
-  studio.remove(src.root);
-  if (savedParent) savedParent.add(src.root);
-  src.root.position.copy(savedPos);
-  src.root.rotation.copy(savedRot);
-  src.root.visible = savedVis;
   key.dispose?.();
-  if (created) {
-    // leave unstaged; fighters exist in memory for the upcoming select preview
-  }
   return out;
 }
 
@@ -866,15 +944,15 @@ function findClip(clips, name) {
   return clips.find((c) => c.name === name) || clips.find((c) => c.name.toLowerCase() === lower);
 }
 
-function tint(root, color) {
+function tint(root, color, ownPaint) {
   const c = new THREE.Color(color);
   root.traverse((o) => {
     if (!o.isMesh) return;
     const mats = [].concat(o.material);
     o.material = mats.length === 1 ? mats[0].clone() : mats.map((m) => m.clone());
-    for (const m of [].concat(o.material)) applyChrome(o, m, c);
+    if (!ownPaint) for (const m of [].concat(o.material)) applyChrome(o, m, c);
     for (const m of [].concat(o.material)) {
-      if (m && m.color) {
+      if (m && m.color && !ownPaint) {
         if (!m.userData.baseColor) m.userData.baseColor = m.color.clone();
         m.color.copy(m.userData.baseColor).lerp(c, 0.42);
       }
@@ -1000,6 +1078,7 @@ function stepEyes(f, dt) {
 }
 
 function retintFighter(f, color) {
+  if (f.noPaint) return; // skins with their own textures keep them
   const c = new THREE.Color(color);
   f.model.traverse((o) => {
     if (!o.isMesh) return;
@@ -1029,8 +1108,8 @@ function applyFighterConfig(f, cfg) {
   if (el) el.textContent = f.config.name;
 }
 
-function makeFighter(gltf, color, side) {
-
+function makeFighter(gltf, color, side, skinId) {
+  const skinDef = (skinId && SKINS[skinId]) || null;
   const root = new THREE.Group();
   const model = cloneSkinned(gltf.scene);
   const box = meshBox(model);
@@ -1039,7 +1118,7 @@ function makeFighter(gltf, color, side) {
   model.scale.setScalar(scale);
   const box2 = meshBox(model);
   if (box2) model.position.y = -box2.min.y + MODEL.footOffset;
-  tint(model, color);
+  tint(model, color, skinDef && skinDef.paint === false);
   // Tiny pieces (fingers, bolts) skip shadow casting; the large plates still shadow the mat.
   model.updateMatrixWorld(true);
   const _b = new THREE.Box3();
@@ -1050,7 +1129,7 @@ function makeFighter(gltf, color, side) {
     _b.setFromObject(o).getSize(_sz);
     if (Math.max(_sz.x, _sz.y, _sz.z) < 0.22) o.castShadow = false;
   });
-  addVisor(model, color);
+  if (!skinDef || skinDef.visor !== false) addVisor(model, color);
   root.add(model);
 
   const shield = new THREE.Mesh(
@@ -1130,6 +1209,8 @@ function makeFighter(gltf, color, side) {
     hipsBindQ: hips ? hips.quaternion.clone() : null,
     config: defaultFighterConfig(side),
     modelScale: scale,
+    skin: skinDef ? skinId : null,
+    noPaint: !!(skinDef && skinDef.paint === false),
   };
   f.config.color = color;
 
@@ -5854,8 +5935,8 @@ function startFightFromShell(opts) {
   opts = opts || {};
   hideSelectPreview({ keepStaged: true });
   stageFighters();
-  if (opts.p1) applyFighterConfig(p1, opts.p1);
-  if (opts.p2) applyFighterConfig(p2, opts.p2);
+  if (opts.p1) applyFighterConfig(swapSkin('p1', opts.p1.skin || null, opts.p1), opts.p1);
+  if (opts.p2) applyFighterConfig(swapSkin('p2', opts.p2.skin || null, opts.p2), opts.p2);
   if (opts.round != null) match.roundIndex = opts.round;
   if (opts.roundTime != null) match.roundTimeOverride = opts.roundTime;
   // Shell owns best-of-N rounds; stash opts.bestOf so getFightState can report it if no shell match is running.
@@ -5932,6 +6013,7 @@ function onLoad(gltf) {
   });
   initArenaPhysics();
   fighterGltf = gltf;
+  setTimeout(() => { for (const id of Object.keys(SKINS)) loadSkin(id); }, 1500); // after first paint
   onPhysicsBounce((kind, impact, rec) => {
     const mass = rec && rec.mass != null ? rec.mass : 4;
     // Heavier parts hit harder and lower: loudness grows with impact speed and mass.
@@ -5967,8 +6049,9 @@ function onLoad(gltf) {
     },
     getState: getFightState,
     setFighterConfig(id, cfg) {
-      const f = id === 'p2' ? p2 : p1;
+      let f = id === 'p2' ? p2 : p1;
       if (!f) return null;
+      if (cfg && 'skin' in cfg) f = swapSkin(f.id, cfg.skin || null, cfg);
       applyFighterConfig(f, cfg);
       return f.config;
     },

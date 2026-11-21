@@ -113,6 +113,19 @@ export const MODEL = {
   },
 };
 
+// Alternate bodies. Each GLB holds only a mesh rebound onto RobotFighter's exact Mixamo
+// skeleton (same 65 bone names and rest rotations), so it plays the robot's clips, joint
+// limits, footwork and damage as is. `paint: false` keeps the model's own textures (no team
+// tint, no shell paint, no chrome mask); `visor: false` skips the neon eyes (Teal has its own face).
+export const SKINS = {
+  teal: {
+    url: './models/TealFighter.glb',
+    source: 'Teal by Lagst (Sketchfab Free Standard); animations from Mixamo',
+    paint: false,
+    visor: false,
+  },
+};
+
 export const LOOP_CLIPS = ['GuardUpper',
   // idle-stance
   'FightingIdle', 'InjuredStumbleIdle', 'Idle',
@@ -263,6 +276,9 @@ export const FIGHTER_PROFILES = {
   overseer: { id: 'overseer', name: 'Overseer Prime', blurb: 'Reads everything and hits hard from range. Slow to recover once the exchange starts.',
     strengths: ['High Power', 'Long Reach'], weaknesses: ['Slow Recovery'],
     stats: { speed: 5, power: 8, armor: 6, reach: 8, recovery: 4, toughness: 5 } },
+  teal: { id: 'teal', name: 'Teal', blurb: 'A light, long-legged scrapper with a smile on its screen. Quick hands, quick feet, thin plating.',
+    strengths: ['Long Legs', 'Quick Recovery'], weaknesses: ['Thin Armor'],
+    stats: { speed: 7, power: 6, armor: 5, reach: 7, recovery: 7, toughness: 4 } },
   // Kept as aliases so older configs that name these ids still resolve.
   striker: null,
   bruiser: null,

@@ -18,14 +18,18 @@
 
   /* Six CPU opponents, easiest first. `prof` feeds the game's own AI knobs (think window,
      reaction-block chance, punch/kick/special/block mix) via api.js fighter config. */
-  // Seven fighters share the current robot model. Paint and `skin` (reserved for later
-  // mesh swaps) stay data-driven. `profile` is a js/config.js FIGHTER_PROFILES id and
+  // Eight fighters. `skin` names a js/config.js SKINS body (null = the standard robot); a
+  // skinned fighter keeps its own textures, so its primary / accent only colour the HUD. `profile` is a js/config.js FIGHTER_PROFILES id and
   // actually drives damage, speed, armor, reach, and recovery in a fight.
   S.ROSTER = [
     { id: 'sprocket', name: 'Sprocket', title: 'The Rookie', style: 'Balanced', profile: 'sprocket',
       skin: null, primary: '#22c3e6', accent: '#dde8f5',
       blurb: 'Fresh off the line. Even stats, no sharp edge.',
       prof: { think: [0.5, 0.7], react: 0.14, punch: 0.36, kick: 0.12, special: 0.04, block: 0.12 } },
+    { id: 'teal', name: 'Teal', title: 'The Tinker', style: 'Balanced', profile: 'teal',
+      skin: 'teal', primary: '#2ec4b6', accent: '#1b1e26',
+      blurb: 'Long legs, quick hands, and a grin on its screen. Light plating.',
+      prof: { think: [0.42, 0.56], react: 0.22, punch: 0.4, kick: 0.18, special: 0.08, block: 0.12 } },
     { id: 'hexwren', name: 'Hex Wren', title: 'The Ghost Step', style: 'Evasive', profile: 'hexwren',
       skin: null, primary: '#3fd6a6', accent: '#3a2340',
       blurb: 'Circles, slips, and pokes when you overreach.',
@@ -60,7 +64,7 @@
   const ACCENT_PARTS = new Set(['head', 'legL', 'legR']);
   S.hex = (c) => parseInt(String(c).replace('#', ''), 16);
   S.paint = (f, primary, accent) => {
-    if (!f || !f.model || !S.api) return;
+    if (!f || !f.model || !S.api || f.noPaint) return;
     const THREE = S.api.THREE;
     const pri = new THREE.Color(primary);
     const acc = new THREE.Color(accent || primary);
