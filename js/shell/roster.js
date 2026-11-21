@@ -18,7 +18,7 @@
 
   /* Six CPU opponents, easiest first. `prof` feeds the game's own AI knobs (think window,
      reaction-block chance, punch/kick/special/block mix) via api.js fighter config. */
-  // Eight fighters. `skin` names a js/config.js SKINS body (null = the standard robot); a
+  // Nine fighters. `skin` names a js/config.js SKINS body (null = the standard robot); a
   // skinned fighter keeps its own textures, so its primary / accent only colour the HUD. `profile` is a js/config.js FIGHTER_PROFILES id and
   // actually drives damage, speed, armor, reach, and recovery in a fight.
   S.ROSTER = [
@@ -42,6 +42,10 @@
       skin: null, primary: '#5d6b4a', accent: '#b08a6a',
       blurb: 'Walks forward behind a raised guard and hits heavy.',
       prof: { think: [0.3, 0.38], react: 0.5, punch: 0.28, kick: 0.32, special: 0.22, block: 0.32 } },
+    { id: 'draugr', name: 'Draugr', title: 'The Grinder', style: 'Brawler', profile: 'draugr',
+      skin: 'draugr', primary: '#b08a6a', accent: '#e23b3b',
+      blurb: 'Tall, heavy-handed, and hard to break. Keeps coming, slow to reset.',
+      prof: { think: [0.26, 0.34], react: 0.3, punch: 0.46, kick: 0.2, special: 0.18, block: 0.18 } },
     { id: 'voltfang', name: 'Volt Fang', title: 'The Rusher', style: 'Rusher', profile: 'voltfang',
       skin: null, primary: '#ff7a2f', accent: '#1b1e26',
       blurb: 'Never backs up. Throws hands until something breaks.',

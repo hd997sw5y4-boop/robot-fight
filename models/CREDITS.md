@@ -6,3 +6,7 @@
 # Teal fighter asset
 
 - **Mesh and textures:** [Teal](https://sketchfab.com/3d-models/teal-4186aea3b40f460a854c7c90670f01e3) by Lagst, Sketchfab Standard license. Rebound onto the Robot fighter's Mixamo skeleton (it plays the same Mixamo clips listed above) and textures resized for the web; its own animations are not used and the original source files are not redistributed.
+
+# Draugr fighter asset
+
+- **Mesh and textures:** [Draugr - General purpose humanoid bot](https://sketchfab.com/3d-models/draugr-general-purpose-humanoid-bot-9d38b656a9394af6985bd8e54bf66cc5) by Lagst, Sketchfab Standard license. Rebound onto the Robot fighter's Mixamo skeleton (it plays the same Mixamo clips listed above) and textures resized for the web; its own animations are not used and the original source files are not redistributed.
