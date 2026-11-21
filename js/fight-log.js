@@ -658,7 +658,8 @@ export function stepFightQuality(env) {
       for (let i = 0; i < 2; i++) {
         const a = s.feet[i], b = p.feet[i];
         if (!a || !b || a[1] - matY > 0.035 || b[1] - matY > 0.035) continue;
-        const v = Math.hypot(a[0] - b[0], a[2] - b[2]) / env.dt;
+        let v = Math.hypot(a[0] - b[0], a[2] - b[2]) / env.dt;
+        if (a.length > 3 && b.length > 3) v = Math.min(v, Math.hypot(a[3] - b[3], a[4] - b[4]) / env.dt); // heel / ball pivot
         if (v > 0.45) qpush('plantSlide', { id: side, foot: i ? 'R' : 'L', v: r2(v), st: s.state, clip: s.clip });
       }
     }

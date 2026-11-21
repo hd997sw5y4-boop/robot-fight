@@ -5821,11 +5821,12 @@ function fighterLogPose(f) {
   for (const side of ['L', 'R']) {
     const leg = f.ikLegs && f.ikLegs[side];
     if (!leg || !leg.foot) { feet.push(null); continue; }
-    // The contact point: the ankle, or the toe when it is lower (a heel coming up on the ball of
-    // the foot pivots the ankle over a planted toe; that is not a slide).
+    // Lowest of ankle / toe for "on the mat", plus both points' XZ: the log judges a slide by
+    // the slower of the two, so a foot pivoting on its heel or on its ball isn't a slide.
     leg.foot.getWorldPosition(_logFt);
-    if (leg.toe) { leg.toe.getWorldPosition(_logH); if (_logH.y < _logFt.y) _logFt.copy(_logH); }
-    feet.push([_logFt.x, _logFt.y, _logFt.z]);
+    let y = _logFt.y, tx = _logFt.x, tz = _logFt.z;
+    if (leg.toe) { leg.toe.getWorldPosition(_logH); y = Math.min(y, _logH.y); tx = _logH.x; tz = _logH.z; }
+    feet.push([_logFt.x, y, _logFt.z, tx, tz]);
   }
   const cap = f.phys && f.phys.body && f.phys.body.position;
   const act = f.current && f.actions[f.current];
