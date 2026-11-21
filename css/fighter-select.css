@@ -102,7 +102,8 @@ button.fs-card:hover, button.fs-card:focus-visible {
     #0d111a;
   box-shadow: inset 0 0 0 1px rgba(255,255,255,.08);
 }
-.fs-pic img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: 50% 20%; }
+.fs-pic picture { display: block; width: 100%; height: 100%; }
+.fs-pic img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: 50% 28%; }
 .fs-meta { min-width: 0; display: flex; flex-direction: column; gap: calc(2 * var(--u)); }
 .fs-meta b { font: 800 calc(13 * var(--u))/1.1 var(--ww-font); letter-spacing: .02em; }
 .fs-meta em { font: 600 calc(10 * var(--u))/1.2 var(--ww-font); letter-spacing: .12em; text-transform: uppercase; color: #9aa3bb; font-style: normal; }

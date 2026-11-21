@@ -96,7 +96,7 @@ shellCall('onReady', {
   showSelectPreview,
   hideSelectPreview,
   previewSelectFighter,
-  renderRosterPortraits,
+  preloadSkin: loadSkin,
   memSnapshot() { return typeof window.__rfMem === 'function' ? window.__rfMem() : null; },
 });
 
@@ -1021,100 +1021,6 @@ function stepSelectPreview(dt) {
     selectPads[0].rotation.y += spin;
     selectPads[1].rotation.y -= spin;
   }
-}
-
-function renderRosterPortraits(list, size) {
-  const out = {};
-  if (!fighterGltf || !Array.isArray(list) || !list.length) return out;
-  const low = gfxKey === 'low';
-  size = Math.max(96, Math.min(256, size || (low ? 128 : 192)));
-  if (!p1) {
-    stageFighters({ physics: false });
-    if (p1 && p1.root && p1.root.parent) p1.root.parent.remove(p1.root);
-    if (p2 && p2.root && p2.root.parent) p2.root.parent.remove(p2.root);
-    fightersStaged = false;
-  }
-  if (!p1 || !p1.root) return out;
-  // Do not fetch every body just for a roster thumbnail — that was loading all unique
-  // GLBs at once and is what ran iPhone Safari out of memory. Snapshot only bodies already in memory.
-  const studio = new THREE.Scene();
-  studio.background = new THREE.Color(0x0b0f18);
-  studio.add(new THREE.HemisphereLight(0xc8d6ff, 0x1a1410, 1.15));
-  const key = new THREE.DirectionalLight(0xfff4e8, 1.35);
-  key.position.set(2.2, 4.2, 3.4);
-  studio.add(key);
-  const fill = new THREE.DirectionalLight(0x8cb0ff, 0.45);
-  fill.position.set(-3.0, 1.6, -1.2);
-  studio.add(fill);
-  const cam = new THREE.PerspectiveCamera(28, 1, 0.1, 20);
-  const rt = new THREE.WebGLRenderTarget(size, size, { type: THREE.UnsignedByteType });
-  rt.texture.colorSpace = THREE.SRGBColorSpace;
-  const prev = renderer.getRenderTarget();
-  const prevClear = new THREE.Color();
-  const prevAlpha = renderer.getClearAlpha();
-  renderer.getClearColor(prevClear);
-  const canvas2 = document.createElement('canvas');
-  canvas2.width = canvas2.height = size;
-  const ctx = canvas2.getContext('2d');
-  const buf = new Uint8Array(size * size * 4);
-  const pixels = new Uint8ClampedArray(size * size * 4);
-  const posed = new Set();
-  try {
-    for (const item of list) {
-      if (!item || !item.id) continue;
-      const skin = item.skin && SKINS[item.skin] ? item.skin : null;
-      if (skin && !skinGltf[skin]) continue; // not loaded: leave the card without a photo
-      const src = skin
-        ? (fighterCache.p1[skin] || fighterCache.p2[skin] || (p1 && p1.skin === skin && p1) || (p2 && p2.skin === skin && p2) || null)
-        : (fighterCache.p1.robot || fighterCache.p2.robot || (p1 && !p1.skin && p1) || (p2 && !p2.skin && p2) || null);
-      if (!src) continue;
-      const savedPos = src.root.position.clone();
-      const savedRot = src.root.rotation.clone();
-      const savedParent = src.root.parent;
-      const savedVis = src.root.visible;
-      if (savedParent) savedParent.remove(src.root);
-      studio.add(src.root);
-      src.root.visible = true;
-      src.root.position.set(0, 0, 0);
-      src.root.rotation.set(0, Math.PI * 0.18, 0);
-      if (!posed.has(src)) { poseSelectIdle(src, 0.35); posed.add(src); }
-      src.root.updateMatrixWorld(true);
-      const box = new THREE.Box3().setFromObject(src.root);
-      const mid = box.getCenter(new THREE.Vector3());
-      const headY = box.min.y + (box.max.y - box.min.y) * 0.72;
-      cam.position.set(mid.x + 0.55 * SIZE, headY + 0.12 * SIZE, mid.z + 2.35 * SIZE);
-      cam.lookAt(mid.x, headY - 0.02 * SIZE, mid.z);
-      applyFighterConfig(src, { ...src.config, name: item.name || src.config.name, profile: item.profile || item.id, color: item.color != null ? item.color : src.config.color });
-      const shell = window.RFShell;
-      if (shell && typeof shell.paint === 'function' && item.primary) shell.paint(src, item.primary, item.accent || item.primary);
-      src.root.updateMatrixWorld(true);
-      renderer.setRenderTarget(rt);
-      renderer.setClearColor(0x0b0f18, 1);
-      renderer.clear();
-      renderer.render(studio, cam);
-      renderer.readRenderTargetPixels(rt, 0, 0, size, size, buf);
-      // WebGL origin is bottom-left; flip for a canvas image.
-      for (let y = 0; y < size; y++) {
-        const srcOff = (size - 1 - y) * size * 4;
-        const dstOff = y * size * 4;
-        pixels.set(buf.subarray(srcOff, srcOff + size * 4), dstOff);
-      }
-      ctx.putImageData(new ImageData(pixels, size, size), 0, 0);
-      out[item.id] = canvas2.toDataURL('image/png');
-      studio.remove(src.root);
-      if (savedParent) savedParent.add(src.root);
-      src.root.position.copy(savedPos);
-      src.root.rotation.copy(savedRot);
-      src.root.visible = savedVis;
-    }
-  } catch (err) {
-    console.warn('[portraits]', err);
-  }
-  renderer.setRenderTarget(prev);
-  renderer.setClearColor(prevClear, prevAlpha);
-  rt.dispose();
-  key.dispose?.();
-  return out;
 }
 
 function collectWireObstacles() {
@@ -6466,7 +6372,7 @@ function onLoad(gltf) {
     showSelectPreview,
     hideSelectPreview,
     previewSelectFighter,
-    renderRosterPortraits,
+    preloadSkin: loadSkin,
     memSnapshot,
   });
   applyGfx(gfxKey);

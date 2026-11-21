@@ -1,7 +1,8 @@
 /* Robot Fight shell: fighter select over the real arena.
    Both chosen robots stand on glowing pads in the ring. Side panels list the eight
-   fighters (data-driven paint / skin body / stats). Portraits are snapshots
-   rendered once offscreen and cached — no per-card live 3D. */
+   fighters (data-driven paint / skin body / stats). Card portraits are static
+   images (webp + png) so they appear immediately; a 3D body loads only when
+   that fighter is selected (or hovered on desktop). */
 import { getFighterStats, STAT_BAR_KEYS, FIGHTER_PROFILES } from '../config.js';
 import { aiConfig, AI_PROVIDERS } from '../api-brain.js';
 
@@ -10,7 +11,7 @@ const BAR_KEYS = STAT_BAR_KEYS || ['power', 'speed', 'armor', 'reach', 'recovery
 const LABEL = { power: 'Power', speed: 'Speed', armor: 'Armor', reach: 'Reach', recovery: 'Recovery' };
 const SIDE_COLOR = { p1: '#3f7dff', p2: '#ff4040' };
 
-const st = { active: false, host: null, portraits: {}, busy: false, ptr: false, painted: false };
+const st = { active: false, host: null, busy: false, ptr: false };
 
 const esc = (t) => S.esc(t);
 const H = () => S.selectHooks;
@@ -147,8 +148,10 @@ function statBars(id) {
   }).join('');
 }
 function portraitHtml(id, alt) {
-  const src = st.portraits[id];
-  return `<span class="fs-pic">${src ? `<img src="${src}" alt="${esc(alt || '')}">` : ''}</span>`;
+  if (!id || id === 'random') return '<span class="fs-pic"></span>';
+  const webp = `./images/portraits/${id}.webp`;
+  const png = `./images/portraits/${id}.png`;
+  return `<span class="fs-pic"><picture><source type="image/webp" srcset="${webp}"><img src="${png}" alt="${esc(alt || '')}" width="256" height="256" decoding="async"></picture></span>`;
 }
 
 function canPick(side) {
@@ -262,6 +265,13 @@ function render() {
     host.addEventListener('keydown', (e) => { if (e.target.matches && e.target.matches('input, select')) e.stopPropagation(); });
     host.addEventListener('pointermove', () => { st.ptr = true; });
     host.addEventListener('keydown', () => { st.ptr = false; }, true);
+    host.addEventListener('pointerenter', (e) => {
+      const card = e.target.closest && e.target.closest('[data-fs="pick"][data-id]');
+      if (!card || card.dataset.id === 'random') return;
+      if (document.documentElement.classList.contains('rf-mobile')) return;
+      const f = fighter(card.dataset.id);
+      if (f && f.skin && S.api && typeof S.api.preloadSkin === 'function') S.api.preloadSkin(f.skin);
+    }, true);
   }
   st.host = host;
   host.innerHTML = `
@@ -282,16 +292,6 @@ function paint() {
   const cpu = host.querySelector('.fs-cpu');
   if (cpu) { const c = S.cpuSetting(); cpu.textContent = c[0].toUpperCase() + c.slice(1); }
   paintApi();
-  host.querySelectorAll('.fs-pic').forEach((el) => {
-    const card = el.closest('[data-id]');
-    const id = card && card.dataset.id;
-    if (id && st.portraits[id] && !el.querySelector('img')) {
-      const img = document.createElement('img');
-      img.src = st.portraits[id];
-      img.alt = '';
-      el.appendChild(img);
-    }
-  });
 }
 
 function onClick(e) {
@@ -352,21 +352,6 @@ function go() {
   }
 }
 
-function ensurePortraits() {
-  if (st.painted || !S.api || typeof S.api.renderRosterPortraits !== 'function') return;
-  st.painted = true;
-  const list = roster().map((o) => ({ id: o.id, name: o.name, primary: o.primary, accent: o.accent, profile: o.profile || o.id, skin: o.skin }));
-  try {
-    const map = S.api.renderRosterPortraits(list) || {};
-    if (map.__pending) { st.painted = false; delete map.__pending; }
-    st.portraits = Object.assign(st.portraits || {}, map);
-    paint();
-  } catch (err) {
-    console.warn('[fighter-select] portraits', err);
-    st.painted = false;
-  }
-}
-
 function open(m) {
   const hooks = H();
   if (!hooks || !S.api) return false;
@@ -378,7 +363,6 @@ function open(m) {
   S.showScreen('select');
   requestAnimationFrame(() => {
     if (!st.active) return;
-    try { ensurePortraits(); } catch (err) { console.warn('[fighter-select] portraits', err); }
     try { hooks.previewSelect(); } catch (err) { console.error('[fighter-select] preview', err); }
   });
   return true;
@@ -406,5 +390,4 @@ if (S) {
     baseNav(act);
   };
   S.on('pads', () => { if (st.active) paint(); });
-  window.addEventListener('rf-skin-ready', () => { if (st.active) { st.painted = false; ensurePortraits(); } });
 }
