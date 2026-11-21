@@ -3330,7 +3330,8 @@ function swingOutOfCapsule(f, bone, pts, target, parts, margin, deepOnly) {
   return moved;
 }
 function limbPushout(f, other) {
-  if (!f || f.ghost) return;
+  if (f) f._clipOther = 0;
+  if (!f || f.ghost) return 0;
   if (!f._armBones) {
     const by = {};
     f.model.traverse((o) => { if (o.isBone || o.type === 'Bone') by[String(o.name).replace(/^mixamorig[:._]*/i, '')] = o; });
@@ -3342,9 +3343,17 @@ function limbPushout(f, other) {
   if (other && !other.ghost) other.model.updateWorldMatrix(true, true);
   const margin = 0.025 * SIZE;
   let clipAmt = 0;
+  // Depth left in the OTHER body by an arm that isn't the strike still on its way in (or by the
+  // head): only that parts the bodies (separate). An arm folded into its own torso (guard pose,
+  // damage bends) or a fist arriving at its target must never shove the fighters apart.
+  let otherAmt = 0;
   for (const a of f._armBones) {
     const deepOnly = !!(punching && strikeSide && a.side === strikeSide);
-    if (other && !other.ghost) clipAmt = Math.max(clipAmt, swingOutOfCapsule(f, a.arm, a.pts, other, TORSO_PARTS, margin, deepOnly));
+    if (other && !other.ghost) {
+      const d = swingOutOfCapsule(f, a.arm, a.pts, other, TORSO_PARTS, margin, deepOnly);
+      clipAmt = Math.max(clipAmt, d);
+      if (!deepOnly) otherAmt = Math.max(otherAmt, d);
+    }
     clipAmt = Math.max(clipAmt, swingOutOfCapsule(f, a.arm, a.pts, f, ['torso'], margin, deepOnly));
   }
   const head = f.flinchBones && f.flinchBones.Head;
@@ -3369,10 +3378,12 @@ function limbPushout(f, other) {
           if (qOk(_sq)) neck.quaternion.premultiply(_sq);
           neck.updateWorldMatrix(false, true);
           clipAmt = Math.max(clipAmt, margin - pr.d);
+          otherAmt = Math.max(otherAmt, margin - pr.d);
         }
       }
     }
   }
+  f._clipOther = otherAmt;
   return clipAmt;
 }
 
@@ -5956,7 +5967,7 @@ function tick() {
     const clipAmt = limbPushout(f, f === p1 ? p2 : p1);
     // A strike still pressed into the other body after the push-out (the hook that stayed
     // buried for seconds in the log): ease the two bodies apart next frame.
-    f._clipPush = dt > 0 && clipAmt > CLIP_PUSH_MIN ? clipAmt : 0;
+    f._clipPush = dt > 0 && (f._clipOther || 0) > CLIP_PUSH_MIN ? f._clipOther : 0;
     if (dt > 0 && clipAmt > 0.04 * SIZE) logGlitch('clipping', { id: f.id, d: +clipAmt.toFixed(3), clip: f.current });
     if (f.koTip) stepKoTip(f, dt);
     stepEyes(f, dt);
