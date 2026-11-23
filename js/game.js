@@ -289,33 +289,15 @@ function applyHdri(on) {
 }
 
 function syncEnvironment() {
-  // Stadium is the default surround. Industrial Pipes (the CC0 HDRI) replaces it
-  // when the setting is on: sky plus reflections. The void wall only covers a
-  // missing stadium so the load never flashes an empty black before the bowl exists.
-  const pipes = hdriEnabled && !!hdriEnv && !!hdriBg;
-  scene.environment = pipes ? hdriEnv : roomEnv;
-  scene.environmentIntensity = pipes ? 1.05 : 0.72;
-  let stadiumOn = false;
-  scene.traverse((o) => {
-    if (o.userData && o.userData.stadium) {
-      o.visible = !pipes;
-      if (!pipes) stadiumOn = true;
-    }
-  });
-  scene.traverse((o) => {
-    if (o.userData && o.userData.voidWall) o.visible = !pipes && !stadiumOn;
-  });
-  if (pipes) {
-    scene.background = hdriBg;
-    scene.backgroundBlurriness = 0.08;
-    scene.backgroundIntensity = 0.72;
-    scene.fog = new THREE.Fog(0x2a241c, 28, 70);
-  } else {
-    scene.background = new THREE.Color(0x070910);
-    scene.backgroundBlurriness = 0;
-    scene.backgroundIntensity = 1;
-    scene.fog = new THREE.Fog(0x070910, 22, 52);
-  }
+  const on = hdriEnabled && !!hdriEnv;
+  // HDRI (when on) is reflections only; the surround stays a dark, spotlit void.
+  scene.environment = on ? hdriEnv : roomEnv;
+  scene.environmentIntensity = on ? 1.2 : 0.62;
+  scene.background = darkBg;
+  scene.backgroundBlurriness = 0;
+  scene.backgroundIntensity = 1;
+  scene.fog = new THREE.Fog(0x020306, 14, 34);
+  scene.traverse((o) => { if (o.userData && o.userData.voidWall) o.visible = true; });
 }
 
 function loadHdri() {

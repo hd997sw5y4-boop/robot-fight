@@ -447,68 +447,9 @@ export function buildArena(scene, { tiled, metalColor, metalRough }) {
   group.position.y = matTop;
   for (const p of fixturePos) p.y += matTop;
   addOctagonPlatform(scene, r, matTop);
-  addStadium(scene, matTop);
 
   scene.add(group);
   return { group, fixturePos, fencePanels, fenceTop: openRing ? 0.42 : H };
-}
-
-// Night stadium bowl. Procedural meshes only — no textures, no crowd models — so it
-// stays cheap next to the iOS memory budget. Hidden when the Industrial Pipes HDRI is the sky.
-function addStadium(scene, matTop) {
-  const g = new THREE.Group();
-  g.name = 'stadiumBowl';
-  g.userData.stadium = true;
-  const seatA = new THREE.MeshStandardMaterial({ color: 0x1a222c, roughness: 0.88, metalness: 0.06, side: THREE.DoubleSide });
-  const seatB = new THREE.MeshStandardMaterial({ color: 0x2c3a4c, roughness: 0.8, metalness: 0.1, side: THREE.DoubleSide });
-  const steel = new THREE.MeshStandardMaterial({ color: 0x2c333c, roughness: 0.4, metalness: 0.62 });
-  const tiers = [
-    { y: 0.7, r0: 13.2, r1: 18, h: 1.35, mat: seatA },
-    { y: 2.15, r0: 18, r1: 24, h: 1.55, mat: seatB },
-    { y: 3.85, r0: 24, r1: 31, h: 1.7, mat: seatA },
-  ];
-  for (const t of tiers) {
-    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(t.r1, t.r0, t.h, 32, 1, true), t.mat);
-    mesh.position.y = t.y;
-    g.add(mesh);
-  }
-  const rowMat = new THREE.MeshStandardMaterial({ color: 0x46566c, roughness: 0.62, metalness: 0.18 });
-  for (const row of [{ y: 1.15, r: 15.4 }, { y: 2.55, r: 20.6 }, { y: 4.15, r: 26.8 }]) {
-    const band = new THREE.Mesh(new THREE.TorusGeometry(row.r, 0.07, 4, 40), rowMat);
-    band.rotation.x = Math.PI / 2;
-    band.position.y = row.y;
-    g.add(band);
-  }
-  const apron = new THREE.Mesh(
-    new THREE.CircleGeometry(42, 32),
-    new THREE.MeshStandardMaterial({ color: 0x090b10, roughness: 1, metalness: 0 }),
-  );
-  apron.rotation.x = -Math.PI / 2;
-  apron.position.y = -0.04;
-  g.add(apron);
-  const rim = new THREE.Mesh(
-    new THREE.TorusGeometry(12.4, 0.055, 6, 48),
-    new THREE.MeshStandardMaterial({ color: 0xffb060, emissive: 0xff8a2a, emissiveIntensity: 1.15, roughness: 0.45 }),
-  );
-  rim.rotation.x = Math.PI / 2;
-  rim.position.y = matTop + 0.08;
-  g.add(rim);
-  const mastGeo = new THREE.CylinderGeometry(0.08, 0.12, 9.5, 6);
-  const headGeo = new THREE.SphereGeometry(0.28, 8, 6);
-  const lampMat = new THREE.MeshStandardMaterial({ color: 0xfff4dc, emissive: 0xffe2a8, emissiveIntensity: 1.3, roughness: 0.35 });
-  for (let i = 0; i < 8; i++) {
-    const ang = i * Math.PI / 4 + Math.PI / 8;
-    const rad = 13.4;
-    const x = Math.cos(ang) * rad;
-    const z = Math.sin(ang) * rad;
-    const mast = new THREE.Mesh(mastGeo, steel);
-    mast.position.set(x, 4.6, z);
-    const lamp = new THREE.Mesh(headGeo, lampMat);
-    lamp.position.set(x, 9.5, z);
-    g.add(mast, lamp);
-  }
-  scene.add(g);
-  return g;
 }
 
 // Raised-stage skirt and steps (0.8-1 m apron). Steps sit on the +/-Z flats.

@@ -42,13 +42,13 @@ The part-to-bone map lives in `js/config.js` (`DAMAGE.bind`) so a later Mixamo-r
 
 ## Arena
 
-The fight takes place on the raised octagon mat (`js/arena.js`). The default surround is a procedural night stadium (no extra textures or crowd models). Settings can switch the sky and reflections to the CC0 Industrial Pipes HDRI instead.
+The fight takes place on the raised octagon mat inside the cage (`js/arena.js`). The surround is a dark, spotlit void — there is no stadium bowl, seats, crowd, truss, jumbotron or LED boards. HDRI (Settings, on by default) feeds robot and mat reflections only; it is not used as a backdrop.
 
 - **Broadcast** (`js/arena/broadcast.js`): the C-key / Settings camera view is a TV director that auto-cuts between wide, ringside, overhead and close-ups. It cuts to a close-up on big hits, knockdowns, torn-off parts and the KO. There is no jumbotron screen feed.
 
 High graphics renders at native DPR (cap 2) with canvas MSAA, no bloom/FXAA, and dynamic resolution disabled, so it stays the sharpest preset.
 
-The octagon has no cage or fence (`ARENA.cage` is false in `js/config.js`); an invisible ring collider still keeps fighters and loose parts on the mat.
+The octagon cage/fence is turned off for now (`ARENA.cage` in `js/config.js`); an invisible ring collider still keeps fighters and loose parts on the mat.
 
 The menu/arcade shell can start and end fights through `js/api.js` (`startFight`, `onFightEnd`, `setFighterConfig` with paint colors and AI personality). Flip attacks and win celebrations will use upcoming Mixamo clips (`MODEL.animations.flipSpecial` / `victory`); missing names are skipped until that pack is in the GLB.
 

@@ -187,8 +187,8 @@ export const ARENA = {
   // invisible ring wall (see physics.js) so fighters and loose parts stay on the mat.
   cage: false,
   cageHeight: 1.48 * WORLD_SCALE,
-  // Selectable surround. Stadium (default) is a procedural bowl with no extra textures.
-  // Industrial Pipes is the CC0 Poly Haven HDRI, used as sky and reflections when enabled.
+  // HDRI is used for robot/mat reflections only (on by default; toggle saved).
+  // The surround stays a dark void. Poly Haven Industrial Pipe and Valve 01 2K (CC0).
   hdriUrl: './hdris/industrial_pipe_and_valve_01_2k.hdr',
 };
 

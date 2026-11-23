@@ -65,7 +65,7 @@ const defaults = {
   fps: false,
   fov: 50,
   light: 1,
-  hdri: false, // false = night stadium; true = Industrial Pipes HDRI sky
+  hdri: true,
   cam: 'arena',
   autoRematch: false, // Bot vs Bot: start the next match by itself after the results
   match: 3, // best-of 1 / 3 / 5
