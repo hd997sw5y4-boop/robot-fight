@@ -542,7 +542,7 @@ const PAD_SVG = `<svg viewBox="0 0 760 390" class="ps-svg" role="img" aria-label
   }
 
   /* ---------- results ---------- */
-  const METHOD = { KO: 'KO', TKO: 'TKO', Decision: 'Decision', Draw: 'Draw' };
+  const METHOD = { KO: 'Knockout', Part: 'Part loss', TKO: 'Part loss', Decision: 'Decision', Draw: 'Draw' };
   function statsTable(total, cfg, wins) {
     // Counters that a build does not track stay undefined and their rows are left out (no made-up numbers).
     const has = (k) => typeof total[0][k] === 'number' && typeof total[1][k] === 'number';

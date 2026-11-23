@@ -152,13 +152,14 @@ export function createPacedBrain(getProfile) {
 
     // If the CPU has been able to act inside kick range for too long without throwing,
     // force a strike so it cannot stall in circle / read / approach.
+    // Standing in range is not a reason to swing every second. Circle, then commit.
     if (!opp.down && self.cooldown <= 0 && dist <= kickR + 0.2) {
       s.inRangeT += snap.dt;
-      if (s.inRangeT > (aggr >= 1.2 ? 1.15 : 1.6) && s.mode !== 'strike') {
+      if (s.inRangeT > (aggr >= 1.2 ? 2.3 : 3.0) && s.mode !== 'strike') {
         s.plan = planStrike(prof, self) || 'punch';
-        s.combo = aggr >= 1.2 ? 3 : 2;
+        s.combo = aggr >= 1.2 ? 2 : 1;
         s.guardUntil = 0;
-        setMode('strike', 2.2);
+        setMode('strike', 1.6);
       }
     } else s.inRangeT = 0;
 
@@ -232,9 +233,8 @@ export function createPacedBrain(getProfile) {
             setMode('feint', rand(0.3, 0.42));
           } else {
             const r = Math.random();
-            s.combo = r < 0.3 / aggr ? 1 : (r < 0.75 ? 2 : 3);
-            if (s.comeback || (s.tempo > 1.25 && Math.random() < 0.4)) s.combo += 1; // pressure phase: longer strings
-            setMode('strike', 2.5);
+            s.combo = r < 0.34 / aggr ? 1 : (r < 0.78 ? 2 : 3);
+            setMode('strike', 2.2);
             s.burst = false;
           }
         }
@@ -263,7 +263,7 @@ export function createPacedBrain(getProfile) {
       }
       case 'reset': {
         // Short step out of range after a combo (spacing, not resting), still circling.
-        intent.move = dist < 1.9 && !cornered ? -1 : 0.15;
+        intent.move = dist < 2.25 && !cornered ? -1 : 0.15;
         intent.strafe = 0.8 * s.circleDir;
         if (s.modeT > s.modeLen) {
           if (s.readNext) startRead(aggr);
@@ -272,7 +272,7 @@ export function createPacedBrain(getProfile) {
         break;
       }
       case 'circle': {
-        const ring = 2.0;
+        const ring = 2.2;
         intent.move = dist > ring + 0.3 ? 0.6 : (dist < ring - 0.3 ? -0.6 : 0);
         intent.strafe = 0.85 * s.circleDir;
         if (s.modeT > s.modeLen) {
@@ -342,17 +342,17 @@ export function createPacedBrain(getProfile) {
     const r = Math.random();
     s.circleDir = Math.random() < 0.5 ? -1 : 1;
     // Hard / high-tempo: cut the long circle and come back in.
+    // Even an aggressive brain leaves range after a string. No instant re-swing.
     if (aggr >= 1.2) {
-      if (r < Math.min(0.2, prof.block || 0.12)) setMode('guard', rand(0.16, 0.28));
-      else if (r < 0.4) setMode('reset', rand(0.1, 0.2));
-      else startApproach(prof, self);
+      if (r < Math.min(0.18, prof.block || 0.1)) setMode('guard', rand(0.22, 0.34));
+      else setMode('reset', rand(0.38, 0.58));
       s.readNext = false;
       return;
     }
-    if (r < (prof.block || 0.12)) setMode('guard', rand(0.25, 0.45));
-    else if (r < 0.48) setMode('reset', rand(0.28, 0.5));
-    else if (r < 0.88) setMode('circle', rand(0.7, 1.3) / Math.sqrt(aggr));
-    else startApproach(prof, self); // straight back in
+    if (r < (prof.block || 0.12)) setMode('guard', rand(0.28, 0.48));
+    else if (r < 0.42) setMode('reset', rand(0.4, 0.65));
+    else if (r < 0.88) setMode('circle', rand(0.75, 1.35) / Math.sqrt(aggr));
+    else setMode('reset', rand(0.32, 0.5));
     s.readNext = r < 0.16;
   }
 
