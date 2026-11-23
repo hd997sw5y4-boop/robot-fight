@@ -5604,19 +5604,36 @@ function poseAfterMixer(f, dt = 1 / 60) {
     f.hips.position.z += (f.hipsBind.z - f.hips.position.z) * w;
     // Pin hips yaw to the bind pose so clip root rotation cannot fight steerYaw: one rotation
     // about the vertical (lean and bounce stay; hipFree still eases the pin off for strikes).
-    // Yaw is only measurable while the hips are fairly upright. Lying flat (falls, get-up roll)
-    // the Euler yaw is gimbal noise and pinning it spun the lying body around, so the
-    // correction is frozen at its last upright value there and blends back in on the way up.
+    // Yaw is only measurable while the hips are upright. Lying flat, the Euler yaw is gimbal
+    // noise. Blending the frozen correction toward that reading on the way up applied a real
+    // parent-space yaw the clip was not doing, and a clamped or paused knockdown clip leaves
+    // the already-pinned quaternion in place, so premultiplying again each frame spun the
+    // body on the mat (a full turn every few frames, the get-up top spin). Hold the last
+    // upright correction through the roll, ease a large gap only once the hips are upright,
+    // and strip a pin the mixer did not overwrite before applying this frame's.
     if (f.hipsBindQ && w > 0.01) {
-      const upY = 1 - 2 * (f.hips.quaternion.x ** 2 + f.hips.quaternion.z ** 2); // hips up axis . vertical
-      const e = _hpE.setFromQuaternion(f.hips.quaternion, 'YXZ');
+      const q = f.hips.quaternion;
+      if (!f._hipPinQ) f._hipPinQ = new THREE.Quaternion();
+      if (f._hipPinAng && q.dot(f._hipPinQ) > 1 - 1e-6) {
+        q.premultiply(_hpQ.setFromAxisAngle(_hpY, -f._hipPinAng));
+      }
+      const upY = 1 - 2 * (q.x ** 2 + q.z ** 2); // hips up axis . vertical
+      const e = _hpE.setFromQuaternion(q, 'YXZ');
       const b = _hpBnd.setFromQuaternion(f.hipsBindQ, 'YXZ');
       const live = Math.atan2(Math.sin(b.y - e.y), Math.cos(b.y - e.y));
-      const s = Math.max(0, Math.min(1, (upY - 0.55) / 0.35));
       if (f.hipYawFix == null) f.hipYawFix = live;
-      const dy = f.hipYawFix + Math.atan2(Math.sin(live - f.hipYawFix), Math.cos(live - f.hipYawFix)) * s * s * (3 - 2 * s);
-      if (upY > 0.9) f.hipYawFix = live;
-      f.hips.quaternion.premultiply(_hpQ.setFromAxisAngle(_hpY, dy * w));
+      const upright = upY > 0.9;
+      if (!upright) f.hipYawHeld = true;
+      else if (f.hipYawHeld) {
+        const gap = Math.atan2(Math.sin(live - f.hipYawFix), Math.cos(live - f.hipYawFix));
+        const maxStep = 1.8 * Math.max(dt, 1 / 120);
+        if (Math.abs(gap) <= maxStep) { f.hipYawFix = live; f.hipYawHeld = false; }
+        else f.hipYawFix += Math.sign(gap) * maxStep;
+      } else f.hipYawFix = live;
+      const applied = f.hipYawFix * w;
+      q.premultiply(_hpQ.setFromAxisAngle(_hpY, applied));
+      f._hipPinAng = applied;
+      f._hipPinQ.copy(q);
     }
     // Weight shift: back over the rear leg in the wind-up, forward and down onto the lead leg
     // as the punch lands (the planted feet hold, so the knees take it).
