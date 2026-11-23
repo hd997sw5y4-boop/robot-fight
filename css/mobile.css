@@ -95,10 +95,9 @@ html.rf-mobile #top {
 html.rf-mobile .fighter-hud { min-width: 0; gap: 4px; }
 html.rf-mobile .fighter-hud .name { font-size: 11px; letter-spacing: .1em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 html.rf-mobile .bar { height: 12px; }
-html.rf-mobile .parts { flex-wrap: wrap; gap: 3px; }
+html.rf-mobile .parts-bot { width: 20px; height: 28px; }
 @media (orientation: portrait) {
-  html.rf-mobile .parts i { transform: scale(.8); }
-  html.rf-mobile .parts i.sub { display: none; }
+  html.rf-mobile .parts-bot { width: 18px; height: 26px; }
 }
 
 html.rf-mobile .rfs-soundlab { width: min(100%, 96vw); }

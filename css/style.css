@@ -14,24 +14,48 @@ html, body { margin: 0; height: 100%; background: #07080c; color: #eef2f6; font-
 }
 .fighter-hud { display: flex; flex-direction: column; gap: 6px; }
 .fighter-hud.right { text-align: right; }
-.parts { display: flex; gap: 4px; margin-top: 1px; }
+.parts { display: flex; margin-top: 3px; pointer-events: auto; }
 .fighter-hud.right .parts { justify-content: flex-end; }
-.parts i {
+.parts-bot {
   display: block;
-  width: 13px;
-  height: 9px;
-  border-radius: 2px;
-  background: #cfd4dc;
-  box-shadow: 0 0 0 1px rgba(0,0,0,0.55), 0 1px 4px #0008;
-  opacity: 0.95;
+  width: 24px;
+  height: 34px;
+  flex-shrink: 0;
+  overflow: visible;
+  filter: drop-shadow(0 1px 2px #000c);
 }
-.parts i[data-part="head"] { width: 9px; height: 9px; border-radius: 50%; }
-.parts i[data-part="torso"] { width: 11px; height: 12px; }
-.parts i[data-part="legL"], .parts i[data-part="legR"] { width: 8px; height: 12px; }
-.parts i.sub { width: 6px; height: 6px; border-radius: 1px; align-self: flex-end; opacity: 0.85; }
-.parts i.sub[data-part="handL"] { margin-left: 4px; }
-.parts i.hurt { background: #e8c14a; }
-.parts i.wreck { background: #2a2d33; box-shadow: 0 0 0 1px #6b6f76; }
+.parts [data-part] {
+  fill: #cfd4dc;
+  stroke: #0c0e14;
+  stroke-width: 1;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  cursor: default;
+  transition: fill 0.16s ease, stroke 0.16s ease, filter 0.16s ease;
+}
+.parts [data-part]:hover { stroke: #f4f7fb; }
+.parts [data-part].hurt {
+  fill: #f0c03e;
+  stroke: #6e4e0c;
+  filter: drop-shadow(0 0 2px rgba(240, 192, 62, 0.95));
+}
+.parts [data-part].hurt:hover { stroke: #ffe9a3; }
+.parts [data-part].wreck {
+  fill: #23262c;
+  stroke: #8a3a3a;
+  stroke-dasharray: 2.4 1.6;
+  filter: none;
+}
+.parts [data-part].wreck:hover { stroke: #c46a6a; }
+.parts-join {
+  fill: #8b929c;
+  stroke: #0c0e14;
+  stroke-width: 1;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+.parts-detail { fill: #16181e; stroke: none; pointer-events: none; }
 .name { font-size: 13px; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 800; color: #f7fafc; opacity: 1; text-shadow: 0 1px 2px #000, 0 0 14px #000; }
 .bar {
   height: 14px;
