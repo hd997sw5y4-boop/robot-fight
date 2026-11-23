@@ -3673,6 +3673,7 @@ function applyFlinch(f, dt) {
     bone.parent.getWorldQuaternion(_flPQ);
     const local = _bp.copy(_flAxis).applyQuaternion(_flPQ.invert());
     _flQ.setFromAxisAngle(local.normalize(), fl.amp * w * env);
+    captureRawBone(f, bone);
     bone.quaternion.premultiply(_flQ);
   }
 }
@@ -5639,6 +5640,21 @@ function diagFootStage(f, stage) {
   }
 }
 
+// Three.js PropertyMixer skips writing a bone when a paused or clamped-at-end clip evaluates to
+// the exact same quaternion as last frame (e.g. HitOnLegs holdAt or a finished knockdown clip).
+// Restore any bone that post-mixer passes (hips yaw-pin, ground-hit flinch) premultiplied last
+// frame before mixer.update(), so those rotations never stack on top of themselves into a spin.
+function captureRawBone(f, bone) {
+  if (!f || !bone) return;
+  if (!f._rawBoneQ) f._rawBoneQ = new Map();
+  if (!f._rawBoneQ.has(bone)) f._rawBoneQ.set(bone, bone.quaternion.clone());
+}
+function restoreRawPose(f) {
+  if (!f || !f._rawBoneQ || !f._rawBoneQ.size) return;
+  for (const [bone, q] of f._rawBoneQ) bone.quaternion.copy(q);
+  f._rawBoneQ.clear();
+}
+
 function poseAfterMixer(f, dt = 1 / 60) {
   // Keep the game's movement in charge: pin hips X/Z, leave Y for clip bounce. During punches
   // and kicks the pin eases off so the clip's lunge, hip turn and weight shift come through,
@@ -5664,6 +5680,7 @@ function poseAfterMixer(f, dt = 1 / 60) {
       if (f.hipYawFix == null) f.hipYawFix = live;
       const dy = f.hipYawFix + Math.atan2(Math.sin(live - f.hipYawFix), Math.cos(live - f.hipYawFix)) * s * s * (3 - 2 * s);
       if (upY > 0.9) f.hipYawFix = live;
+      captureRawBone(f, f.hips);
       f.hips.quaternion.premultiply(_hpQ.setFromAxisAngle(_hpY, dy * w));
     }
     // Weight shift: back over the rear leg in the wind-up, forward and down onto the lead leg
@@ -6107,6 +6124,7 @@ function tick() {
   if (!DOWN_STATES.has(p1.state) && !DOWN_STATES.has(p2.state) && !p1.ghost && !p2.ghost) separate(p1, p2, dt);
   faceEachOther(p1, p2, dt);
   for (const f of [p1, p2]) {
+    restoreRawPose(f);
     updateBaseLayer(f);
     f.mixer.update(dt);
     f.root.position.y = 0;
