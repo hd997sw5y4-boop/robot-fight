@@ -202,8 +202,8 @@
     M.rounds.push({ n: M.round, winner, method, stats: M.stats });
     paintHud();
     const who = winner == null ? 'Nobody scores' : (winner === 0 ? M.cfg.p1.name : M.cfg.p2.name) + ' takes round ' + M.round;
-    const big = { KO: 'K.O.', TKO: 'T.K.O.', Decision: 'Decision', Draw: 'Draw' }[method];
-    const ko = method === 'KO' || method === 'TKO';
+    const big = { KO: 'Knockout', Part: 'Part loss', TKO: 'Part loss', Decision: 'Decision', Draw: 'Draw' }[method] || method;
+    const ko = method === 'KO' || method === 'Part' || method === 'TKO';
     S.call(big, who, 'end ' + (ko ? 'ko' : ''));
     // [announcer hook]
     const ev = ko ? 'ko' : (method === 'Decision' ? 'decision' : (method === 'Draw' ? 'draw' : 'roundEnd'));
@@ -280,7 +280,7 @@
     const st = S.fight.getFightState();
     if (!st || !st.ready) return;
     if (M.phase === 'intro') {
-      if (st.phase === 'fight') { M.phase = 'fight'; S.call('Fight', '', 'fight', 0.9); }
+      if (st.phase === 'fight') { M.phase = 'fight'; S.call('Spark up', '', 'fight', 0.9); }
       return;
     }
     if (M.phase !== 'fight') return;
@@ -296,7 +296,11 @@
     if (st.over) {
       if (st.winner !== 'p1' && st.winner !== 'p2') return endRound(null, 'Draw');
       const loser = st.winner === 'p1' ? 1 : 0;
-      endRound(1 - loser, partsDown(S.fighters()[loser]) >= 3 ? 'TKO' : 'KO');
+      const f = S.fighters()[loser];
+      const p = (f && f.parts) || {};
+      const gone = (id) => p[id] && p[id].detached;
+      const partLoss = gone('head') || gone('legL') || gone('legR');
+      endRound(1 - loser, partLoss ? 'Part' : 'KO');
       return;
     }
     if (M.timeLeft != null && st.phase === 'fight') {

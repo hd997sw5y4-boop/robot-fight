@@ -167,6 +167,7 @@ let humGain = null;
 let masterLevel = 1;
 let sfxLevel = 1;
 let crowdLevel = 0.7;
+let crowdDuckUntil = 0;
 const buffers = new Map();
 let loaded = false;
 let loading = null;
@@ -466,7 +467,8 @@ function applyGains() {
   };
   set(master, taper(masterLevel));
   set(sfx, taper(sfxLevel));
-  set(crowd, taper(crowdLevel) * (performance.now() < voiceUntil ? 0.6 : 1));
+  const ducked = performance.now() < crowdDuckUntil ? 0.42 : 1;
+  set(crowd, taper(crowdLevel) * (performance.now() < voiceUntil ? 0.6 : 1) * ducked);
   if (voice) set(voice, taper(voiceLevel));
 }
 
@@ -644,7 +646,15 @@ function makeCtx() {
   sfxWet.connect(master);
   humGain.connect(crowd);
   crowd.connect(master);
-  master.connect(ctx.destination);
+  // Gentle bus compressor so stacked metal layers don't clip the output.
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -10;
+  comp.knee.value = 8;
+  comp.ratio.value = 3.2;
+  comp.attack.value = 0.003;
+  comp.release.value = 0.14;
+  master.connect(comp);
+  comp.connect(ctx.destination);
   hookConvolver();
   applyGains();
 }
@@ -777,24 +787,33 @@ export function playHit(opts = {}) {
     return;
   }
   const metal = heavy ? 'metalH' : 'metalM';
-  playGroup(metal, { vol: Math.min(1, 0.85 * impact + (heavy ? 0.12 : 0)), rate: kick ? 0.68 : 0.76, rateVar: 0.08 });
-  playGroup(heavy || kick ? 'plateH' : 'plateM', { vol: (heavy ? 0.9 : 0.65) * impact, rateVar: 0.08, delay: 0.004 });
-  playGroup('thud', { vol: (heavy ? 0.95 : 0.7) * impact, rateVar: 0.06, delay: 0.008 });
+  playGroup(metal, { vol: Math.min(0.9, 0.72 * impact + (heavy ? 0.1 : 0)), rate: kick ? 0.68 : 0.76, rateVar: 0.08 });
+  playGroup(heavy || kick ? 'plateH' : 'plateM', { vol: (heavy ? 0.74 : 0.58) * impact, rateVar: 0.08, delay: 0.004 });
+  playGroup('thud', { vol: (heavy ? 0.78 : 0.62) * impact, rateVar: 0.06, delay: 0.008 });
   playGroup(heavy || kick ? 'punchH' : 'punchM', {
-    vol: (heavy ? 0.82 : 0.5) * impact,
+    vol: (heavy ? 0.68 : 0.46) * impact,
     rate: (heavy || kick) ? 0.62 : 0.82,
     delay: 0.012,
     rateVar: 0.06,
   });
-  subThump({ vol: heavy ? 1 : 0.55 + hard * 0.35, f0: heavy ? 76 : 95, f1: heavy ? 30 : 42, dur: heavy ? 0.38 : 0.22 });
+  subThump({ vol: heavy ? 0.82 : 0.5 + hard * 0.28, f0: heavy ? 76 : 95, f1: heavy ? 30 : 42, dur: heavy ? 0.38 : 0.22 });
   if ((heavy || hard > 0.55) && limited('rattle', 120)) playGroup('rattle', { vol: 0.42 + hard * 0.12, delay: 0.06, rateVar: 0.1 });
   if (limited('spark', 40)) {
     playGroup('spark', { vol: heavy ? 0.5 : 0.26 + hard * 0.12, rate: 0.85, rateVar: 0.14 });
     if (heavy && Math.random() < 0.45) playGroup('sparkArc', { vol: 0.32, rate: 0.9, rateVar: 0.12, delay: 0.02 });
   }
   if (heavy && limited('crowdHit', 420)) {
-    playGroup(Math.random() < 0.55 ? 'crowdBig' : 'crowdHit', { bus: crowd, vol: 0.78, rateVar: 0.03, volVar: 0.08 });
+    playGroup(Math.random() < 0.55 ? 'crowdBig' : 'crowdHit', { bus: crowd, vol: 0.72, rateVar: 0.03, volVar: 0.08 });
   }
+  if (heavy) duckCrowd(110);
+}
+
+// Pull the crowd bed down for a heavy connect so the impact cuts through. Real-time, not sim-time.
+export function duckCrowd(ms = 100) {
+  crowdDuckUntil = Math.max(crowdDuckUntil, performance.now() + ms);
+  applyGains();
+  const wait = ms + 30;
+  setTimeout(() => { if (performance.now() >= crowdDuckUntil - 5) applyGains(); }, wait);
 }
 
 export function playSfx(kind, opts = {}) {

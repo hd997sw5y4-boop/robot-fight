@@ -3108,6 +3108,11 @@ function endAttack(f, fade = 0.2) {
   const who = f.isCpu ? ((aiProfile(f).recoverMul) || COMBAT.cpuRecoverMul || 1) : (COMBAT.playerRecoverMul || 1);
   const rec = base * who * (f.hitThisAttack ? 1 : (COMBAT.whiffMul || 2)) * ((f.atkMods && f.atkMods.cooldownMul) || 1) * (!f.isCpu && f.chain > 0 ? 0.8 : 1);
   f.cooldown = Math.max(f.cooldown, rec / statOf(f, 'recovery'));
+  // After 2–3 connected hits the attacker has to reset. Stops nonstop swinging.
+  if ((f._hitCombo || 0) >= 3) {
+    f.cooldown = Math.max(f.cooldown, f.isCpu ? 0.72 : 0.38);
+    f._hitCombo = 0;
+  }
   f.state = 'idle';
   f.atkContact = false;
   f.strikePlan = null;
@@ -3714,7 +3719,12 @@ function applyHit(atk, def, spec, kind, strikeBone, contact) {
   // in addShake) and a bright flash right at the contact point.
   const hard = Math.max(0, Math.min(1, (force - 2) / 4 + (heavy ? 0.25 : 0) + (counter ? 0.25 : 0)));
   playHit({ blocked, heavy, kick: kind === 'kick', hard });
-  addShake(blocked ? 0.06 : (heavy ? 0.22 + hard * 0.14 : 0.11 + hard * 0.1));
+  const finishing = def.health <= 0 || isCatastrophic(def);
+  if (blocked) addShake(0.045, 0.08);
+  else if (finishing || counter) addShake(finishing ? 0.28 : 0.16, finishing ? 0.26 : 0.18);
+  else if (heavy) addShake(0.13 + hard * 0.04, 0.17);
+  else addShake(0.055 + hard * 0.02, 0.1);
+  addImpactFreeze(blocked ? 0.04 : (finishing || counter ? COMBAT.hitStopCounter : heavy ? COMBAT.hitStopHeavy : COMBAT.hitStopLight));
   hitFlash(hit.point, blocked ? 0.45 : 0.7 + hard * 0.85, blocked ? 0x9fd0ff : 0xfff0c8);
   const fwd = hit.dir;
   // Attacker feels the connect: the drive stops and the torso recoils a touch off the target.
@@ -3728,8 +3738,8 @@ function applyHit(atk, def, spec, kind, strikeBone, contact) {
       ? Math.min(1.2, 0.88 + force * 0.06)
       : Math.min(0.78, 0.5 + force * 0.05);
   startFlinch(def, fwd, flinchAmp, blocked ? 'arm' : hitZone(hit.partId));
-  // Knockback always walks out through hitPush / setFighterMove (physics owns the body;
-  // no freeze frames, no slow motion). Heavier blows travel farther and start immediately.
+  // Knockback walks out through hitPush / setFighterMove (physics owns the body).
+  // A short hit-stop freezes both fighters first; gravity is not changed.
   const solid = !blocked && (force >= COMBAT.stumbleForce || heavy);
   const stumbleClip = solid && def.actions.StumbleBackwards ? 'StumbleBackwards' : null;
   if (blocked) {
@@ -3769,7 +3779,9 @@ function applyHit(atk, def, spec, kind, strikeBone, contact) {
       const lightTap = !heavy && !counter && force < 2.6;
       const useStumble = !lightTap && !!def.actions.StumbleBackwards && !!(stumbleClip || force >= 2.6 || solid);
       const clip = useStumble ? 'StumbleBackwards' : pickHitClip(def, hit.partId, force);
-      const stun = ((useStumble ? COMBAT.hitStunHeavy : Math.max(COMBAT.hitStun, 0.45)) + (counter ? COMBAT.counterExtra : 0)) / statOf(def, 'recovery');
+      // Counters take the heavy stun plus the extra frames, so a read wins the turn.
+      const baseStun = (useStumble || counter) ? COMBAT.hitStunHeavy : COMBAT.hitStun;
+      const stun = (baseStun + (counter ? COMBAT.counterExtra : 0)) / statOf(def, 'recovery');
       startHitReaction(def, fwd, { clip, useStumble, lightTap, stun });
     }
   }
@@ -4278,6 +4290,16 @@ function dampFallYaw(f, dt) {
   f.root.rotation.y += f.fallYawVel * dt;
 }
 
+// First knockdown is a short settle. Each later one stays down longer, capped.
+function knockdownRest(f) {
+  const n = Math.max(0, (f.kdCount || 1) - 1);
+  const step = COMBAT.downRestStep != null ? COMBAT.downRestStep : 0.45;
+  const cap = COMBAT.downRestCap != null ? COMBAT.downRestCap : 1.8;
+  const later = Math.min(cap - COMBAT.downRest, n * step);
+  const blow = Math.max(0, Math.min(0.25, ((f.downForce || 5) - FALL_HEAVY) * 0.18));
+  return Math.min(cap, COMBAT.downRest + later + blow) / statOf(f, 'recovery');
+}
+
 function stepDown(f, dt) {
   const spec = f.downSpec || FALL.stumble;
   dampFallYaw(f, dt);
@@ -4292,7 +4314,7 @@ function stepDown(f, dt) {
   const frac = act.time / dur;
   if (spec.lieAt == null) {
     // Kneel-and-rise clip: the robot is back on its feet when the clip ends.
-    if (!f.landed && frac > 0.22) { f.landed = true; playSfx('clank', { vol: 0.7, rate: 0.62 }); addShake(0.08); }
+    if (!f.landed && frac > 0.22) { f.landed = true; playSfx('clank', { vol: 0.7, rate: 0.62 }); addShake(0.07, 0.1); }
     if (frac >= 0.97 || !act.isRunning() || f.stateT > dur / spec.speed + 0.4) {
       f.state = 'idle';
       f.hitPush = null;
@@ -4304,15 +4326,14 @@ function stepDown(f, dt) {
   if (spec.holdAt && !act.paused && frac >= spec.holdAt) { act.time = spec.holdAt * dur; act.paused = true; }
   if (!f.downLying && frac >= spec.lieAt) {
     f.downLying = true;
-    if (!f.landed) { f.landed = true; playSfx('clank', { vol: 1, rate: 0.55 }); addShake(0.14); }
+    if (!f.landed) { f.landed = true; playSfx('clank', { vol: 1, rate: 0.55 }); addShake(0.15, 0.18); }
   }
   if (!f.downLying) return;
-  // Lie still a beat (same every time: robots don't tire), then get up. The clock runs
-  // through ground hits, so a robot can't be kept down.
+  // Lie still after the settle, then get up. Later knockdowns stay down longer.
+  // The clock runs through ground hits, so a robot can't be kept down by stomps.
   f.downLieT += dt;
   const settled = act.paused || frac >= 0.78 || !act.isRunning();
-  // Harder blows keep it down a little longer (same every time for the same blow).
-  const rest = (COMBAT.downRest + Math.max(0, Math.min(0.5, ((f.downForce || 5) - FALL_HEAVY) * 0.25))) / statOf(f, 'recovery');
+  const rest = knockdownRest(f);
   if ((settled && f.downLieT >= rest) || f.stateT > COMBAT.downMax) beginGetUp(f);
 }
 
@@ -4415,8 +4436,8 @@ function stepKoTip(f, dt) {
     const flat = 1.5;
     if (k.ang >= flat) {
       k.ang = flat;
-      if (k.vel > 1.2 && k.bounces < 2) { k.vel = -k.vel * 0.22; k.bounces++; playSfx('clank', { vol: 0.9, rate: 0.6 }); addShake(0.12); }
-      else { k.vel = 0; k.done = true; if (!f.landed) { f.landed = true; playSfx('clank', { vol: 1, rate: 0.55 }); addShake(0.14); } }
+      if (k.vel > 1.2 && k.bounces < 2) { k.vel = -k.vel * 0.22; k.bounces++; playSfx('clank', { vol: 0.9, rate: 0.6 }); addShake(0.12, 0.14); }
+      else { k.vel = 0; k.done = true; if (!f.landed) { f.landed = true; playSfx('clank', { vol: 1, rate: 0.55 }); addShake(0.16, 0.18); } }
     }
   }
   // +z rolls the robot toward its own right (see applyMalfunctions).
@@ -4446,14 +4467,21 @@ function ko(loser, winner, info) {
   match.overlayAt = performance.now() + 1600;
   const title = document.getElementById('ko-title');
   const sub = document.getElementById('ko-sub');
-  if (title) title.textContent = winner && winner.id === 'p1' ? 'Blue wins' : 'Red wins';
+  const methodEl = document.getElementById('ko-method');
+  const headGone = (info && info.reason === 'head') || (loser.parts && loser.parts.head && loser.parts.head.detached);
+  const legGone = (info && info.reason === 'legs') || (loser.parts && ['legL', 'legR'].some((k) => loser.parts[k] && loser.parts[k].detached));
+  const blue = winner && winner.id === 'p1';
+  if (methodEl) methodEl.textContent = headGone || legGone ? 'Part loss' : 'Knockout';
+  if (title) title.textContent = blue ? 'Blue wins' : 'Red wins';
   if (sub) {
-    if ((info && info.reason === 'head') || (loser.parts && loser.parts.head && loser.parts.head.detached)) sub.textContent = winner && winner.id === 'p1' ? "You took the opponent's head." : 'Your head was torn off.';
-    else if ((info && info.reason === 'legs') || (loser.parts && ['legL', 'legR'].some((k) => loser.parts[k] && loser.parts[k].detached))) sub.textContent = 'A leg is gone. The fighter collapsed.';
-    else sub.textContent = winner && winner.id === 'p1' ? 'You won the fight.' : 'CPU won the fight.';
+    if (headGone) sub.textContent = blue ? 'The head came off. Chassis down.' : 'Your head was torn off.';
+    else if (legGone) sub.textContent = 'A leg is gone. The chassis collapsed.';
+    else sub.textContent = blue ? 'You won the fight.' : 'The other chassis is down.';
   }
   playSfx('ko');
-  addShake(0.28);
+  addShake(0.28, 0.28);
+  addImpactFreeze(COMBAT.hitStopCounter || 0.12);
+  startKoSlow();
   notifyFightEnd({
     winner: match.winner,
     reason: 'ko',
@@ -5136,10 +5164,49 @@ function syncHud(dt = 0) {
 
 const camT = new THREE.Vector3();
 const lookT = new THREE.Vector3();
-let shakeAmp = 0;
-function addShake(amount) {
+// Timed camera kick in metres. Light ~0.06 m / 100 ms, heavy ~0.15 m / 170 ms, KO ~0.28 m / 280 ms.
+const shakeState = { amp: 0, dur: 0.12, t: 1 };
+function addShake(amount, dur) {
   if (!getSettings().shake) return;
-  shakeAmp = Math.min(0.58, shakeAmp + amount);
+  const amp = Math.max(0, Math.min(0.32, amount || 0));
+  if (amp < 0.01) return;
+  const d = dur || (amp >= 0.22 ? 0.26 : amp >= 0.11 ? 0.17 : 0.1);
+  const alive = shakeState.t < shakeState.dur ? Math.pow(1 - shakeState.t / shakeState.dur, 1.6) : 0;
+  if (amp >= shakeState.amp * alive) {
+    shakeState.amp = amp;
+    shakeState.dur = d;
+    shakeState.t = 0;
+  }
+}
+function stepShake(dt) {
+  if (!getSettings().shake) { shakeState.t = shakeState.dur; return; }
+  if (shakeState.t < shakeState.dur) shakeState.t += dt;
+}
+function shakeEnv() {
+  if (shakeState.amp <= 0 || shakeState.t >= shakeState.dur) return 0;
+  return shakeState.amp * Math.pow(1 - shakeState.t / shakeState.dur, 1.6);
+}
+function applyCameraShake() {
+  const amp = shakeEnv();
+  if (amp <= 0) return;
+  if (camModeLive === 'first' && !match.over) {
+    camera.rotateX((Math.random() - 0.5) * amp * 0.35);
+    camera.rotateZ((Math.random() - 0.5) * amp * 0.22);
+    return;
+  }
+  camera.position.x += (Math.random() - 0.5) * amp;
+  camera.position.y += (Math.random() - 0.5) * amp * 0.45;
+}
+
+// Hit-stop: both fighters hold. Gravity is untouched because the sim clock just pauses.
+let impactFreeze = 0;
+let koSlowLeft = 0;
+function addImpactFreeze(sec) {
+  const s = Math.max(0, Math.min(0.14, sec || 0));
+  if (s > impactFreeze) impactFreeze = s;
+}
+function startKoSlow() {
+  koSlowLeft = 0.30;
 }
 
 // Contact flash: an additive glow sprite, timed on wall-clock so it stays visible on impact.
@@ -5158,7 +5225,7 @@ function hitFlash(point, size, color) {
   }
   _flash.position.copy(point);
   _flash.material.color.setHex(color);
-  _flash.userData = { t: 0, life: 0.11, size: size * SIZE };
+  _flash.userData = { t: 0, life: size > 1.1 ? 0.16 : 0.1, size: size * SIZE };
   _flash.visible = true;
 }
 function stepFlash(rawDt) {
@@ -5271,11 +5338,6 @@ function updateFightingCamera(dt) {
     lookT.lerp(_cvB, 1 - Math.pow(0.0005, dt));
   }
   camera.lookAt(lookT);
-  if (shakeAmp > 0) {
-    camera.position.y += (Math.random() - 0.5) * shakeAmp * 0.4;
-    camera.position.addScaledVector(_cvF, (Math.random() - 0.5) * shakeAmp * 0.8);
-    if (dt > 0) shakeAmp = Math.max(0, shakeAmp - dt * 3.2);
-  }
 }
 
 function updateFollowCamera(dt, mode) {
@@ -5315,18 +5377,6 @@ function updateFollowCamera(dt, mode) {
     const w = (hd - 0.3) * (mode === 'first' ? 0.1 : 0.05);
     camera.rotateZ(Math.sin(t * 1.3) * w + (Math.random() - 0.5) * w * 0.3);
     camera.rotateX(Math.sin(t * 2.1 + 1) * w * 0.4);
-  }
-  if (shakeAmp > 0) {
-    // Mechanical shake: a hard rotational jolt (1st person) or a positional one (3rd).
-    if (mode === 'first') {
-      camera.rotateX((Math.random() - 0.5) * shakeAmp * 0.9);
-      camera.rotateY((Math.random() - 0.5) * shakeAmp * 0.6);
-      camera.rotateZ((Math.random() - 0.5) * shakeAmp * 0.7);
-    } else {
-      camera.position.x += (Math.random() - 0.5) * shakeAmp * 0.8;
-      camera.position.y += (Math.random() - 0.5) * shakeAmp * 0.4;
-    }
-    if (dt > 0) shakeAmp = Math.max(0, shakeAmp - dt * 3.2);
   }
 }
 
@@ -5393,21 +5443,23 @@ function updateCamera(dt) {
     _camFromL.copy(_camSaveL);
     _camFromFov = saveFov;
   }
-  if (camEase <= 0) return;
-  const toP = camera.position.clone();
-  camera.getWorldDirection(_camSaveD);
-  const toL = camera.position.clone().addScaledVector(_camSaveD, 6);
-  const toFov = camera.fov;
-  camEase = Math.max(0, camEase - Math.max(dt || 0, 0.001) / 0.4);
-  const a = 1 - camEase;
-  const s = a * a * (3 - 2 * a);
-  camera.position.lerpVectors(_camFromP, toP, s);
-  _camLookE.lerpVectors(_camFromL, toL, s);
-  camera.lookAt(_camLookE);
-  if (Math.abs(toFov - _camFromFov) > 0.05) {
-    camera.fov = _camFromFov + (toFov - _camFromFov) * s;
-    camera.updateProjectionMatrix();
+  if (camEase > 0) {
+    const toP = camera.position.clone();
+    camera.getWorldDirection(_camSaveD);
+    const toL = camera.position.clone().addScaledVector(_camSaveD, 6);
+    const toFov = camera.fov;
+    camEase = Math.max(0, camEase - Math.max(dt || 0, 0.001) / 0.4);
+    const a = 1 - camEase;
+    const s = a * a * (3 - 2 * a);
+    camera.position.lerpVectors(_camFromP, toP, s);
+    _camLookE.lerpVectors(_camFromL, toL, s);
+    camera.lookAt(_camLookE);
+    if (Math.abs(toFov - _camFromFov) > 0.05) {
+      camera.fov = _camFromFov + (toFov - _camFromFov) * s;
+      camera.updateProjectionMatrix();
+    }
   }
+  applyCameraShake();
 }
 
 
@@ -5434,7 +5486,8 @@ function updateCameraInner(dt) {
   const a = p1.root.position;
   const b = p2.root.position;
   // Over: aim above the bodies so the fighters sit in the lower frame, under the title.
-  const midY = matTopY() + (match.over ? 1.55 : 1.15) * SIZE;
+  const downed = p1.state === 'down' || p2.state === 'down' || p1.state === 'ko' || p2.state === 'ko';
+  const midY = matTopY() + (match.over ? 1.45 : downed ? 0.82 : 1.15) * SIZE;
   lookT.set((a.x + b.x) / 2, midY, (a.z + b.z) / 2);
   if (match.over) {
     match.orbitT = (match.orbitT || 0) + dt;
@@ -5467,11 +5520,6 @@ function updateCameraInner(dt) {
     camera.position.x += Math.sin(t * 1.7) * a;
     camera.position.y += Math.sin(t * 2.3 + 1) * a * 0.5;
     camera.rotation.z += Math.sin(t * 1.3) * a * 0.15;
-  }
-  if (shakeAmp > 0) {
-    camera.position.x += (Math.random() - 0.5) * shakeAmp;
-    camera.position.y += (Math.random() - 0.5) * shakeAmp * 0.5;
-    if (dt > 0) shakeAmp = Math.max(0, shakeAmp - dt * 3.2);
   }
 }
 
@@ -5992,7 +6040,17 @@ function tick() {
   logFps(fps);
   stepFov(rawDt);
   stepFlash(rawDt);
+  stepShake(rawDt);
+  const frozen = !isSettingsOpen() && impactFreeze > 0;
+  if (impactFreeze > 0) impactFreeze = Math.max(0, impactFreeze - rawDt);
   let dt = isSettingsOpen() ? 0 : rawDt;
+  let camDt = dt;
+  if (frozen) camDt = rawDt;
+  else if (!isSettingsOpen() && koSlowLeft > 0 && dt > 0) {
+    koSlowLeft = Math.max(0, koSlowLeft - rawDt);
+    dt *= 0.5;
+    camDt = dt;
+  }
   if (match.over && match.overlayAt && performance.now() >= match.overlayAt) showKoOverlay();
   const live = !!(p1 && p2 && fightersStaged && !previewMode);
   if (live && !bellRung && (shellRoundOver() || match.over)) ringBell('round');
@@ -6016,11 +6074,22 @@ function tick() {
   if (match.phase === 'fight' && !match.over) stepRound(dt);
   // dt is 0 while the shell pause or Settings holds the clock: nobody decides or acts then (a
   // CPU used to start strikes into a frozen frame, and the log counted it as stuck).
-  canAct = match.phase === 'fight' && !match.over && !inBell() && !isSettingsOpen() && dt > 0;
+  canAct = match.phase === 'fight' && !match.over && !inBell() && !isSettingsOpen() && !frozen && dt > 0;
   const watch = !!shellCall('cpuControls', 'p1'); // Bot vs Bot: P1 is a CPU too
   p1.isCpu = watch;
-  const pin = canAct ? (watch ? updateAI(p1, p2, dt) : consumeAttacks(rawInput(), dt)) : consumeAttacks({ sidestep: 0, inout: 0, punch: false, kick: false, block: false }, 1);
-  const ain = canAct ? updateAI(p2, p1, dt) : { sidestep: 0, inout: 0, punch: false, kick: false, block: false };
+  const emptyIn = { sidestep: 0, inout: 0, punch: false, kick: false, block: false };
+  let pin;
+  let ain;
+  if (frozen) {
+    // Hold the input buffer (dt 0) so a press during the freeze is remembered, not burned.
+    if (!watch) consumeAttacks(rawInput(), 0);
+    pin = emptyIn;
+    ain = emptyIn;
+    dt = 0;
+  } else {
+    pin = canAct ? (watch ? updateAI(p1, p2, dt) : consumeAttacks(rawInput(), dt)) : consumeAttacks(emptyIn, 1);
+    ain = canAct ? updateAI(p2, p1, dt) : emptyIn;
+  }
   tapped.clear();
   shellCall('clearTapped');
 
@@ -6107,7 +6176,7 @@ function tick() {
     stepLooseEffects(dt, false);
   }
 
-  if (!match.camLock) updateCamera(dt);
+  if (!match.camLock) updateCamera(camDt);
   placeTitles();
   updateFighterRims();
   hitLight.intensity = Math.max(0, hitLight.intensity - dt * 28);

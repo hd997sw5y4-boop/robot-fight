@@ -183,9 +183,9 @@ export const ARENA = {
   // Raised octagon stage: mat top sits 0.9 m above the arena floor (ARENA.floorY).
   // Visual floor-mesh top and physics plane share this Y so feet and colliders agree.
   matTop: 0.9,
-  // Short MMA cage (waist-to-chest). Visuals and physics share this height for the
-  // visible rail; physics also uses a taller extension of the same wall so jump-outs stay in.
-  cage: true,
+  // Visual cage is off: chain-link and rails block the camera. Physics keeps an
+  // invisible ring wall (see physics.js) so fighters and loose parts stay on the mat.
+  cage: false,
   cageHeight: 1.48 * WORLD_SCALE,
   // HDRI is used for robot/mat reflections only (on by default; toggle saved).
   // The surround stays a dark void. Poly Haven Industrial Pipe and Valve 01 2K (CC0).
@@ -217,7 +217,7 @@ export const COMBAT = {
   punchSpeed: 1.45,      // punch clip playback (damage slows it again)
   kickSpeed: 1.28,
   playerRecoverMul: 0.55, // the player's post-attack pause vs the table above
-  cpuRecoverMul: 0.85,    // CPU stays readable, a little snappier than the table
+  cpuRecoverMul: 1,       // CPU uses the recovery table; the player stays snappier
   inputBuffer: 0.3,      // seconds an early attack press is remembered
   contactHold: 0.1,      // after a fist/foot connects it is pulled back this soon
   knockdownForce: 4.6,   // a heavy blow at least this hard knocks down (heavy counters always do)
@@ -229,9 +229,14 @@ export const COMBAT = {
   fistShell: 0.16 * SIZE,  // fist surface beyond the hand bone (contact tolerance)
   kickShell: 0.15 * SIZE,
   blockReduction: 0.82,
-  hitStun: 0.34,       // light hitstun
-  hitStunHeavy: 1.05,  // hooks, body shots, most kicks: a few stumble steps before recover
-  counterExtra: 0.17,  // caught mid-swing: +10f
+  // Hitstun at 60 fps: light 18f, heavy 32f, counter = heavy + 10f.
+  hitStun: 0.30,
+  hitStunHeavy: 0.53,
+  counterExtra: 0.17,
+  // Mutual freeze on connect (attacker and defender). No gravity change — time just holds.
+  hitStopLight: 0.05,
+  hitStopHeavy: 0.08,
+  hitStopCounter: 0.12,
   blockStunTail: 0.08, // guard stays locked this long after its pushback
   hitInvuln: 0.08,     // only stops one blow registering twice; combos can land
   hitRock: 0.42 * SIZE,       // metres a light hit knocks a robot back (walked out with the back-step)
@@ -240,9 +245,11 @@ export const COMBAT = {
   separate: 1.1 * SIZE,       // soft spacing: closer than this, the CPU steps back (with its walk)
   separateDown: 0.6 * SIZE,   // how close a robot may walk to one lying on the mat (ground attacks)
   separateHard: 0.92 * SIZE,  // emergency push-apart only (physics capsules normally keep 0.95)
-  downRest: 0.85,      // seconds lying still before getting up (same every time: robots don't tire)
-  downMax: 4.2,        // safety: get up by this long after the knockdown started
-  getupTime: 1.25,     // the GettingUp clip is played over about this long
+  downRest: 0.85,      // first knockdown, after the body has settled (later ones add time)
+  downRestStep: 0.45,  // each further knockdown stays down longer
+  downRestCap: 1.8,    // lying-still cap (plus the fall itself)
+  downMax: 5.2,        // safety: get up by this long after the knockdown started
+  getupTime: 1.05,     // GettingUp plays over about this long (blended, never a snap)
   // Front flip dodge (Y, or R1 + forward). No back flip and no jump / flip kicks.
   dodge: {
     back: 1.75 * SIZE,      // metres a back flip carries the robot away

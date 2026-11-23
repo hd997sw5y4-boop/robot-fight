@@ -246,7 +246,7 @@
   const brkEl = mk('fpBreak', 'fp-break');
   const BREAK_SECS = 5;
   const brk = { on: false, next: null, left: 0 };
-  const METHOD = { KO: 'K.O.', TKO: 'T.K.O.', Decision: 'decision', Draw: 'draw' };
+  const METHOD = { KO: 'knockout', Part: 'part loss', TKO: 'part loss', Decision: 'decision', Draw: 'draw' };
   function statList(s) {
     if (!s) return '';
     const rows = [];

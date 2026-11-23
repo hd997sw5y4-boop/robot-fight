@@ -291,10 +291,13 @@ export function buildArena(scene, { tiled, metalColor, metalRough }) {
     return 0x121317;
   };
 
-  // Short cage: waist-to-chest on the ~2.74 m robots. Posts sit on the mat top (y = 0).
-  const postH = H + 0.08;
-  const fenceTop = H;
-  const padH = H - 0.16;
+  // The chain-link cage blocks the camera, so the default ring is open: short corner
+  // posts and a kick pad only. Physics still has an invisible wall. ARENA.cage brings
+  // the rails and fence back.
+  const openRing = ARENA.cage === false;
+  const postH = openRing ? 0.52 : H + 0.08;
+  const fenceTop = openRing ? 0.4 : H;
+  const padH = openRing ? 0.4 : H - 0.16;
   const padY = padH / 2; // bottom at y = 0
   const capY = padH;
   const ledTopY = Math.max(0.2, padH - 0.08);
@@ -337,8 +340,8 @@ export function buildArena(scene, { tiled, metalColor, metalRough }) {
   pads.castShadow = true;
   group.add(posts, pads);
 
-  const linkTex = chainlinkTexture();
-  const linkMat = new THREE.MeshStandardMaterial({
+  const linkTex = openRing ? null : chainlinkTexture();
+  const linkMat = openRing ? null : new THREE.MeshStandardMaterial({
     map: linkTex,
     alphaTest: 0.5,
     side: THREE.DoubleSide,
@@ -347,7 +350,7 @@ export function buildArena(scene, { tiled, metalColor, metalRough }) {
     roughness: 0.3,
   });
   const fenceH = Math.max(0.4, fenceTop - 0.36);
-  linkTex.repeat.set(7, Math.max(1.1, 3.2 * (fenceH / 2.34)));
+  if (linkTex) linkTex.repeat.set(7, Math.max(1.1, 3.2 * (fenceH / 2.34)));
 
   const xAxis = new THREE.Vector3(1, 0, 0);
   const railGeoCache = {};
@@ -379,9 +382,11 @@ export function buildArena(scene, { tiled, metalColor, metalRough }) {
     const G = railGeoCache[key];
     // Mid rail sits between the kick pad and the top pad.
     const midRailY = kickH + (fenceTop - kickH) * 0.42;
-    rails.push({ geo: G.rail, m: m4.clone().compose(new THREE.Vector3(mid.x, midRailY, mid.z), q, sc) });
-    topPads.push({ geo: G.top, m: m4.clone().compose(new THREE.Vector3(mid.x, fenceTop, mid.z), q, sc) });
-    fences.push({ geo: G.fence, m: m4.clone().compose(new THREE.Vector3(mid.x, kickH + fenceH / 2, mid.z), q, sc) });
+    if (!openRing) {
+      rails.push({ geo: G.rail, m: m4.clone().compose(new THREE.Vector3(mid.x, midRailY, mid.z), q, sc) });
+      topPads.push({ geo: G.top, m: m4.clone().compose(new THREE.Vector3(mid.x, fenceTop, mid.z), q, sc) });
+      fences.push({ geo: G.fence, m: m4.clone().compose(new THREE.Vector3(mid.x, kickH + fenceH / 2, mid.z), q, sc) });
+    }
     // Kick pads sit on the mat (bottom at y = 0). Inner face stays near the mat flat (apothem).
     kickPads.push({ geo: G.kick, m: m4.clone().compose(new THREE.Vector3(mid.x, kickH / 2, mid.z), q, sc) });
     kickTrim.push({ geo: G.trim, m: m4.clone().compose(new THREE.Vector3(mid.x, kickH - 0.02, mid.z), q, sc) });
@@ -389,29 +394,34 @@ export function buildArena(scene, { tiled, metalColor, metalRough }) {
   const trimMat = new THREE.MeshStandardMaterial({ color: 0xc0262a, roughness: 0.4, emissive: 0x400808 });
   const fencePanels = [];
   const fadeMat = (m) => { const c = m.clone(); c.transparent = true; return c; };
-  for (let i = 0; i < 8; i++) {
-    const side = new THREE.Group();
-    const parts = [
-      merged([fences[i]], fadeMat(linkMat)),
-      merged([topPads[i]], fadeMat(vinylMat)),
-    ];
-    for (const m of parts) { m.castShadow = true; m.receiveShadow = true; side.add(m); }
-    parts[0].userData.isFence = true;
-    const apos = corners[i];
-    const bpos = corners[(i + 1) % 8];
-    side.userData.normal = new THREE.Vector3((apos.x + bpos.x) / 2, 0, (apos.z + bpos.z) / 2).normalize();
-    side.userData.opacity = 1;
-    side.userData.parts = parts;
-    fencePanels.push(side);
-    group.add(side);
+  if (!openRing) {
+    for (let i = 0; i < 8; i++) {
+      const side = new THREE.Group();
+      const parts = [
+        merged([fences[i]], fadeMat(linkMat)),
+        merged([topPads[i]], fadeMat(vinylMat)),
+      ];
+      for (const m of parts) { m.castShadow = true; m.receiveShadow = true; side.add(m); }
+      parts[0].userData.isFence = true;
+      const apos = corners[i];
+      const bpos = corners[(i + 1) % 8];
+      side.userData.normal = new THREE.Vector3((apos.x + bpos.x) / 2, 0, (apos.z + bpos.z) / 2).normalize();
+      side.userData.opacity = 1;
+      side.userData.parts = parts;
+      fencePanels.push(side);
+      group.add(side);
+    }
   }
   group.userData.fencePanels = fencePanels;
-  const railMesh = merged(rails, railMat);
-  railMesh.castShadow = true;
+  if (!openRing && rails.length) {
+    const railMesh = merged(rails, railMat);
+    railMesh.castShadow = true;
+    group.add(railMesh);
+  }
   const kickMesh = merged(kickPads, vinylMat);
   kickMesh.receiveShadow = true;
   kickMesh.castShadow = true;
-  group.add(railMesh, kickMesh, merged(kickTrim, trimMat));
+  group.add(kickMesh, merged(kickTrim, trimMat));
 
   const fixtureMat = new THREE.MeshStandardMaterial({
     color: 0xfff4dc, emissive: 0xffe7b0, emissiveIntensity: 0.7, roughness: 0.45,
@@ -439,7 +449,7 @@ export function buildArena(scene, { tiled, metalColor, metalRough }) {
   addOctagonPlatform(scene, r, matTop);
 
   scene.add(group);
-  return { group, fixturePos, fencePanels, fenceTop: H };
+  return { group, fixturePos, fencePanels, fenceTop: openRing ? 0.42 : H };
 }
 
 // Raised-stage skirt and steps (0.8-1 m apron). Steps sit on the +/-Z flats.
