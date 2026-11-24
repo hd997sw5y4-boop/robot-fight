@@ -308,7 +308,7 @@ export const GFX_PRESETS = {
   // Ultra is desktop-first and never the default on phones, but it stays selectable there.
   // Bloom / GTAO / film finish are Ultra-only so High stays the previous sharp, haze-free look.
   // Shadows stay PCF (r187 dropped PCFSoft; PCF is the same filtered look) at 4096.
-  ultra: { pixelCap: 2.5, shadows: true, shadowSize: 4096, exposure: 1.08, bloom: true, bloomStrength: 0.14, bloomRadius: 0.28, bloomThreshold: 0.84, mirror: 2048, minScale: 1, ao: true, filmic: true, envBoost: 1.04 },
+  ultra: { pixelCap: 2.5, shadows: true, shadowSize: 4096, exposure: 1.08, bloom: true, bloomStrength: 0.11, bloomRadius: 0.24, bloomThreshold: 0.88, mirror: 2048, minScale: 1, ao: true, filmic: true, envBoost: 1.04 },
   // phones/tablets (js/mobile.js): applied on top of low/high: pixel ratio and shadow caps.
   // iOS additionally caps pixel ratio at 1.5 and forces shadows off (see gfxPreset in game.js).
   mobile: { pixelCap: 1.25, shadowSize: 1024 }, // phones stay capped; High sharpness is a desktop budget

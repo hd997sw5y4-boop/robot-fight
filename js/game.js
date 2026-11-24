@@ -165,7 +165,7 @@ const outputPass = new OutputPass();
 composer.addPass(outputPass);
 // Bloom after OutputPass so it reads display-referred (0-1) color. Blooming the HDR
 // buffer first smeared mat highlights into a white haze over the cage.
-const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.14, 0.28, 0.84);
+const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.11, 0.24, 0.88);
 bloom.enabled = false;
 composer.addPass(bloom);
 const FILMIC_SHADER = {
@@ -455,8 +455,8 @@ function finishRobotMat(m, mesh, on) {
     mat = p;
   }
   if (on) {
-    mat.roughness = Math.max(0.07, Math.min(0.22, (base.roughness ?? 0.28) * 0.58));
-    mat.envMapIntensity = Math.min(1.85, (base.envMapIntensity ?? 1.25) * 1.28);
+    mat.roughness = Math.max(0.08, Math.min(0.16, (base.roughness ?? 0.28) * 0.5));
+    mat.envMapIntensity = Math.max(1.45, Math.min(1.7, (base.envMapIntensity ?? 1.25) * 1.28));
     if (mat.isMeshPhysicalMaterial) {
       mat.clearcoat = 0.85;
       mat.clearcoatRoughness = 0.08;
@@ -475,7 +475,7 @@ function finishRobotMat(m, mesh, on) {
   return mat;
 }
 
-function applyEyeBloomCompat() {
+function applyEyeBloomCompat(target) {
   const ultra = gfxKey === 'ultra';
   const mul = ultra ? 1.2 : 2.2;
   const haloOp = ultra ? 0.16 : 0.85;
@@ -493,16 +493,28 @@ function applyEyeBloomCompat() {
       halo.material.toneMapped = !ultra; // High keeps the cheap stand-in; Ultra lets the bloom pass glow
     }
   };
-  for (const f of [p1, p2]) {
+  const list = target ? [target] : [p1, p2];
+  for (const f of list) {
     if (f && f.eyes) for (const e of f.eyes) apply(e.mesh, e.halo);
   }
 }
 
-function applyRobotGloss() {
+function applyRobotGloss(root) {
   const on = gfxKey === 'ultra';
-  for (const f of [p1, p2]) {
-    if (!f || !f.model) continue;
-    f.model.traverse((o) => {
+  const roots = [];
+  if (root && root.isObject3D) roots.push(root);
+  else {
+    const list = root && root.model ? [root] : [p1, p2];
+    for (const f of list) {
+      if (f && f.model) roots.push(f.model);
+      else if (f && f.root) roots.push(f.root);
+    }
+  }
+  const seen = new Set();
+  for (const r of roots) {
+    if (!r || seen.has(r)) continue;
+    seen.add(r);
+    r.traverse((o) => {
       if (!o.isMesh) return;
       const list = [].concat(o.material);
       const next = list.map((m) => finishRobotMat(m, o, on));
@@ -510,6 +522,13 @@ function applyRobotGloss() {
       if (changed) o.material = next.length === 1 ? next[0] : next;
     });
   }
+}
+
+function polishFighter(f) {
+  if (!f) return f;
+  applyRobotGloss(f.model || f.root);
+  applyEyeBloomCompat(f);
+  return f;
 }
 
 function setComposerAA(samples) {
@@ -530,9 +549,9 @@ function applyGfx(key) {
   useComposer = !!(p.bloom || p.ao || p.filmic);
   bloom.enabled = !!p.bloom;
   if (p.bloom) {
-    bloom.strength = p.bloomStrength != null ? p.bloomStrength : 0.14;
-    bloom.radius = p.bloomRadius != null ? p.bloomRadius : 0.28;
-    bloom.threshold = p.bloomThreshold != null ? p.bloomThreshold : 0.84;
+    bloom.strength = p.bloomStrength != null ? p.bloomStrength : 0.11;
+    bloom.radius = p.bloomRadius != null ? p.bloomRadius : 0.24;
+    bloom.threshold = p.bloomThreshold != null ? p.bloomThreshold : 0.88;
   }
   gtaoPass.enabled = !!p.ao;
   filmicPass.enabled = !!p.filmic;
@@ -556,6 +575,7 @@ function applyGfx(key) {
     }
   });
   applyLightIntensities();
+  syncUltraLighting();
   syncEnvironment();
   applyAnisotropy();
   applyRobotGloss();
@@ -605,7 +625,58 @@ function trackLight(l) {
 }
 
 let fighterRims = [];
+let arenaLightRig = null;
 const _rimDir = new THREE.Vector3();
+const _lookCol = new THREE.Color();
+function rememberLightLook(l) {
+  if (!l || l.userData.rfLook) return;
+  l.userData.rfLook = {
+    color: l.color.clone(),
+    intensity: l.userData.baseIntensity != null ? l.userData.baseIntensity : l.intensity,
+    x: l.position.x, y: l.position.y, z: l.position.z,
+  };
+}
+function restoreLightLook(l) {
+  const look = l && l.userData.rfLook;
+  if (!look) return;
+  l.color.copy(look.color);
+  l.position.set(look.x, look.y, look.z);
+  l.userData.baseIntensity = look.intensity;
+}
+// Ultra: same fill and rim on both corners so one fighter is not warmer or brighter.
+function syncUltraLighting() {
+  const even = gfxKey === 'ultra';
+  if (arenaLightRig) {
+    for (const l of [arenaLightRig.fill, arenaLightRig.fill2, arenaLightRig.rimL, arenaLightRig.rimR]) rememberLightLook(l);
+    if (even) {
+      _lookCol.set(0x8ea4c4);
+      arenaLightRig.fill.color.copy(_lookCol);
+      arenaLightRig.fill.position.set(-6, 8, 8);
+      arenaLightRig.fill.userData.baseIntensity = 0.16;
+      arenaLightRig.fill2.color.copy(_lookCol);
+      arenaLightRig.fill2.position.set(6, 8, 8);
+      arenaLightRig.fill2.userData.baseIntensity = 0.16;
+      _lookCol.set(0xd4e2ff);
+      arenaLightRig.rimL.color.copy(_lookCol);
+      arenaLightRig.rimL.position.set(-8, 3.5, -7.5);
+      arenaLightRig.rimL.userData.baseIntensity = 0.44;
+      arenaLightRig.rimR.color.copy(_lookCol);
+      arenaLightRig.rimR.position.set(8, 3.5, -7.5);
+      arenaLightRig.rimR.userData.baseIntensity = 0.44;
+    } else {
+      for (const l of [arenaLightRig.fill, arenaLightRig.fill2, arenaLightRig.rimL, arenaLightRig.rimR]) restoreLightLook(l);
+    }
+  }
+  _lookCol.set(0xe4edff);
+  for (const l of fighterRims) {
+    rememberLightLook(l);
+    if (even) {
+      l.color.copy(_lookCol);
+      l.userData.baseIntensity = 0.55;
+    } else restoreLightLook(l);
+  }
+  applyLightIntensities();
+}
 function makeFighterRim(color) {
   const l = new THREE.DirectionalLight(color, 0.55);
   l.userData.baseIntensity = 0.55;
@@ -954,7 +1025,7 @@ function loadSkin(id) {
 }
 function fighterFor(side, skinId) {
   const key = skinId || 'robot';
-  if (fighterCache[side][key]) return fighterCache[side][key];
+  if (fighterCache[side][key]) return polishFighter(fighterCache[side][key]);
   let src = fighterGltf;
   if (skinId) {
     prepFootworkClips(fighterGltf); // shared clips: prep once, on the robot's list
@@ -992,6 +1063,7 @@ function swapSkin(side, skinId, cfg) {
   nf.root.visible = cur.root.visible;
   if (nf.mixer && cur.mixer) nf.mixer.timeScale = cur.mixer.timeScale;
   if (side === 'p2') p2 = nf; else p1 = nf;
+  polishFighter(nf);
   if (staged) scene.add(nf.root);
   if (hadPhys) attachFighter(nf);
   warmedFor = null;
@@ -1012,6 +1084,8 @@ function stageFighters(opts) {
     p2 = fighterFor('p2', null);
     applyFighterConfig(p1, defaultFighterConfig('p1'));
     applyFighterConfig(p2, defaultFighterConfig('p2'));
+    polishFighter(p1);
+    polishFighter(p2);
   }
   if (!fightersStaged) {
     if (p1.mixer) p1.mixer.timeScale = 1;
@@ -1265,7 +1339,7 @@ function tint(root, color, ownPaint) {
     o.castShadow = true;
     o.receiveShadow = true;
   });
-  if (gfxKey === 'ultra') applyRobotGloss();
+  applyRobotGloss(root);
 }
 
 
@@ -1484,6 +1558,7 @@ function makeFighter(gltf, color, side, skinId) {
     if (Math.max(_sz.x, _sz.y, _sz.z) < 0.22) o.castShadow = false;
   });
   if (!skinDef || skinDef.visor !== false) addVisor(model, color);
+  applyRobotGloss(model);
   root.add(model);
 
   const shield = new THREE.Mesh(
@@ -1586,6 +1661,7 @@ function makeFighter(gltf, color, side, skinId) {
   f.stat = f.stats.mul;
   initSpecial(f);
   collectEyes(f);
+  applyEyeBloomCompat(f);
   prepareFighterDamage(f);
   cacheFeet(f);
   cacheBody(f);
@@ -6743,6 +6819,7 @@ function onLoad(gltf) {
       setMirrorRes(floorMirror);
     }
   });
+  arenaLightRig = lightRig || null;
   if (lightRig) {
     trackLight(lightRig.hemi);
     trackLight(lightRig.fill);
