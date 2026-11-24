@@ -1,4 +1,4 @@
-/* Robot Fight shell: best-of-N rounds (Settings > Match, default 3), round timer, intros, KO / TKO / decision, stats, training.
+/* Robot Fight shell: best-of-N rounds (Settings > Match, default 3), round timer, CPU vs CPU auto rounds (no clock), intros, KO / TKO / decision, stats, training.
    Each round is started with the public api.js startFight(); the shell owns the round clock
    (roundTime: 0 turns the game's own timer off) and the between-round flow. */
 (function () {
@@ -84,6 +84,7 @@
     }
     const t = document.getElementById('rfsTimer');
     if (t) {
+      t.style.display = M.cfg && M.cfg.auto ? 'none' : ''; // CPU vs CPU: no clock shown
       if (M.timeLeft == null) { t.textContent = '∞'; t.classList.remove('low'); }
       else {
         const s = Math.max(0, Math.ceil(M.timeLeft));
@@ -166,7 +167,9 @@
       skipIntro,
     });
     M.lastHp = S.fighters().map((f) => f.health);
-    M.timeLeft = training || !S.roundLength() ? null : S.roundLength();
+    // CPU vs CPU auto rounds have no clock at all: a round lasts until a robot is knocked out.
+    M.timeLeft = training || M.cfg.auto || !S.roundLength() ? null : S.roundLength();
+    M.quietT = 0;
     paintHud();
     if (training) { S.paintTraining(); return; }
     const last = M.wins[0] === winsNeeded() - 1 && M.wins[1] === winsNeeded() - 1;
@@ -175,7 +178,7 @@
     const rematch = !!M.rematch && matchStart;
     M.rematch = false;
     const announce = () => {
-      S.call(last ? 'Final Round' : 'Round ' + n, M.cfg.p1.name + '  vs  ' + M.cfg.p2.name, 'round');
+      S.call(M.cfg.auto ? 'Round ' + M.cfg.autoN : last ? 'Final Round' : 'Round ' + n, M.cfg.p1.name + '  vs  ' + M.cfg.p2.name, 'round');
       if (window.RFAnnounce) window.RFAnnounce('round', { n, final: last, matchStart, rematch, delay: 0.25 });
       S.sfx('confirm');
     };
@@ -201,7 +204,7 @@
     for (let i = 0; i < 2; i++) for (const k of STAT_KEYS) M.total[i][k] += M.stats[i][k];
     M.rounds.push({ n: M.round, winner, method, stats: M.stats });
     paintHud();
-    const who = winner == null ? 'Nobody scores' : (winner === 0 ? M.cfg.p1.name : M.cfg.p2.name) + ' takes round ' + M.round;
+    const who = winner == null ? 'Nobody scores' : (winner === 0 ? M.cfg.p1.name : M.cfg.p2.name) + (M.cfg.auto ? ' wins' : ' takes round ' + M.round);
     const big = { KO: 'Knockout', Part: 'Part loss', TKO: 'Part loss', Decision: 'Decision', Draw: 'Draw' }[method] || method;
     const ko = method === 'KO' || method === 'Part' || method === 'TKO';
     S.call(big, who, 'end ' + (ko ? 'ko' : ''));
@@ -212,6 +215,8 @@
     S.emit('roundEnd', M.rounds[M.rounds.length - 1]);
     S.after(ko ? 3 : 2.5, () => {
       if (M.phase !== 'round-end') return;
+      // CPU vs CPU: no results screen, straight into the next round with a fresh pair.
+      if (M.cfg.auto) { if (S.autoNext) S.autoNext(); return; }
       if (done) return endMatch();
       // [fight-presentation hook] round break card (damage maps + round stats) before the next round.
       const next = () => { if (M.phase === 'round-end') beginRound(M.round + 1); };
@@ -270,6 +275,7 @@
           S.paintTraining();
         }
       }
+      if (drop > 0.01) M.quietT = 0;
       M.lastHp[i] = f.health;
       M.stats[1 - i].parts = partsDown(f);
     }
@@ -302,6 +308,11 @@
       const partLoss = gone('head') || gone('legL') || gone('legR');
       endRound(1 - loser, partLoss ? 'Part' : 'KO');
       return;
+    }
+    // CPU vs CPU stall guard (no clock): after 10 s without damage, send both CPUs in.
+    if (M.cfg.auto && st.phase === 'fight') {
+      M.quietT = (M.quietT || 0) + dt;
+      if (M.quietT > 10) { M.quietT = 5; if (S.fight.nudgeFighters) S.fight.nudgeFighters(); }
     }
     if (M.timeLeft != null && st.phase === 'fight') {
       const prev = M.timeLeft;

@@ -4699,7 +4699,7 @@ function updateAI(cpu, player, dt) {
   // CPU modes only (vs CPU, CPU vs CPU). Never built for an API or Player side.
   cpu.isCpu = true;
   if (!cpu.brain || cpu.brain.kind === 'api') cpu.brain = createPacedBrain(() => aiProfile(cpu));
-  cpu._ai = cpu.brain.state || cpu._ai; // per-fighter think state (Bot vs Bot runs two)
+  cpu._ai = cpu.brain.state || cpu._ai; // per-fighter think state (CPU vs CPU runs two)
   const intent = cpu.brain.think(brainSnapshot(cpu, player, dt));
   return intentToInput(cpu, player, intent);
 }
@@ -6239,7 +6239,7 @@ function tick() {
   // dt is 0 while the shell pause or Settings holds the clock: nobody decides or acts then (a
   // CPU used to start strikes into a frozen frame, and the log counted it as stuck).
   canAct = match.phase === 'fight' && !match.over && !inBell() && !isSettingsOpen() && !frozen && dt > 0;
-  const watch = !!shellCall('cpuControls', 'p1'); // Bot vs Bot: P1 is a CPU too
+  const watch = !!shellCall('cpuControls', 'p1'); // CPU vs CPU: P1 is a CPU too
   p1.isCpu = watch;
   const emptyIn = { sidestep: 0, inout: 0, punch: false, kick: false, block: false };
   let pin;
@@ -6603,6 +6603,10 @@ function onLoad(gltf) {
       return getFightState();
     },
     getState: getFightState,
+    // CPU vs CPU stall guard: both CPU brains drop their circling / reading and go in to strike.
+    nudge() {
+      for (const f of [p1, p2]) if (f && f._ai) { f._ai.sinceAtk = 99; f._ai.guardUntil = 0; }
+    },
     setFighterConfig(id, cfg) {
       let f = id === 'p2' ? p2 : p1;
       if (!f) return null;

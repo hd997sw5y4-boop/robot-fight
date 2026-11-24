@@ -171,6 +171,7 @@ function card(f, side, selected) {
 
 function sideTitle(side) {
   const m = mode();
+  if (m === 'watch') return side === 'p1' ? { kicker: 'Blue corner CPU', title: 'Choose a bot' } : { kicker: 'Red corner CPU', title: 'Choose a bot' };
   if (side === 'p1') {
     if (m === 'versus') return { kicker: 'Blue corner', title: 'Choose your fighter' };
     return { kicker: 'Blue corner', title: 'Choose your fighter' };

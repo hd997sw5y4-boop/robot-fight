@@ -165,6 +165,7 @@ const PAD_SVG = `<svg viewBox="0 0 760 412" class="ps-svg" role="img" aria-label
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="arcade"><b>Arcade</b><small>Climb the eight-fighter ladder</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="versus"><b>Versus</b><small>Two players, one keyboard or two gamepads</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="training"><b>Training</b><small>Practice on a dummy, no timer</small></button>
+          <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="watch"><b>CPU vs CPU</b><small>Pick two bots, they fight round after round until a knockout</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="tournament"><b>AI Tournament</b><small>Round-robin API brains, Elo and results</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="settings"><b>Settings</b><small>Graphics, sound, CPU difficulty, round time</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="credits"><b>Credits</b></button>
@@ -360,7 +361,7 @@ const PAD_SVG = `<svg viewBox="0 0 760 412" class="ps-svg" role="img" aria-label
     arcade: ['Arcade', 'Eight opponents · rising difficulty'],
     versus: ['Versus', 'Local two-player · best of 3'],
     training: ['Training', 'Dummy · no timer'],
-    watch: ['Bot vs Bot', 'Watch two CPUs · best of 3'],
+    watch: ['CPU vs CPU', 'Auto rounds · until knockout'],
     tournament: ['AI Tournament', 'API vs API · round-robin'],
   };
   function modeInfo(mode) {
@@ -495,8 +496,7 @@ const PAD_SVG = `<svg viewBox="0 0 760 412" class="ps-svg" role="img" aria-label
       const o = sel.opp === 'random' ? S.ROSTER[Math.floor(Math.random() * S.ROSTER.length)] : S.opponent(sel.opp);
       S.startMatch({ mode, p1: p1Cfg(false), p2: oppCfg(o), opp: o });
     } else if (mode === 'watch') {
-      const o = sel.opp === 'random' ? S.ROSTER[Math.floor(Math.random() * S.ROSTER.length)] : S.opponent(sel.opp);
-      S.startMatch({ mode, p1: sideCfg(sel.p1Id, 'CPU'), p2: oppCfg(o), opp: o });
+      startAuto(1);
     } else if (mode === 'versus') {
       const right = sel.p2Id === 'random' ? S.ROSTER[Math.floor(Math.random() * S.ROSTER.length)] : (S.fighterOf(sel.p2Id) || S.ROSTER[0]);
       S.startMatch({ mode, p1: p1Cfg(true), p2: sideCfg(right.id, 'P2') });
@@ -504,6 +504,19 @@ const PAD_SVG = `<svg viewBox="0 0 760 412" class="ps-svg" role="img" aria-label
       S.startMatch({ mode, p1: p1Cfg(false), p2: { name: 'Dummy', label: 'Training dummy', paint: { primary: '#4a505c', accent: '#9aabff' } }, dummyBlock: sel.dummyBlock });
     }
   }
+
+  // CPU vs CPU auto rounds: the two bots picked on fighter select (a side left on Random gets a
+  // new random bot each round), no clock, until a knockout; the next round starts by itself
+  // (js/shell/match.js calls S.autoNext). Esc / Options pauses: Switch bots or Quit from there.
+  function startAuto(n) {
+    const R = S.ROSTER;
+    const any = () => R[Math.floor(Math.random() * R.length)];
+    const a = (sel.p1Id && sel.p1Id !== 'random' && S.fighterOf(sel.p1Id)) || any();
+    const b = (sel.opp && sel.opp !== 'random' && S.opponent(sel.opp)) || any();
+    S.startMatch({ mode: 'watch', auto: true, autoN: n, bestOf: 1, skipIntro: n > 1,
+      p1: sideCfg(a.id, 'CPU'), p2: oppCfg(b), opp: b });
+  }
+  S.autoNext = () => { if (S.match.cfg && S.match.cfg.auto) startAuto((S.match.cfg.autoN || 1) + 1); };
 
   // [fighter-select hook] shared choices + start, used by js/shell/fighter-select.js.
   S.selectHooks = { sel, MODE_INFO, modeInfo, fromPreset, paintName, setPaint, previewSelect, cfgFromFighter, syncSelPaint, start: startFromSelect };
@@ -624,6 +637,7 @@ const PAD_SVG = `<svg viewBox="0 0 760 412" class="ps-svg" role="img" aria-label
       <nav class="rfs-menu">
         <button type="button" class="rfs-f rfs-btn" data-act="resume" data-autofocus><b>Resume</b></button>
         ${mode === 'training' ? '<button type="button" class="rfs-f rfs-btn" data-act="reset"><b>Reset dummy</b></button>' : '<button type="button" class="rfs-f rfs-btn" data-act="restart"><b>Restart match</b></button>'}
+        ${mode === 'watch' ? '<button type="button" class="rfs-f rfs-btn" data-act="fighters"><b>Switch bots</b></button>' : ''}
         <button type="button" class="rfs-f rfs-btn" data-act="pauseSettings"><b>Settings</b></button>
         <button type="button" class="rfs-f rfs-btn" data-act="menu"><b>Quit to main menu</b></button>
       </nav>

@@ -45,6 +45,11 @@ export function getFightState() {
   return runtime && runtime.getState ? runtime.getState() : null;
 }
 
+// Push both CPU brains into an exchange (CPU vs CPU stall guard).
+export function nudgeFighters() {
+  if (runtime && runtime.nudge) runtime.nudge();
+}
+
 export function setFighterConfig(id, cfg) {
   if (!runtime || !runtime.setFighterConfig) return null;
   return runtime.setFighterConfig(id, cfg);

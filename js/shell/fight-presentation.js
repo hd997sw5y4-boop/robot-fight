@@ -122,7 +122,7 @@
         ${traits(pr)}
       </div>`;
     };
-    const mode = { fight: 'Quick match', arcade: 'Arcade', versus: 'Versus', watch: 'Bot vs Bot' }[M.cfg.mode] || '';
+    const mode = { fight: 'Quick match', arcade: 'Arcade', versus: 'Versus', watch: 'CPU vs CPU' }[M.cfg.mode] || '';
     tapeEl.innerHTML = `<div class="fp-tcard" role="dialog" aria-label="Tale of the tape">
       <header><small>${esc(mode)}${M.cfg.mode === 'arcade' && M.cfg.opp ? ' · ' + esc(M.cfg.opp.name) : ''} · best of 3</small><b>Tale of the tape</b></header>
       <div class="fp-tgrid">${col(0)}<div class="fp-tvs">VS</div>${col(1)}</div>

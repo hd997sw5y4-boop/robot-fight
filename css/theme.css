@@ -1,0 +1,64 @@
+/* Sunset-neon theme (loaded last): dusky purple to warm pink / orange skies with neon magenta and
+   electric cyan accents. Colors only (no images, fonts or logos); glows are light box/text shadows,
+   and the drop-shadow filters are dropped on phones. */
+:root {
+  --sn-magenta: #ff4fd8;
+  --sn-cyan: #3ee8ff;
+  --sn-pink: #ff8fb8;
+  --sn-orange: #ffb36b;
+  --sn-dusk: #1c0b2e;
+  --ww-accent: #ff5cd6;
+  --ww-accent-soft: rgba(255,79,216,.16);
+  --ww-accent-line: rgba(255,79,216,.45);
+  --rf-head: linear-gradient(180deg, #fff 18%, #ffc2ea 52%, #ffb36b 100%);
+  --rf-glow: 0 18px 50px rgba(10,2,20,.7), 0 0 0 1px rgba(255,79,216,.22), 0 0 24px rgba(62,232,255,.18);
+  --sn-sky: linear-gradient(180deg, #1c0b2e 0%, #3a1356 38%, #8a2c6e 68%, #e0606f 86%, #ffb36b 100%);
+}
+
+/* loader + backdrops: a sunset sky behind the menus (the 3D arena still shows through) */
+#loader { background: var(--sn-sky); }
+.rfs-screen[data-screen="title"] {
+  background: linear-gradient(180deg, rgba(28,11,46,.55) 0%, rgba(58,19,86,.35) 40%, rgba(160,50,110,.28) 72%, rgba(255,150,100,.32) 100%);
+}
+.rfs-screen[data-screen="main"] {
+  background: linear-gradient(90deg, rgba(28,11,46,.88) 0%, rgba(58,19,86,.55) 40%, rgba(120,40,110,.12) 68%, rgba(28,11,46,.55) 100%),
+    linear-gradient(0deg, rgba(255,140,100,.22), rgba(255,140,100,0) 45%);
+}
+.rfs-screen.rfs-dim { background: radial-gradient(ellipse at center, rgba(58,19,86,.5), rgba(22,8,36,.86)); }
+
+/* title: sunset letters with a neon rim */
+.rfs-title .rfs-brand b {
+  background: linear-gradient(100deg, #ffd6f2 0%, #fff 30%, #ffb0de 50%, #ffb36b 70%, #ffd6f2 100%);
+  background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 14px rgba(255,79,216,.55)) drop-shadow(0 0 30px rgba(62,232,255,.25));
+}
+.rfs-brand b { filter: drop-shadow(0 0 12px rgba(255,79,216,.45)); }
+.rfs-tag { color: #ffd9ee; text-shadow: 0 0 12px rgba(255,79,216,.55), 0 2px 10px #1c0b2e; }
+.rfs-press { border-color: rgba(62,232,255,.65); background: linear-gradient(90deg, rgba(62,232,255,.2), rgba(255,79,216,.22), rgba(255,179,107,.2)); }
+
+/* panels + buttons */
+.rfs-card { border-color: rgba(255,79,216,.35) !important; }
+.rfs-card::before { background: linear-gradient(90deg, transparent, var(--sn-cyan), var(--sn-magenta), transparent); }
+.rfs-btn { border-color: rgba(255,79,216,.22); }
+.rfs-btn small { color: #f3c9e6; }
+.rfs-btn:focus, .rfs-btn:hover {
+  background: linear-gradient(90deg, rgba(255,79,216,.28), rgba(62,232,255,.14)); border-color: var(--sn-magenta);
+}
+nav.rfs-menu .rfs-btn:focus { border-left-color: var(--sn-cyan); box-shadow: 0 0 0 1px rgba(255,79,216,.75), 0 0 22px rgba(255,79,216,.35), 0 0 34px rgba(62,232,255,.18); }
+.rfs-btn b { text-shadow: 0 0 10px rgba(255,79,216,.35); }
+.rfs-btn.rfs-go, #setpX, .fs-go { background: linear-gradient(90deg, #12b8ff, #c13cff 55%, #ff4f9a) !important; border-color: rgba(255,214,240,.8) !important; }
+.rfs-selhead small, .fs-head small, .rfs-controls h4 { color: var(--sn-cyan) !important; text-shadow: 0 0 8px rgba(62,232,255,.45); }
+.rfs-controls h3 { color: #ffd9ee; text-shadow: 0 0 10px rgba(255,79,216,.5); }
+.rfs-ctrl-tab.is-on { background: rgba(255,79,216,.2); border-color: var(--sn-magenta); box-shadow: inset 0 0 12px rgba(255,79,216,.25); }
+
+/* fight HUD: neon round label + calls */
+.round-label, .round { color: #ffe3f4; text-shadow: 0 0 10px rgba(255,79,216,.7), 0 0 22px rgba(62,232,255,.3); }
+.fighter-hud .name { text-shadow: 0 0 8px rgba(255,79,216,.5), 0 1px 3px #1c0b2e; }
+.rfs-call b { filter: drop-shadow(0 0 18px rgba(255,79,216,.6)) drop-shadow(0 4px 10px rgba(28,11,46,.8)); }
+.rfs-call span { color: #ffd9ee; text-shadow: 0 0 10px rgba(62,232,255,.45); }
+#controlsHint, #bottom { color: #f3d5ea; }
+
+/* phones: keep the colors, drop the filter glows (GPU cost on iPhone) */
+html.rf-mobile .rfs-title .rfs-brand b, html.rf-mobile .rfs-brand b, html.rf-mobile .rfs-call b { filter: none; }
+html.rf-mobile .rfs-title .rfs-brand b { text-shadow: none; }
+@media (prefers-reduced-motion: reduce) { .rfs-title .rfs-brand b { animation: none; } }

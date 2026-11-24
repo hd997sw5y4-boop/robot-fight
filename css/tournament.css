@@ -2,20 +2,20 @@
 .rfs-screen[data-screen="tourney"],
 .rfs-screen[data-screen="tourney-results"] {
   align-items: flex-start; justify-content: center;
-  background: radial-gradient(ellipse at 50% 0%, rgba(12,16,28,.82), rgba(6,8,14,.92));
+  background: radial-gradient(ellipse at 50% 0%, rgba(28,12,49,.82), rgba(19,6,30,.92));
   overflow: auto;
 }
 .rft-wrap { width: min(1120px, 100%); margin: 0 auto; padding-bottom: 28px; }
 .rft-wrap h1 {
   margin: 0 0 4px; font: 800 clamp(28px, 5vw, 52px)/1 var(--ww-font);
   letter-spacing: .06em; text-transform: uppercase;
-  background: linear-gradient(180deg, #fff 30%, #c6d0ff 100%);
+  background: linear-gradient(180deg, #fff 30%, #ffc4ec 100%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .rft-sub { margin: 0 0 18px; color: var(--ww-text-2); letter-spacing: .08em; text-transform: uppercase; font-size: 12px; }
 .rft-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
 .rft-card {
-  background: #14161c; border: 1px solid var(--ww-accent-line); border-radius: 16px; padding: 14px 16px;
+  background: #281031; border: 1px solid var(--ww-accent-line); border-radius: 16px; padding: 14px 16px;
 }
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   .rft-card { background: var(--ww-glass-strong); -webkit-backdrop-filter: var(--ww-blur); backdrop-filter: var(--ww-blur); }
@@ -45,27 +45,27 @@
 .rft-hl b { display: block; margin-top: 6px; font-size: 20px; }
 
 /* In-fight overlay */
-.rft-hud { position: fixed; inset: 0; z-index: 12; pointer-events: none; font: 600 13px/1.35 var(--ww-font); color: #e8edff; }
+.rft-hud { position: fixed; inset: 0; z-index: 12; pointer-events: none; font: 600 13px/1.35 var(--ww-font); color: #fff0fa; }
 .rft-hud .rft-banner {
   position: absolute; top: 58px; left: 50%; transform: translateX(-50%);
-  padding: 6px 16px; border-radius: 999px; background: rgba(10,14,24,.7); border: 1px solid rgba(154,171,255,.35);
+  padding: 6px 16px; border-radius: 999px; background: rgba(25,10,44,.7); border: 1px solid rgba(255,92,214,.35);
   letter-spacing: .08em; text-transform: uppercase; font-size: 12px; white-space: nowrap;
 }
 .rft-bubble {
   position: absolute; top: 110px; max-width: 280px; padding: 10px 12px; border-radius: 12px;
-  background: rgba(8,10,16,.78); border: 1px solid rgba(255,255,255,.16);
+  background: rgba(22,7,32,.78); border: 1px solid rgba(255,255,255,.16);
 }
 .rft-bubble.l { left: 18px; }
 .rft-bubble.r { right: 18px; }
 .rft-bubble b { display: block; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; opacity: .7; margin-bottom: 4px; }
 .rft-tags { margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; }
 .rft-tags span { font-size: 11px; padding: 2px 6px; border-radius: 6px; background: rgba(255,255,255,.08); }
-.rft-meta { position: absolute; top: 18px; font-size: 11px; color: #c5cbe0; opacity: .85; }
+.rft-meta { position: absolute; top: 18px; font-size: 11px; color: #d3c5e0; opacity: .85; }
 .rft-meta.l { left: 18px; }
 .rft-meta.r { right: 18px; text-align: right; }
 .rft-dlog {
   position: absolute; right: 16px; bottom: 52px; width: min(320px, 42vw);
-  padding: 10px 12px; border-radius: 12px; background: rgba(8,10,16,.78); border: 1px solid rgba(255,255,255,.12);
+  padding: 10px 12px; border-radius: 12px; background: rgba(22,7,32,.78); border: 1px solid rgba(255,255,255,.12);
   font: 600 11px/1.45 ui-monospace, monospace; max-height: 160px; overflow: hidden;
 }
 .rft-dlog div { opacity: .9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
