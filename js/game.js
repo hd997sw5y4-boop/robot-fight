@@ -45,7 +45,7 @@ import {
   onFightEnd,
 } from './api.js';
 import { createPacedBrain } from './brain.js';
-import { bindSpecials, initSpecial, tryRocketPunch, tryDash, tryCharge, trySlam, tryOverheat, stepSpecial, clearSpecial, specialAvail, syncEnergyHud, specialWarmObjects } from './specials.js';
+import { bindSpecials, initSpecial, tryDash, tryCharge, trySlam, tryOverheat, stepSpecial, clearSpecial, specialAvail, syncEnergyHud, specialWarmObjects } from './specials.js';
 import {
   prepareFighterDamage,
   canPunch,
@@ -2619,7 +2619,7 @@ window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 function clearStuckKeys() {
   keys.clear();
   tapped.clear();
-  held.punch = held.kick = held.ground = held.flipFront = held.rocket = held.dashFwd = held.dashBack = false;
+  held.punch = held.kick = held.ground = held.flipFront = held.dashFwd = held.dashBack = false;
   held.move = null;
 }
 window.addEventListener('blur', clearStuckKeys);
@@ -2642,7 +2642,6 @@ function rawInput() {
   inp.tapKick = tapped.has('k');
   inp.tapGround = tapped.has('i');
   inp.tapFlipFront = tapped.has('y');
-  inp.tapRocket = tapped.has('q');
   inp.tapDashFwd = tapped.has('e');
   inp.tapDashBack = tapped.has('x');
   inp.punch = keys.has('j') || inp.tapPunch;
@@ -2651,7 +2650,6 @@ function rawInput() {
   inp.ground = keys.has('i') || inp.tapGround;
   inp.run = keys.has('shift');
   inp.flipFront = keys.has('y') || inp.tapFlipFront; // (P is pause)
-  inp.rocket = keys.has('q') || inp.tapRocket;
   inp.dashFwd = keys.has('e') || inp.tapDashFwd;
   inp.dashBack = keys.has('x') || inp.tapDashBack;
   // Named moves: one key each (see SOLO_MOVE_KEYS). A tap is never lost between frames.
@@ -2667,7 +2665,7 @@ function rawInput() {
   if (pad) {
     inp.sidestep += pad.sidestep;
     inp.inout += pad.inout;
-    for (const k of ['punch', 'kick', 'block', 'ground', 'run', 'rocket', 'dashFwd', 'dashBack', 'flipFront']) if (pad[k]) inp[k] = true;
+    for (const k of ['punch', 'kick', 'block', 'ground', 'run', 'dashFwd', 'dashBack', 'flipFront']) if (pad[k]) inp[k] = true;
     if (pad.move && !inp.move) inp.move = pad.move;
   }
   inp.sidestep = Math.max(-1, Math.min(1, inp.sidestep));
@@ -2682,20 +2680,17 @@ function consumeAttacks(inp, dt = 0) {
   const kick = (inp.kick && !held.kick) || !!inp.tapKick;
   const ground = (!!inp.ground && !held.ground) || !!inp.tapGround;
   const flipFront = (!!inp.flipFront && !held.flipFront) || !!inp.tapFlipFront;
-  const rocket = (!!inp.rocket && !held.rocket) || !!inp.tapRocket;
   const dashFwd = (!!inp.dashFwd && !held.dashFwd) || !!inp.tapDashFwd;
   const dashBack = (!!inp.dashBack && !held.dashBack) || !!inp.tapDashBack;
   held.punch = inp.punch;
   held.kick = inp.kick;
   held.ground = !!inp.ground;
   held.flipFront = !!inp.flipFront;
-  held.rocket = !!inp.rocket;
   held.dashFwd = !!inp.dashFwd;
   held.dashBack = !!inp.dashBack;
   const move = inp.tapMove || (inp.move && inp.move !== held.move ? inp.move : null);
   held.move = inp.move || null;
   if (move) { held.buf = 'move:' + move; held.bufT = COMBAT.inputBuffer || 0.3; logInputPress('p1', move); }
-  else if (rocket) { held.buf = 'rocket'; held.bufT = COMBAT.inputBuffer || 0.3; logInputPress('p1', 'rocket_punch'); }
   else if (dashFwd) { held.buf = 'dashFwd'; held.bufT = COMBAT.inputBuffer || 0.3; logInputPress('p1', 'dash_forward'); }
   else if (dashBack) { held.buf = 'dashBack'; held.bufT = COMBAT.inputBuffer || 0.3; logInputPress('p1', 'dash_back'); }
   else if (flipFront) { held.buf = 'flipFront'; held.bufT = COMBAT.inputBuffer || 0.3; }
@@ -2711,7 +2706,7 @@ function consumeAttacks(inp, dt = 0) {
     sidestep: inp.sidestep, inout: inp.inout, block: inp.block, run: !!inp.run,
     punch: b === 'punch', kick: b === 'kick', ground: b === 'ground',
     flipFront: b === 'flipFront',
-    rocket: b === 'rocket', dashFwd: b === 'dashFwd', dashBack: b === 'dashBack',
+    dashFwd: b === 'dashFwd', dashBack: b === 'dashBack',
     move: b && b.startsWith('move:') ? b.slice(5) : null,
   };
 }
@@ -2888,7 +2883,7 @@ function usesCpuBrain(f) {
 
 function tryAttack(f, kind, clipName, exact = false, moveId = null) {
   if (inBell() || match.over) { logBellBlock(f.id, kind); return false; }
-  if (f.state === 'ko' || f.state === 'hit' || f.state === 'punch' || f.state === 'kick' || f.state === 'ground' || f.state === 'dash' || f.state === 'rocket') return false;
+  if (f.state === 'ko' || f.state === 'hit' || f.state === 'punch' || f.state === 'kick' || f.state === 'ground' || f.state === 'dash') return false;
   if (f.cooldown > 0) return false;
   if (kind === 'punch' && !canPunch(f)) return false;
   if (kind === 'kick' && !canKick(f)) return false;
@@ -3933,7 +3928,7 @@ function canGroundAttack(f, def) {
 
 function tryGroundAttack(f, def) {
   if (inBell() || match.over) { logBellBlock(f.id, 'ground'); return false; }
-  if (f.state === 'ko' || f.state === 'hit' || f.state === 'punch' || f.state === 'kick' || f.state === 'ground' || f.state === 'dash' || f.state === 'rocket') return false;
+  if (f.state === 'ko' || f.state === 'hit' || f.state === 'punch' || f.state === 'kick' || f.state === 'ground' || f.state === 'dash') return false;
   if (!canGroundAttack(f, def)) return false;
   const t = nearestGroundTarget(f, def);
   const stomp = t.dist <= COMBAT.ground.stompReach && canKick(f) && f.actions.KneeKickLead;
@@ -4600,7 +4595,7 @@ function moveReach(mv) {
 // (the clip's measured reach plus its step or lunge).
 function moveAvail(f, opp) {
   const out = {};
-  const free = !(f.state === 'ko' || DOWN_STATES.has(f.state) || f.state === 'hit' || f.state === 'punch' || f.state === 'kick' || f.state === 'ground' || f.state === 'dash' || f.state === 'rocket') && !(f.cooldown > 0);
+  const free = !(f.state === 'ko' || DOWN_STATES.has(f.state) || f.state === 'hit' || f.state === 'punch' || f.state === 'kick' || f.state === 'ground' || f.state === 'dash') && !(f.cooldown > 0);
   const gap = f.root.position.distanceTo(opp.root.position);
   for (const id in MOVES) {
     const mv = MOVES[id];
@@ -4622,14 +4617,14 @@ function brainSnapshot(f, opp, dt) {
     t: performance.now() / 1000,
     dt,
     dist: +f.root.position.distanceTo(opp.root.position).toFixed(3),
-    strikeRange: { punch: COMBAT.punch.reach * statOf(f, 'reach'), kick: COMBAT.kick.reach * statOf(f, 'reach'), rocket: SPECIAL.rocket.range * statOf(f, 'reach') },
+    strikeRange: { punch: COMBAT.punch.reach * statOf(f, 'reach'), kick: COMBAT.kick.reach * statOf(f, 'reach') },
     self: {
       quick: statOf(f, 'speed') * statOf(f, 'recovery'), // stat profile: how fast it reads and answers
       health: f.health,
       state: f.state,
       stateT: f.stateT,
       cooldown: f.cooldown,
-      canAct: !busy && f.state !== 'punch' && f.state !== 'kick' && f.state !== 'ground' && f.state !== 'dash' && f.state !== 'rocket',
+      canAct: !busy && f.state !== 'punch' && f.state !== 'kick' && f.state !== 'ground' && f.state !== 'dash',
       canPunch: canPunch(f) && punchClipsFor(f).length > 0,
       canKick: canKick(f),
       canBlock: canBlock(f),
@@ -4674,7 +4669,6 @@ function intentToInput(f, opp, intent) {
   if (intent.dodge === 'front') inp.flipFront = true;
   if (intent.attack && (MOVES[intent.attack] || ROBOT_MOVES.includes(intent.attack))) inp.move = intent.attack;
   else if (intent.attack === 'ground') inp.ground = true;
-  else if (intent.attack === 'rocket' || intent.attack === 'rocket_punch') inp.rocket = true;
   else if (intent.attack === 'dash_forward' || intent.attack === 'dashFwd') inp.dashFwd = true;
   else if (intent.attack === 'dash_back' || intent.attack === 'dashBack') inp.dashBack = true;
   else if (intent.attack === 'punch' && punchClipsFor(f).length) {
@@ -4827,7 +4821,7 @@ function stepFighter(f, other, inp, dt) {
     if (contact) {
       f.hitThisAttack = true;
       f.contactT = f.stateT;
-      if (f.specialKind !== 'rocket') applyHit(f, other, attackSpec(f), f.state, contact.bone, contact);
+      applyHit(f, other, attackSpec(f), f.state, contact.bone, contact);
     }
     // Solid bodies: whenever the striking limb is inside the other robot's body (any phase,
     // landed or not), the clip stops advancing there and the strike is pulled back.
@@ -4836,7 +4830,7 @@ function stepFighter(f, other, inp, dt) {
         // Already in the body at the start of the window: that is the connect.
         f.hitThisAttack = true;
         const tip = (f.strikeBones[f.state] || []).map((b) => b.getWorldPosition(new THREE.Vector3())).map((p) => ({ p, pr: capsuleProbe(other, p) })).sort((x, y) => x.pr.d - y.pr.d)[0];
-        if (f.specialKind !== 'rocket') applyHit(f, other, attackSpec(f), f.state, null, tip && tip.pr.point ? { point: tip.pr.point, part: tip.pr.part } : null);
+        applyHit(f, other, attackSpec(f), f.state, null, tip && tip.pr.point ? { point: tip.pr.point, part: tip.pr.part } : null);
       }
       if (f.contactT < 0) f.contactT = f.stateT;
       // (An airborne attack can't hang in mid-air: it lands through its follow-through instead.)
@@ -4898,7 +4892,6 @@ function stepFighter(f, other, inp, dt) {
     if (gp.t > gp.t1 + COMBAT.blockStunTail) { f.guardPush = null; stepLegs(f, 0, 1); }
     return;
   }
-  if (inp.rocket && tryRocketPunch(f, other)) return;
   if (inp.dashFwd && tryDash(f, other, 1)) return;
   if (inp.dashBack && tryDash(f, other, -1)) return;
   if (inp.ground && tryGroundAttack(f, other)) return;
@@ -4910,7 +4903,7 @@ function stepFighter(f, other, inp, dt) {
       if (tryAttack(f, 'punch', next.clip, !!next.clip)) f.chain = next.chain;
     } else tryAttack(f, 'punch', inp.punchClip);
   } else if (inp.kick) tryAttack(f, 'kick', inp.kickClip);
-  if (f.state === 'punch' || f.state === 'kick' || f.state === 'ground' || f.state === 'hit' || f.state === 'ko' || f.state === 'dash' || f.state === 'rocket') return;
+  if (f.state === 'punch' || f.state === 'kick' || f.state === 'ground' || f.state === 'hit' || f.state === 'ko' || f.state === 'dash') return;
 
   const speeds = locoMoveSpeeds(f, f.blocking);
   if (inp.run && !f.blocking) { // Shift / L3 / LT: faster forward and back
@@ -6171,7 +6164,7 @@ function countFighterVis(f) {
 }
 
 // Off the fight loop (menus, fighter select, results) the fight's own effects must not freeze
-// in mid-air: a rocket fist / its trail / dash jets are removed, sparks and smoke keep falling
+// in mid-air: dash jets / shockwave rings are removed, sparks and smoke keep falling
 // and fading, and loose debris settles or shrinks away.
 function stepLooseEffects(dt, noPhysics) {
   for (const f of [p1, p2]) if (f && f.special) clearSpecial(f);
@@ -6418,7 +6411,7 @@ function buzzFromFighters() {
   return b;
 }
 
-// Shader pre-warm. Effects (sparks, smoke, oil, torn-off parts, chips, wires, rocket fist, dash
+// Shader pre-warm. Effects (sparks, smoke, oil, torn-off parts, chips, wires, dash
 // jets) used to compile their shaders the first time they appeared mid-fight: 100-250 ms
 // hitches on a Mac, and the log showed new programs being linked all fight long. At fight start
 // (and after a graphics change) one tiny copy of every variant is compiled with the live lights
@@ -6588,7 +6581,7 @@ function onLoad(gltf) {
     // (damage, guard, reaction, knockdown chance, KO). False if it couldn't land.
     dealSpecialHit(atk, def, spec, point, dir) {
       if (def.state === 'ko' || DOWN_STATES.has(def.state) || def.invuln > 0) return false;
-      applyHit(atk, def, { damage: spec.damage, knock: spec.knock || 0 }, 'rocket', null, { point, dir });
+      applyHit(atk, def, { damage: spec.damage, knock: spec.knock || 0 }, 'special', null, { point, dir });
       return true;
     },
     // The shared contact light, used as the overheat glow / slam flash (no extra light).
@@ -6597,15 +6590,7 @@ function onLoad(gltf) {
       hitLight.intensity = Math.max(hitLight.intensity, intensity);
       hitLight.position.copy(pos);
     },
-    dealRocketHit(atk, def, point, dir) {
-      applyHit(atk, def, { damage: SPECIAL.rocket.damage }, 'rocket', null, { point, dir });
-      if (!def.blocking && def.hitPush) {
-        def.hitPush.x = (def.hitPush.x || 0) + dir.x * 2.4;
-        def.hitPush.z = (def.hitPush.z || 0) + dir.z * 2.4;
-      } else if (!def.blocking) {
-        def.hitPush = { x: dir.x * 4.2, z: dir.z * 4.2, t: 0, t1: 0.28 };
-      }
-    },
+
   });
   arenaLoaded = true;
   registerFightRuntime({
@@ -6852,13 +6837,12 @@ function onLoad(gltf) {
     }
     return { dur, st: STRIKE_T && STRIKE_T[name], out };
   };
-  // Debug: objects spawned into the scene since the first call (strays: parts, chips, rockets).
+  // Debug: objects spawned into the scene since the first call (strays: parts, chips, jets).
   window.__rfStrays = () => {
     const base = window.__rfStrayBase || (window.__rfStrayBase = new Set(scene.children));
     return scene.children.filter((o) => !base.has(o) && o.visible && o !== p1.root && o !== p2.root && (o.isMesh || o.isGroup))
       .map((o) => [o.uuid.slice(0, 6), o.name || '', +(o.position.y - matTopY()).toFixed(2), o.geometry ? o.geometry.type : o.children.length, o.material && o.material.color ? o.material.color.getHexString() : '', Object.keys(o.userData || {}).join('|')]);
   };
-  window.__rfRocket = (id) => { const f = id === 'p1' ? p1 : p2; f.energy = SPECIAL.energyMax; f.cooldown = 0; return tryRocketPunch(f, f === p1 ? p2 : p1); };
   // Debug: punching arm extension (shoulder-to-hand / arm length) and the strike phase.
   window.__rfArmExt = (id, punch, gap) => {
     const f = id === 'p1' ? p1 : p2;

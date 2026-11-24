@@ -53,7 +53,7 @@
   const KEYS_SOLO = `
     <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows <span>move</span></li>
     <li><kbd>J</kbd> <span>punch</span> <kbd>K</kbd> <span>kick</span> <kbd>L</kbd> <span>block</span></li>
-    <li><kbd>Q</kbd> <span>rocket punch</span> <kbd>E</kbd> <span>dash forward</span> <kbd>X</kbd> <span>dash back</span></li>
+    <li><kbd>E</kbd> <span>dash forward</span> <kbd>X</kbd> <span>dash back</span></li>
     <li><kbd>I</kbd> <span>stomp / ground punch a downed robot</span></li>
     <li><kbd>Y</kbd> <span>front flip</span></li>
     <li><kbd>U</kbd> <span>uppercut</span> <kbd>O</kbd> <span>elbow</span> <kbd>H</kbd> <span>spinning backfist</span></li>
@@ -63,9 +63,9 @@
     <li><kbd>V</kbd> <span>camera view: arena, fighting, 3rd person, 1st person, broadcast</span> <kbd>C</kbd> <span>broadcast on/off</span></li>
     <li><kbd>Esc</kbd> / <kbd>P</kbd> <span>pause</span></li>
     <li>Mouse drag <span>spin camera</span> · wheel <span>zoom</span> · double-click <span>reset view</span></li>`;
-  const KEYS_P1 = '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>F</kbd> punch · <kbd>G</kbd> kick · <kbd>H</kbd> block · <kbd>Q</kbd> rocket punch · <kbd>E</kbd> dash forward · <kbd>X</kbd> dash back · <kbd>T</kbd> ground attack · hold <kbd>Left Shift</kbd> run · <kbd>1</kbd> uppercut · <kbd>2</kbd> elbow · <kbd>3</kbd> spinning backfist · <kbd>4</kbd> knee · <kbd>5</kbd> sweep kick · <kbd>6</kbd> flying kick · <kbd>R</kbd> shoulder charge · <kbd>Z</kbd> ground slam · <kbd>B</kbd> overheat';
-  const KEYS_P2 = '<kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> move · <kbd>.</kbd> punch · <kbd>/</kbd> kick · <kbd>Right Shift</kbd> block · <kbd>[</kbd> rocket punch · <kbd>]</kbd> dash forward · <kbd>;</kbd> dash back · <kbd>,</kbd> ground attack · hold <kbd>Right Ctrl</kbd> run · <kbd>7</kbd> uppercut · <kbd>8</kbd> elbow · <kbd>9</kbd> spinning backfist · <kbd>0</kbd> knee · <kbd>-</kbd> sweep kick · <kbd>=</kbd> flying kick · <kbd>\\</kbd> shoulder charge · <kbd>L</kbd> ground slam · <kbd>O</kbd> overheat';
-  const PAD = '<li><span>Left stick / D-pad</span> move · <span class="ps">✕</span> punch · <span class="ps">○</span> kick · <span class="ps">□</span> block · <span class="ps">△</span> ground · <span class="ps">L1</span> rocket punch · <span class="ps">R2</span> dash (stick back = back dash) · hold <span class="ps">L2</span>/<span class="ps">L3</span> run · <span class="ps">R1</span>+forward front flip · <span class="ps">Options</span> pause</li>'
+  const KEYS_P1 = '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>F</kbd> punch · <kbd>G</kbd> kick · <kbd>H</kbd> block · <kbd>E</kbd> dash forward · <kbd>X</kbd> dash back · <kbd>T</kbd> ground attack · hold <kbd>Left Shift</kbd> run · <kbd>1</kbd> uppercut · <kbd>2</kbd> elbow · <kbd>3</kbd> spinning backfist · <kbd>4</kbd> knee · <kbd>5</kbd> sweep kick · <kbd>6</kbd> flying kick · <kbd>R</kbd> shoulder charge · <kbd>Z</kbd> ground slam · <kbd>B</kbd> overheat';
+  const KEYS_P2 = '<kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> move · <kbd>.</kbd> punch · <kbd>/</kbd> kick · <kbd>Right Shift</kbd> block · <kbd>]</kbd> dash forward · <kbd>;</kbd> dash back · <kbd>,</kbd> ground attack · hold <kbd>Right Ctrl</kbd> run · <kbd>7</kbd> uppercut · <kbd>8</kbd> elbow · <kbd>9</kbd> spinning backfist · <kbd>0</kbd> knee · <kbd>-</kbd> sweep kick · <kbd>=</kbd> flying kick · <kbd>\\</kbd> shoulder charge · <kbd>L</kbd> ground slam · <kbd>O</kbd> overheat';
+  const PAD = '<li><span>Left stick / D-pad</span> move · <span class="ps">✕</span> punch · <span class="ps">○</span> kick · <span class="ps">□</span> block · <span class="ps">△</span> ground · <span class="ps">R2</span> dash (stick back = back dash) · hold <span class="ps">L2</span>/<span class="ps">L3</span> run · <span class="ps">R1</span>+forward front flip · <span class="ps">Options</span> pause</li>'
     + '<li><span class="ps">L2</span>+<span class="ps">✕</span> uppercut · <span class="ps">L2</span>+<span class="ps">□</span> elbow · <span class="ps">L2</span>+<span class="ps">○</span> knee strike · <span class="ps">L2</span>+<span class="ps">△</span> sweep kick</li>'
     + '<li><span class="ps">R1</span>+<span class="ps">✕</span> spinning backfist · <span class="ps">R1</span>+<span class="ps">○</span> flying kick</li>'
     + '<li><span class="ps">L2</span>+<span class="ps">R2</span> shoulder charge · <span class="ps">L2</span>+<span class="ps">L1</span> ground slam · <span class="ps">R3</span> (click right stick) overheat super</li>';
@@ -120,7 +120,6 @@ const PAD_SVG = `<svg viewBox="0 0 760 412" class="ps-svg" role="img" aria-label
   <!-- External labels -->
   <g class="ps-call">
     <text x="70" y="54">L2 Run</text>
-    <text x="70" y="86">L1 Rocket punch</text>
     <text x="70" y="154">D-pad Move</text>
     <text x="70" y="236">Left stick Move</text>
     <text x="70" y="268">L3 (click) Run</text>
@@ -797,8 +796,8 @@ const PAD_SVG = `<svg viewBox="0 0 760 412" class="ps-svg" role="img" aria-label
     S.$$('.rfs-ctrl-pane').forEach((p) => p.classList.toggle('is-on', p.dataset.ctrlPane === which));
     if (!fromPad) S._ctrlTabLock = which;
   }
-  const HINT_KB = '<kbd>A</kbd>/<kbd>D</kbd> sidestep · <kbd>W</kbd>/<kbd>S</kbd> in/out · <kbd>J</kbd> punch · <kbd>K</kbd> kick · <kbd>L</kbd> block · <kbd>Q</kbd> rocket · <kbd>E</kbd> dash · <kbd>X</kbd> back dash · <kbd>I</kbd> ground · <kbd>U</kbd> uppercut · <kbd>O</kbd> elbow · <kbd>H</kbd> backfist · <kbd>N</kbd> knee · <kbd>M</kbd> sweep · <kbd>Space</kbd> flying kick · <kbd>Z</kbd> charge · <kbd>G</kbd> slam · <kbd>F</kbd> overheat · <kbd>V</kbd> camera · <kbd>Esc</kbd> pause';
-  const HINT_PS = '<span class="ps">LS</span>/<span class="ps">D-pad</span> move · <span class="ps">✕</span> punch · <span class="ps">○</span> kick · <span class="ps">□</span> block · <span class="ps">△</span> ground · <span class="ps">L1</span> rocket · <span class="ps">R2</span> dash · <span class="ps">L2</span> run · <span class="ps">R1</span>+fwd flip · <span class="ps">L2</span>+<span class="ps">✕</span>/<span class="ps">□</span>/<span class="ps">○</span>/<span class="ps">△</span> uppercut/elbow/knee/sweep · <span class="ps">R1</span>+<span class="ps">✕</span>/<span class="ps">○</span> backfist/flying kick · <span class="ps">L2</span>+<span class="ps">R2</span> charge · <span class="ps">L2</span>+<span class="ps">L1</span> slam · <span class="ps">R3</span> overheat · <span class="ps">Options</span> pause';
+  const HINT_KB = '<kbd>A</kbd>/<kbd>D</kbd> sidestep · <kbd>W</kbd>/<kbd>S</kbd> in/out · <kbd>J</kbd> punch · <kbd>K</kbd> kick · <kbd>L</kbd> block · <kbd>E</kbd> dash · <kbd>X</kbd> back dash · <kbd>I</kbd> ground · <kbd>U</kbd> uppercut · <kbd>O</kbd> elbow · <kbd>H</kbd> backfist · <kbd>N</kbd> knee · <kbd>M</kbd> sweep · <kbd>Space</kbd> flying kick · <kbd>Z</kbd> charge · <kbd>G</kbd> slam · <kbd>F</kbd> overheat · <kbd>V</kbd> camera · <kbd>Esc</kbd> pause';
+  const HINT_PS = '<span class="ps">LS</span>/<span class="ps">D-pad</span> move · <span class="ps">✕</span> punch · <span class="ps">○</span> kick · <span class="ps">□</span> block · <span class="ps">△</span> ground · <span class="ps">R2</span> dash · <span class="ps">L2</span> run · <span class="ps">R1</span>+fwd flip · <span class="ps">L2</span>+<span class="ps">✕</span>/<span class="ps">□</span>/<span class="ps">○</span>/<span class="ps">△</span> uppercut/elbow/knee/sweep · <span class="ps">R1</span>+<span class="ps">✕</span>/<span class="ps">○</span> backfist/flying kick · <span class="ps">L2</span>+<span class="ps">R2</span> charge · <span class="ps">L2</span>+<span class="ps">L1</span> slam · <span class="ps">R3</span> overheat · <span class="ps">Options</span> pause';
   function paintControlsHint() {
     const el = document.getElementById('controlsHint');
     if (!el) return;

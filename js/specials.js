@@ -1,5 +1,5 @@
-/* Robot moves on one shared energy bar: rocket punch, thruster dash, shoulder charge, ground slam
-   and the overheat super. Mixamo clips plus procedural poses and VFX (no fireball effects). */
+/* Robot moves on one shared energy bar: thruster dash, shoulder charge, ground slam and the
+   overheat super. Mixamo clips plus procedural poses and VFX. */
 import * as THREE from 'three';
 import { SIZE, MODEL, SPECIAL } from './config.js';
 
@@ -16,16 +16,14 @@ export function initSpecial(f) {
 
 export function specialAvail(f) {
   const energy = f && f.energy != null ? f.energy : SPECIAL.energyMax;
-  // A special still in flight (a rocket fist returning after the punch clip already ended) is
-  // busy too: starting another one used to overwrite it and strand its fist and trail mid-air.
+  // A special still running is busy too: starting another one would overwrite it.
   const busy = !f || !f.state || !!f.special || f.state === 'ko' || f.state === 'down' || f.state === 'getup' || f.state === 'hit'
-    || f.state === 'punch' || f.state === 'kick' || f.state === 'ground' || f.state === 'dash' || f.state === 'rocket';
+    || f.state === 'punch' || f.state === 'kick' || f.state === 'ground' || f.state === 'dash';
   const arm = ctx && ctx.canPunch ? ctx.canPunch(f) : true;
   const legs = !(f && f.parts && (f.parts.legL.detached || f.parts.legR.detached));
   return {
     energy: +energy.toFixed(1),
     energyMax: SPECIAL.energyMax,
-    rocket_punch: !busy && arm && energy >= SPECIAL.rocketCost,
     dash_forward: !busy && energy >= SPECIAL.dashCost,
     dash_back: !busy && energy >= SPECIAL.dashCost,
     shoulder_charge: !busy && energy >= SPECIAL.chargeCost,
@@ -45,81 +43,6 @@ export function stepEnergy(f, dt) {
   if (f.energy < SPECIAL.energyMax) f.energy = Math.min(SPECIAL.energyMax, f.energy + SPECIAL.regen * dt);
 }
 
-function findBone(root, re) {
-  let hit = null;
-  root.traverse((o) => { if (!hit && o.isBone && re.test(o.name)) hit = o; });
-  return hit;
-}
-
-function wristOf(f) {
-  return findBone(f.model, /righthand$/i) || findBone(f.model, /handr$/i) || findBone(f.model, /righthand/i);
-}
-
-function hideHand(f, hide) {
-  const part = (f.subs && f.subs.handR) || (f.parts && f.parts.armR);
-  const meshes = part ? [].concat(part.meshes || [], part.skinned || []) : [];
-  for (const m of meshes) if (m) m.visible = !hide;
-}
-
-// The flying fist. With SPECIAL.rocket.fireTrail off it is plain metal: no orange glow and no
-// flame trail (the "little fire ball", removed for now).
-function fistMesh() {
-  const g = new THREE.Group();
-  const fire = !!SPECIAL.rocket.fireTrail;
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0xb8c0cc, metalness: 0.82, roughness: 0.28,
-    ...(fire ? { emissive: 0xff6a1a, emissiveIntensity: 0.35 } : {}),
-  });
-  const core = new THREE.Mesh(new THREE.CapsuleGeometry(0.07 * SIZE, 0.1 * SIZE, 4, 8), mat);
-  core.rotation.z = Math.PI / 2;
-  g.add(core);
-  return g;
-}
-
-function makeTrail(color, low) {
-  const pts = [];
-  const n = low ? 6 : 14;
-  const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, depthWrite: false });
-  const geo = new THREE.SphereGeometry(0.045 * SIZE, 6, 6);
-  for (let i = 0; i < n; i++) {
-    const m = new THREE.Mesh(geo, mat);
-    m.visible = false;
-    pts.push(m);
-  }
-  return { pts, geo, mat, i: 0 };
-}
-
-function pushTrail(trail, pos, parent) {
-  const m = trail.pts[trail.i % trail.pts.length];
-  trail.i += 1;
-  if (m.parent !== parent) parent.add(m);
-  m.position.copy(pos);
-  m.visible = true;
-  m.userData.life = 1;
-}
-
-function fadeTrail(trail, dt) {
-  for (const m of trail.pts) {
-    if (!m.visible) continue;
-    m.userData.life -= dt * 5;
-    m.scale.setScalar(Math.max(0.15, m.userData.life));
-    m.material.opacity = Math.max(0, m.userData.life);
-    if (m.userData.life <= 0) m.visible = false;
-  }
-}
-
-function disposeTrail(trail) {
-  for (const m of trail.pts) { if (m.parent) m.parent.remove(m); m.visible = false; }
-  trail.geo.dispose();
-  trail.mat.dispose();
-}
-
-function disposeFist(fist) {
-  if (!fist) return;
-  if (fist.parent) fist.parent.remove(fist);
-  fist.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
-}
-
 function jetSprite(color) {
   const m = new THREE.Mesh(
     new THREE.ConeGeometry(0.07 * SIZE, 0.28 * SIZE, 8, 1, true),
@@ -131,9 +54,7 @@ function jetSprite(color) {
 
 // One of each special-effect object, for the shader pre-warm (disposed by the caller).
 export function specialWarmObjects() {
-  const out = [jetSprite(0x66d8ff), fistMesh(), shockRing(0xbfe8ff)];
-  if (SPECIAL.rocket.fireTrail) out.push(makeTrail(0xffa040, true).pts[0]);
-  return out;
+  return [jetSprite(0x66d8ff), shockRing(0xbfe8ff)];
 }
 
 export function clearSpecial(f) {
@@ -142,53 +63,10 @@ export function clearSpecial(f) {
     return;
   }
   const s = f.special;
-  disposeFist(s.fist);
-  if (s.trail) disposeTrail(s.trail);
   if (s.jets) for (const j of s.jets) { if (j.parent) j.parent.remove(j); j.visible = false; }
-  hideHand(f, false);
   if (s.kind === 'charge' || s.kind === 'slam' || s.kind === 'overheat') resetMovePose(f);
   f.special = null;
   f.specialKind = null;
-}
-
-export function tryRocketPunch(f, other) {
-  if (!ctx || !f || !other) return false;
-  if (ctx.inBell && ctx.inBell()) { if (ctx.logBellBlock) ctx.logBellBlock(f.id, 'rocket_punch'); return false; }
-  const av = specialAvail(f);
-  if (!av.rocket_punch) return false;
-  clearSpecial(f);
-  spendEnergy(f, SPECIAL.rocketCost);
-  f.specialKind = 'rocket';
-  const clip = (f.actions && (f.actions.RightHook || f.actions.Uppercut || f.actions[MODEL.animations.punch])) ? (f.actions.RightHook ? 'RightHook' : (f.actions.Uppercut ? 'Uppercut' : MODEL.animations.punch)) : MODEL.animations.punch;
-  f.state = 'punch';
-  f.stateT = 0;
-  f.hitThisAttack = false;
-  f.attackClip = clip;
-  f.blocking = false;
-  if (f.shield) f.shield.visible = false;
-  ctx.setAnim(f, clip, 0.12);
-  const act = f.actions && f.actions[clip];
-  if (act) {
-    act.timeScale = 1.25;
-    if (act.getClip) act.time = Math.min(0.12, act.getClip().duration * 0.15);
-  }
-  const low = ctx.gfxKey === 'low';
-  const fist = fistMesh();
-  ctx.scene.add(fist);
-  fist.visible = false;
-  f.special = {
-    kind: 'rocket',
-    t: 0,
-    phase: 'wind',
-    fist,
-    trail: SPECIAL.rocket.fireTrail ? makeTrail(0xff7a2f, low) : null,
-    hit: false,
-    clip,
-  };
-  if (ctx.playSfx) ctx.playSfx('whoosh');
-  if (ctx.logSpecial) ctx.logSpecial(f.id, 'rocket_punch', 'use');
-  if (!f.isCpu && ctx.logInputAction) ctx.logInputAction(f.id, 'rocket_punch');
-  return true;
 }
 
 export function tryDash(f, other, dir) {
@@ -220,79 +98,6 @@ export function tryDash(f, other, dir) {
   if (ctx.logSpecial) ctx.logSpecial(f.id, dir > 0 ? 'dash_forward' : 'dash_back', 'use');
   if (!f.isCpu && ctx.logInputAction) ctx.logInputAction(f.id, dir > 0 ? 'dash_forward' : 'dash_back');
   return true;
-}
-
-function flyRocket(f, other, dt) {
-  const s = f.special;
-  const spec = SPECIAL.rocket;
-  s.t += dt;
-  s.life = (s.life || 0) + dt;
-  // Knocked out of the wind-up (hit, knocked down, KO, round over): the fist never launches.
-  // In flight it always finishes and comes home; a hard lifetime cleans up whatever happens.
-  const owner = f.state === 'punch' || f.state === 'idle' || f.state === 'block';
-  if ((s.phase === 'wind' && !owner) || s.life > spec.wind + spec.fly + spec.ret + 0.8) { clearSpecial(f); return; }
-  const wrist = wristOf(f);
-  const wp = new THREE.Vector3();
-  if (wrist) wrist.getWorldPosition(wp);
-  else wp.copy(f.root.position).add(new THREE.Vector3(0, 1.15 * SIZE, 0));
-
-  if (s.phase === 'wind') {
-    if (s.t >= spec.wind) {
-      s.phase = 'fly';
-      s.t = 0;
-      hideHand(f, true);
-      s.fist.visible = true;
-      s.origin = wp.clone();
-      const to = ctx.toward(f, other, new THREE.Vector3());
-      const gap = f.root.position.distanceTo(other.root.position);
-      const travel = Math.min(spec.range, Math.max(0.8 * SIZE, gap + 0.35 * SIZE));
-      s.target = s.origin.clone().addScaledVector(to, travel);
-      s.target.y = wp.y;
-    }
-    return;
-  }
-
-  const dur = s.phase === 'fly' ? spec.fly : spec.ret;
-  const u = Math.min(1, s.t / dur);
-  const ease = s.phase === 'ret' ? (1 - Math.pow(1 - u, 2)) : (1 - Math.pow(1 - u, 1.6));
-  if (s.phase === 'fly') s.fist.position.lerpVectors(s.origin, s.target, ease);
-  else {
-    if (wrist) wrist.getWorldPosition(wp);
-    s.fist.position.lerpVectors(s.from || s.fist.position, wp, ease);
-  }
-  const look = s.phase === 'fly' ? s.target : wp;
-  s.fist.lookAt(look);
-  if (s.trail) {
-    pushTrail(s.trail, s.fist.position, ctx.scene);
-    fadeTrail(s.trail, dt);
-  }
-
-  if (s.phase === 'fly' && !s.hit) {
-    const chest = other.root.position.clone();
-    chest.y += 1.15 * SIZE;
-    if (s.fist.position.distanceTo(chest) < (spec.radius + 0.42 * SIZE) || s.fist.position.distanceTo(other.root.position) < 0.7 * SIZE) {
-      s.hit = true;
-      const dir = ctx.toward(f, other, new THREE.Vector3());
-      if (ctx.dealRocketHit) ctx.dealRocketHit(f, other, s.fist.position.clone(), dir);
-      if (ctx.logSpecial) ctx.logSpecial(f.id, 'rocket_punch', other.blocking ? 'block' : 'land');
-    }
-  }
-
-  if (u >= 1) {
-    if (s.phase === 'fly') {
-      s.phase = 'ret';
-      s.t = 0;
-      s.from = s.fist.position.clone();
-      if (!s.hit && ctx.logSpecial) ctx.logSpecial(f.id, 'rocket_punch', 'miss');
-    } else {
-      clearSpecial(f);
-      // Only a robot still in its punch goes back to the guard (not one hit or downed meanwhile).
-      if (f.state === 'punch') {
-        if (ctx.endAttack) ctx.endAttack(f, 0.14);
-        else { f.state = 'idle'; f.cooldown = 0.18; }
-      }
-    }
-  }
 }
 
 // Thruster dash: a smooth burst through the physics body (velocity, never position), so the
@@ -352,8 +157,7 @@ export function stepSpecial(f, other, dt) {
   stepRing(f, dt);
   if (!f.special) return;
   const k = f.special.kind;
-  if (k === 'rocket') flyRocket(f, other, dt);
-  else if (k === 'dash') flyDash(f, other, dt);
+  if (k === 'dash') flyDash(f, other, dt);
   else if (k === 'charge') flyCharge(f, other, dt);
   else if (k === 'slam') flySlam(f, other, dt);
   else if (k === 'overheat') flyOverheat(f, other, dt);

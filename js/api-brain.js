@@ -18,7 +18,7 @@ import { memoryKey, isLearningOn, promptNotes, defaultLearningOn, setDefaultLear
 // Named strikes (in reach when self.moves[name] is true) and robot moves (energy, self.specials).
 export const AI_MOVES = ['uppercut', 'elbow', 'spin_backfist', 'knee', 'sweep_kick', 'flying_kick'];
 export const AI_ROBOT_MOVES = ['shoulder_charge', 'ground_slam', 'overheat'];
-export const AI_ACTIONS = ['approach', 'retreat', 'circle_left', 'circle_right', 'punch', 'kick', 'flip_front', 'block', 'ground', 'wait', 'rocket_punch', 'dash_forward', 'dash_back', ...AI_MOVES, ...AI_ROBOT_MOVES];
+export const AI_ACTIONS = ['approach', 'retreat', 'circle_left', 'circle_right', 'punch', 'kick', 'flip_front', 'block', 'ground', 'wait', 'dash_forward', 'dash_back', ...AI_MOVES, ...AI_ROBOT_MOVES];
 export const AI_TARGETS = ['head', 'torso', 'armL', 'armR', 'legL', 'legR'];
 
 export const AI_PROVIDERS = {
@@ -36,7 +36,7 @@ export const SYSTEM = 'You control one heavy humanoid robot in a 3D fighting gam
   + 'state as JSON (distances in metres, health 0-100, parts 0-1 health, 0 means torn off). Reply with JSON '
   + '{"action":"<one of the Allowed actions>","plan":"<up to 12 words>","target":"<optional one of: '
   + AI_TARGETS.join(', ') + '>"} and nothing else. inRange.punch / inRange.kick are true when that strike can land now. '
-  + 'rocket_punch, dash_forward and dash_back are specials that spend shared energy (see specials / energy in the state). '
+  + 'dash_forward and dash_back are specials that spend shared energy (see specials / energy in the state). '
   + 'Named strikes: uppercut, elbow and knee (close, heavy), spin_backfist (strong, slow), sweep_kick (low, often knocks down), flying_kick (from just outside kick range). '
   + 'Robot moves on energy: shoulder_charge (rush in from mid range), ground_slam (shockwave around you, hits a standing opponent nearby), overheat (needs a full bar; big burst all around, then no energy for a while). '
   + 'legal is the only set of actions that work at this distance — do not pick approach when it is omitted. '
@@ -154,15 +154,12 @@ export function rangeInfo(s) {
   }
   if (opp.groundable) legal.push('ground');
   const sp = self.specials || {};
-  const rocketRange = (s && s.strikeRange && s.strikeRange.rocket) || (kick ? kick + 0.9 : punch ? punch + 1.1 : 3.2);
-  inRange.rocket = dist <= rocketRange + 0.02;
-  if (sp.rocket_punch && inRange.rocket) legal.push('rocket_punch');
   if (sp.dash_forward) legal.push('dash_forward');
   if (sp.dash_back) legal.push('dash_back');
   const mv = self.moves || {};
   for (const m of AI_MOVES) if (mv[m]) legal.push(m);
   for (const m of AI_ROBOT_MOVES) if (sp[m]) legal.push(m);
-  return { dist, inRange, legal, strikeRange: { punch, kick, rocket: +rocketRange.toFixed(2) }, energy: self.energy };
+  return { dist, inRange, legal, strikeRange: { punch, kick }, energy: self.energy };
 }
 
 function compact(s) {
@@ -455,7 +452,6 @@ function actionIntent(a) {
   else if (a === 'circle_left') it.strafe = -1;
   else if (a === 'circle_right') it.strafe = 1;
   else if (a === 'punch' || a === 'kick' || a === 'ground') it.attack = a;
-  else if (a === 'rocket_punch') it.attack = 'rocket_punch';
   else if (a === 'dash_forward') it.attack = 'dash_forward';
   else if (a === 'dash_back') it.attack = 'dash_back';
   else if (AI_MOVES.includes(a) || AI_ROBOT_MOVES.includes(a)) it.attack = a;

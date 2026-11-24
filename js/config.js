@@ -15,28 +15,16 @@ export const CAGE_PAD = 0.48 * SIZE + 0.14;
 // but they are not loaded into the fight mixer (they read as a back or side flip kick).
 export const UNUSED_CLIPS = ['FlipKick', 'SpinFlipKick', 'ChapaGiratoria', 'MeiaLuaDeCompasso', 'Backflip', 'BackFlipToUppercut'];
 
-// Shared special-move energy (rocket punch + thruster dash). Costs are absolute points
+// Shared robot-move energy (thruster dash, shoulder charge, ground slam, overheat). Costs are absolute points
 // on a 0–energyMax pool that refills after a short delay.
 export const SPECIAL = {
   energyMax: 100,
   regen: 18,
   regenDelay: 0.45,
-  rocketCost: 55,
   dashCost: 32,
   chargeCost: 38,
   slamCost: 50,
   overheatCost: 100, // the whole bar
-  rocket: {
-    // Orange glow + flame trail on the flying fist ("little fire ball"): off for now (Nov 23).
-    // Set true to bring it back; with false the trail is never built.
-    fireTrail: false,
-    damage: 12,
-    range: 3.2 * SIZE,
-    wind: 0.14,
-    fly: 0.16,
-    ret: 0.2,
-    radius: 0.24 * SIZE,
-  },
   // Shoulder charge: a thruster rush with the shoulder down; stops on the body.
   charge: { dist: 2.4 * SIZE, time: 0.42, damage: 9, knock: 0.4, hitGap: 1.22 * SIZE, recover: 0.38 },
   // Ground slam: hop, then both fists into the mat; a shockwave ring along the floor.

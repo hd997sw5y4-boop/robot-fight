@@ -132,7 +132,7 @@
     inp.ground = b(3) && !l2;
     inp.block = b(2) && !l2;
     inp.run = b(10) || b(6);
-    inp.rocket = b(4) && !l2;
+    // L1 alone is unbound (only L2 + L1 ground slam uses it).
     if (b(7) && !l2) {
       if (inp.inout < -0.25) inp.dashBack = true;
       else inp.dashFwd = true;

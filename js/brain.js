@@ -316,12 +316,6 @@ export function createPacedBrain(getProfile) {
     }
 
     const sp = self.specials || {};
-    const rocketR = (snap.strikeRange.rocket || (snap.strikeRange.kick + SIZE)) / SIZE;
-    if (sp.rocket_punch && dist > punchR * 0.65 && dist < rocketR && Math.random() < (prof.special || 0.12) * 0.9) {
-      intent.attack = 'rocket_punch';
-      intent.block = false;
-      return intent;
-    }
     // Overheat super with a full bar, up close (it hits all around).
     if (sp.overheat && !opp.down && dist < 2.0 && perSec(prof, 0.9, snap.dt)) {
       intent.attack = 'overheat';

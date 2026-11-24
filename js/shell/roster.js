@@ -128,9 +128,9 @@
   };
 
   /* ---------- input: versus + training dummy ---------- */
-  const P1K = { l: ['KeyA'], r: ['KeyD'], u: ['KeyW'], d: ['KeyS'], punch: ['KeyF'], kick: ['KeyG'], block: ['KeyH'], ground: ['KeyT'], run: ['ShiftLeft'], rocket: ['KeyQ'], dashFwd: ['KeyE'], dashBack: ['KeyX'] };
+  const P1K = { l: ['KeyA'], r: ['KeyD'], u: ['KeyW'], d: ['KeyS'], punch: ['KeyF'], kick: ['KeyG'], block: ['KeyH'], ground: ['KeyT'], run: ['ShiftLeft'], dashFwd: ['KeyE'], dashBack: ['KeyX'] };
   const P2K = { l: ['ArrowLeft'], r: ['ArrowRight'], u: ['ArrowUp'], d: ['ArrowDown'],
-    punch: ['Period', 'Numpad1'], kick: ['Slash', 'Numpad2'], block: ['ShiftRight', 'Quote', 'Numpad3'], ground: ['Comma', 'Numpad4'], run: ['ControlRight', 'Numpad0'], rocket: ['BracketLeft', 'Numpad7'], dashFwd: ['BracketRight', 'Numpad8'], dashBack: ['Semicolon', 'Numpad9'] };
+    punch: ['Period', 'Numpad1'], kick: ['Slash', 'Numpad2'], block: ['ShiftRight', 'Quote', 'Numpad3'], ground: ['Comma', 'Numpad4'], run: ['ControlRight', 'Numpad0'], dashFwd: ['BracketRight', 'Numpad8'], dashBack: ['Semicolon', 'Numpad9'] };
   // Named moves, one key each (e.code -> move id).
   P1K.moves = { Digit1: 'uppercut', Digit2: 'elbow', Digit3: 'spin_backfist', Digit4: 'knee', Digit5: 'sweep_kick', Digit6: 'flying_kick',
     KeyR: 'shoulder_charge', KeyZ: 'ground_slam', KeyB: 'overheat' };
@@ -150,7 +150,6 @@
     inp.tapPunch = anyTap(map.punch);
     inp.tapKick = anyTap(map.kick);
     inp.tapGround = anyTap(map.ground || []);
-    inp.tapRocket = anyTap(map.rocket || []);
     inp.tapDashFwd = anyTap(map.dashFwd || []);
     inp.tapDashBack = anyTap(map.dashBack || []);
     inp.punch = inp.punch || anyDown(map.punch) || inp.tapPunch;
@@ -158,7 +157,6 @@
     inp.block = inp.block || anyDown(map.block);
     inp.ground = inp.ground || anyDown(map.ground || []) || inp.tapGround;
     inp.run = inp.run || anyDown(map.run || []);
-    inp.rocket = inp.rocket || anyDown(map.rocket || []) || inp.tapRocket;
     inp.dashFwd = inp.dashFwd || anyDown(map.dashFwd || []) || inp.tapDashFwd;
     inp.dashBack = inp.dashBack || anyDown(map.dashBack || []) || inp.tapDashBack;
     for (const code in (map.moves || {})) {
@@ -176,7 +174,7 @@
     if (S.state.padSwap) i = 1 - i;
     return pads[i] || null;
   };
-  const p2Held = { punch: false, kick: false, ground: false, rocket: false, dashFwd: false, dashBack: false, move: null };
+  const p2Held = { punch: false, kick: false, ground: false, dashFwd: false, dashBack: false, move: null };
   const idle = () => ({ sidestep: 0, inout: 0, punch: false, kick: false, block: false });
   S.inputFor = (side) => {
     const m = S.match && S.match.cfg;
@@ -189,16 +187,14 @@
       const punch = inp.punch || inp.tapPunch;
       const kick = inp.kick || inp.tapKick;
       const ground = inp.ground || inp.tapGround;
-      const rocket = inp.rocket || inp.tapRocket;
       const dashFwd = inp.dashFwd || inp.tapDashFwd;
       const dashBack = inp.dashBack || inp.tapDashBack;
       const move = inp.tapMove || (inp.move && inp.move !== p2Held.move ? inp.move : null);
-      const out = { ...inp, punch: punch && !p2Held.punch, kick: kick && !p2Held.kick, ground: ground && !p2Held.ground, rocket: rocket && !p2Held.rocket, dashFwd: dashFwd && !p2Held.dashFwd, dashBack: dashBack && !p2Held.dashBack, move };
+      const out = { ...inp, punch: punch && !p2Held.punch, kick: kick && !p2Held.kick, ground: ground && !p2Held.ground, dashFwd: dashFwd && !p2Held.dashFwd, dashBack: dashBack && !p2Held.dashBack, move };
       p2Held.move = inp.move || null;
       p2Held.punch = punch;
       p2Held.kick = kick;
       p2Held.ground = ground;
-      p2Held.rocket = rocket;
       p2Held.dashFwd = dashFwd;
       p2Held.dashBack = dashBack;
       return out;
