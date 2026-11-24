@@ -5,7 +5,7 @@
    no immediate repeats, crowd ducking via the audio bus. */
 import { playVoiceClip, stopVoice, voiceClipDuration, isVoiceBusy, unlockAudio, registerSoundFiles } from './audio.js';
 
-const MANIFEST_URL = './sounds/announcer/manifest.json?v=excited-d-1';
+const MANIFEST_URL = './sounds/announcer/manifest.json?v=excited-d-2';
 
 const RANK = {
   ko: 1, decision: 1, draw: 1, winner: 1, winnerBlue: 1, winnerRed: 1, rematch: 1,

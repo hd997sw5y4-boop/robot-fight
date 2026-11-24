@@ -5,7 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  <title>Robot Fight</title>
+  <title>Android Arena</title>
+  <meta name="application-name" content="Android Arena">
+  <meta name="apple-mobile-web-app-title" content="Android Arena">
+  <meta property="og:title" content="Android Arena">
+  <script>
+    // The game's name. Change it here (and in the three tags above) to rename the game.
+    window.RF_GAME_TITLE = 'Android Arena';
+    document.title = window.RF_GAME_TITLE;
+    document.documentElement.style.setProperty('--rf-title', JSON.stringify(window.RF_GAME_TITLE));
+  </script>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='14' y='18' width='36' height='30' rx='8' fill='%2322303f'/%3E%3Crect x='20' y='27' width='9' height='7' rx='2' fill='%2366d8ff'/%3E%3Crect x='35' y='27' width='9' height='7' rx='2' fill='%23ff9a3a'/%3E%3Crect x='30' y='8' width='4' height='10' fill='%2322303f'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="./css/style.css">
   <link rel="stylesheet" href="./css/shell.css">
@@ -27,7 +36,7 @@
 </head>
 <body>
   <canvas id="c"></canvas>
-  <div id="loader"><div class="spin">Loading Robot Fight<div class="barline"><i id="loadbar"></i></div></div></div>
+  <div id="loader"><div class="spin">Loading<div class="barline"><i id="loadbar"></i></div></div></div>
   <div id="hud">
     <div id="vignette"></div>
     <div id="top">
@@ -203,8 +212,6 @@
             <option value="max">Max</option>
           </select>
         </label>
-        <label>Auto rematch (Bot vs Bot) <input type="checkbox" id="setAutoRematch"></label>
-        <label>Loop CPU vs CPU fights <input type="checkbox" id="setLoopCpu"></label>
         <div class="set-log">
           <span>Fight log</span>
           <button type="button" id="setLogDownload">Download fight log</button>
@@ -212,7 +219,7 @@
           <button type="button" id="setLogClear">Clear log</button>
         </div>
         <p class="hint" id="setLogSaveErr" hidden></p>
-        <p class="hint">Damage is how badly robots dent, lose armor, and break apart. Low is light wear. Medium adds more dents and the odd armor plate. Max bends and dents hard, sheds plates often, and limbs, hands, and the head come off sooner. Loop CPU vs CPU auto-starts the next Bot vs Bot fight and keeps logging. Download fight log saves a JSON file of recent fights (old ones rotate out).</p>
+        <p class="hint">Damage is how badly robots dent, lose armor, and break apart. Low is light wear. Medium adds more dents and the odd armor plate. Max bends and dents hard, sheds plates often, and limbs, hands, and the head come off sooner. Download fight log saves a JSON file of recent fights (old ones rotate out).</p>
       </section>
       <section class="mcat">
         <h3>AI API Brain</h3>
@@ -227,9 +234,6 @@
         <label>Base URL <input type="url" id="aiBase" autocomplete="off" spellcheck="false"></label>
         <label>Model <input type="text" id="aiModel" autocomplete="off" spellcheck="false"></label>
         <label>API key <input type="password" id="aiKey" autocomplete="off" spellcheck="false"> <button type="button" id="aiClear">Clear</button></label>
-        <label>P1 brain (Bot vs Bot)
-          <select id="aiBrainP1"><option value="cpu">CPU</option><option value="api">API</option></select>
-        </label>
         <label>P2 brain
           <select id="aiBrainP2"><option value="cpu">CPU</option><option value="api">API</option></select>
         </label>

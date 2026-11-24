@@ -22,10 +22,8 @@ const KEYS = {
   light: 'rf_light',
   hdri: 'rf_hdri',
   cam: 'rf_cam',
-  autoRematch: 'rf_autorematch',
   match: 'rf_match',
   damage: 'rf_damage',
-  loopCpu: 'rf_loop_cpu',
 };
 
 // Camera views, in the order the V key cycles them. 'arena' is the original orbit camera.
@@ -67,10 +65,8 @@ const defaults = {
   light: 1,
   hdri: true,
   cam: 'arena',
-  autoRematch: false, // Bot vs Bot: start the next match by itself after the results
   match: 3, // best-of 1 / 3 / 5
   damage: 'medium', // low / medium / max: scales the existing dent / detach / debris system
-  loopCpu: false, // CPU vs CPU back-to-back loop
 };
 
 function read() {
@@ -104,13 +100,10 @@ function read() {
     if (hdri != null) s.hdri = hdri === '1';
     const cam = localStorage.getItem(KEYS.cam);
     if (CAM_MODES.includes(cam)) s.cam = cam;
-    s.autoRematch = localStorage.getItem(KEYS.autoRematch) === '1';
     const mt = localStorage.getItem(KEYS.match);
     if (mt === '1' || mt === '3' || mt === '5') s.match = +mt;
     const dmg = localStorage.getItem(KEYS.damage);
     if (dmg === 'low' || dmg === 'medium' || dmg === 'max') s.damage = dmg;
-    const loop = localStorage.getItem(KEYS.loopCpu);
-    if (loop != null) s.loopCpu = loop === '1';
   } catch (_) {}
   return s;
 }
@@ -131,10 +124,8 @@ function write(s) {
     localStorage.setItem(KEYS.light, String(s.light));
     localStorage.setItem(KEYS.hdri, s.hdri ? '1' : '0');
     localStorage.setItem(KEYS.cam, s.cam);
-    localStorage.setItem(KEYS.autoRematch, s.autoRematch ? '1' : '0');
     localStorage.setItem(KEYS.match, String(s.match));
     localStorage.setItem(KEYS.damage, s.damage);
-    localStorage.setItem(KEYS.loopCpu, s.loopCpu ? '1' : '0');
   } catch (_) {}
 }
 
@@ -197,14 +188,10 @@ function paint() {
   if (hdriEl) hdriEl.checked = !!settings.hdri;
   const camEl = $('setCam');
   if (camEl) camEl.value = settings.cam;
-  const arEl = $('setAutoRematch');
-  if (arEl) arEl.checked = !!settings.autoRematch;
   const matchEl = $('setMatch');
   if (matchEl) matchEl.value = String(settings.match);
   const dmgEl = $('setDamage');
   if (dmgEl) dmgEl.value = settings.damage === 'low' || settings.damage === 'max' ? settings.damage : 'medium';
-  const loopEl = $('setLoopCpu');
-  if (loopEl) loopEl.checked = !!settings.loopCpu;
   applyChrome();
 }
 
@@ -344,16 +331,6 @@ export function initSettings(nextHooks) {
     settings.damage = (v === 'low' || v === 'max') ? v : 'medium';
     persist();
   });
-  document.getElementById('setAutoRematch')?.addEventListener('change', (e) => {
-    settings.autoRematch = e.target.checked;
-    persist();
-  });
-  document.getElementById('setLoopCpu')?.addEventListener('change', (e) => {
-    settings.loopCpu = e.target.checked;
-    if (settings.loopCpu) settings.autoRematch = true;
-    persist();
-    paint();
-  });
   document.getElementById('setControls')?.addEventListener('change', (e) => {
     settings.controls = e.target.checked;
     persist();
@@ -461,11 +438,3 @@ export function updateFps(dt) {
 
 export function lastFps() { return updateFps._last || 0; }
 
-
-export function setLoopCpu(on) {
-  settings.loopCpu = !!on;
-  if (settings.loopCpu) settings.autoRematch = true;
-  persist();
-  paint();
-}
-if (typeof window !== 'undefined') window.RFSetLoopCpu = setLoopCpu;

@@ -42,6 +42,8 @@ function chainlinkTexture() {
 
 // Painted markings only (transparent canvas): start lines, corner wedges, scuffs, edge text.
 // Layered as a decal over the Metal001 mat base — not a replacement for it.
+// Edge text on the mat: the game's name (index.html window.RF_GAME_TITLE), letters spaced wide.
+const MAT_TITLE = String((typeof window !== 'undefined' && window.RF_GAME_TITLE) || '').toUpperCase().split(' ').join('  ');
 function matDecalTexture(a) {
   const N = 2048;
   const c = document.createElement('canvas');
@@ -91,7 +93,7 @@ function matDecalTexture(a) {
   g.textBaseline = 'middle';
   for (const [z, rot] of [[a * 0.8, 0], [-a * 0.8, Math.PI]]) {
     const [px, py] = toPx(0, z);
-    g.save(); g.translate(px, py); g.rotate(rot); g.fillText('ROBOT  FIGHT', 0, 0); g.restore();
+    g.save(); g.translate(px, py); g.rotate(rot); g.fillText(MAT_TITLE, 0, 0); g.restore();
   }
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -102,31 +104,6 @@ function matDecalTexture(a) {
 function merged(list, mat) {
   const geos = list.map(({ geo, m }) => { const g2 = geo.clone(); g2.applyMatrix4(m); return g2; });
   return new THREE.Mesh(mergeGeometries(geos, false), mat);
-}
-
-function logoTexture() {
-  const c = document.createElement('canvas');
-  c.width = 1024;
-  c.height = 1024;
-  const g = c.getContext('2d');
-  g.clearRect(0, 0, 1024, 1024);
-  g.strokeStyle = 'rgba(255,255,255,0.95)';
-  g.lineWidth = 22;
-  g.beginPath();
-  g.arc(512, 512, 430, 0, Math.PI * 2);
-  g.stroke();
-  g.fillStyle = 'rgba(255,255,255,0.96)';
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.font = '700 86px ui-sans-serif, system-ui, sans-serif';
-  g.letterSpacing = '0.18em';
-  g.fillText('WINDOW', 512, 400);
-  g.fillText('WORKSHOP', 512, 512);
-  g.fillText('GAMES', 512, 624);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 16;
-  return t;
 }
 
 // World-XZ UVs so the tiled Metal001 plate reads even across the octagon, not polar-warped.
@@ -190,24 +167,6 @@ export function buildArena(scene, { tiled, metalColor, metalRough }) {
   floor.rotation.y = Math.PI / 8;
   floor.receiveShadow = true;
   group.add(floor);
-
-  const logo = new THREE.Mesh(
-    new THREE.CircleGeometry(2.35, 64),
-    new THREE.MeshStandardMaterial({
-      map: logoTexture(),
-      transparent: true,
-      metalness: 0.12,
-      roughness: 0.62,
-      envMapIntensity: 0.22,
-      emissive: 0x000000,
-      emissiveIntensity: 0,
-      depthWrite: false,
-    }),
-  );
-  logo.rotation.x = -Math.PI / 2;
-  logo.position.y = 0.004;
-  logo.receiveShadow = true;
-  group.add(logo);
 
   const ringMat = new THREE.MeshStandardMaterial({
     color: 0xd5d8de,

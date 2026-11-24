@@ -59,7 +59,6 @@ function settingsSnapshot() {
     gfx: s.gfx,
     hdri: !!s.hdri,
     round: s.round,
-    loop: !!s.loopCpu,
   };
 }
 
@@ -814,7 +813,7 @@ export function downloadLog() {
   const a = document.createElement('a');
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   a.href = URL.createObjectURL(blob);
-  a.download = `robot-fight-log-${stamp}.json`;
+  a.download = `android-arena-log-${stamp}.json`;
   document.body.appendChild(a);
   a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);

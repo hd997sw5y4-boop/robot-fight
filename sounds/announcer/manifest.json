@@ -3,14 +3,8 @@
  "processing": "dry: EQ + comp, -16 LUFS / -1.5 dBTP, mono 44.1 kHz 96 kbps; apply arena PA reverb at runtime",
  "license": "Chatterbox MIT (outputs carry Resemble PerTh inaudible watermark); Kokoro Apache-2.0; lines original (Window Workshop Games). No real-person voice and no trademarked fight calls.",
  "version": "excited-d-1",
- "count": 108,
+ "count": 104,
  "events": {
-  "intro": [
-   "ann_intro_01.mp3",
-   "ann_intro_02.mp3",
-   "ann_intro_03.mp3",
-   "ann_intro_04.mp3"
-  ],
   "introBlue": [
    "ann_intro_blue_01.mp3",
    "ann_intro_blue_02.mp3",
@@ -171,30 +165,6 @@
   ]
  },
  "clips": {
-  "ann_intro_01": {
-   "event": "intro",
-   "text": "Ladies and gentlemen... welcome to ROBOT FIGHT!",
-   "file": "ann_intro_01.mp3",
-   "duration_s": 2.8
-  },
-  "ann_intro_02": {
-   "event": "intro",
-   "text": "The floor is lit! Welcome to ROBOT FIGHT!",
-   "file": "ann_intro_02.mp3",
-   "duration_s": 3.21
-  },
-  "ann_intro_03": {
-   "event": "intro",
-   "text": "This is ROBOT FIGHT! The marks are set... let's work!",
-   "file": "ann_intro_03.mp3",
-   "duration_s": 3.55
-  },
-  "ann_intro_04": {
-   "event": "intro",
-   "text": "Welcome to ROBOT FIGHT! Chassis ready... sparks ready!",
-   "file": "ann_intro_04.mp3",
-   "duration_s": 3.66
-  },
   "ann_intro_blue_01": {
    "event": "introBlue",
    "text": "In the blue marks... a fighter built to work!",

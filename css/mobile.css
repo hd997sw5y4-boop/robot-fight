@@ -81,8 +81,7 @@ html.rf-mobile .fs-foot .rfs-go { min-width: 140px; min-height: 46px; }
   html.rf-mobile .fs-chips { grid-template-columns: repeat(4, 1fr); }
   html.rf-mobile .fs-ctrl.fs-ctrl3 { grid-template-columns: 1fr 1fr; }
 }
-html.rf-mobile nav.rfs-menu .rfs-btn { padding: 8px 12px 8px 44px; min-height: 46px; }
-html.rf-mobile nav.rfs-menu .rfs-btn::before { left: 12px; font-size: 13px; }
+html.rf-mobile nav.rfs-menu .rfs-btn { padding: 8px 12px; min-height: 46px; }
 html.rf-mobile #bottom { display: none !important; } /* keyboard hint bar */
 html.rf-mobile .rfs-mainwrap .rfs-col { width: 100%; }
 html.rf-mobile body.fs-open #rfRotate { display: none !important; }
@@ -100,8 +99,6 @@ html.rf-mobile .parts-bot { width: 20px; height: 28px; }
   html.rf-mobile .parts-bot { width: 18px; height: 26px; }
 }
 
-html.rf-mobile .rfs-soundlab { width: min(100%, 96vw); }
-html.rf-mobile .rfs-soundlab-card { padding: 14px 12px 20px; }
 html.rf-mobile .rfs-sl-actions { width: 100%; }
 html.rf-mobile .rfs-sl-actions .rfs-btn { flex: 1; min-width: 0; }
 html.rf-mobile .rfs-sl-sheet { align-items: stretch; padding: 0; }

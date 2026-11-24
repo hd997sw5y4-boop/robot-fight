@@ -36,7 +36,7 @@ function aiWrite(k, v) {
     else localStorage.setItem(LS[k], v);
   } catch (_) { /* storage blocked */ }
 }
-const apiAllowed = (side) => (side === 'p1' ? !['arcade', 'training'].includes(mode()) : mode() !== 'training');
+const apiAllowed = () => mode() !== 'training';
 function brainOf(side) {
   if (!isCpu(side)) return 'player';
   const c = aiConfig();
@@ -91,15 +91,12 @@ function ctrlToggle(side) {
   const m = mode();
   const cur = brainOf(side);
   let lockP = false;
-  let lockC = false;
   let note = '';
-  if (side === 'p1' && (m === 'arcade' || m === 'training')) { lockC = true; note = m === 'arcade' ? 'Arcade is played by you.' : 'Training is played by you.'; }
-  else if (side === 'p1' && m === 'watch') note = 'Bot vs Bot: both robots run on a CPU or AI brain.';
-  else if (side === 'p2' && m === 'arcade') { lockP = true; note = 'Arcade is a solo ladder.'; }
-  else if (side === 'p2' && m === 'training') { lockP = true; note = 'Training uses a dummy (no brain).'; }
+  if (m === 'arcade') { lockP = true; note = 'Arcade is a solo ladder.'; }
+  else if (m === 'training') { lockP = true; note = 'Training uses a dummy (no brain).'; }
   const lockA = !apiAllowed(side);
   const b = (v, label, locked) => `<button type="button" class="rfs-f fs-tog" data-fs="ctrl" data-side="${side}" data-v="${v}" aria-pressed="${cur === v}"${locked ? ' aria-disabled="true"' : ''}>${label}</button>`;
-  return `<div class="fs-ctrl" role="group" aria-label="${side.toUpperCase()} control">${b('player', side === 'p1' ? 'Player' : 'Player', lockP)}${b('cpu', m === 'training' && side === 'p2' ? 'Dummy' : 'CPU', lockC)}${b('api', 'AI API', lockA)}</div>
+  return `<div class="fs-ctrl" role="group" aria-label="${side.toUpperCase()} control">${b('player', 'Player', lockP)}${b('cpu', m === 'training' ? 'Dummy' : 'CPU', false)}${b('api', 'AI API', lockA)}</div>
     ${note ? `<p class="fs-note">${note}</p>` : ''}${cur === 'api' ? apiPanel(side) : ''}`;
 }
 
@@ -175,7 +172,6 @@ function card(f, side, selected) {
 function sideTitle(side) {
   const m = mode();
   if (side === 'p1') {
-    if (m === 'watch') return { kicker: 'Blue corner', title: 'Choose your fighter' };
     if (m === 'versus') return { kicker: 'Blue corner', title: 'Choose your fighter' };
     return { kicker: 'Blue corner', title: 'Choose your fighter' };
   }
@@ -215,7 +211,7 @@ function sidePanel(side) {
   }
   return `<section class="fs-side" data-side="${side}" style="--pc:${SIDE_COLOR[side]}">
     <header class="fs-head"><small>${esc(head.kicker)}</small><b>${esc(head.title)}</b></header>
-    ${ctrlToggle(side)}
+    ${side === 'p2' ? ctrlToggle(side) : ''}
     ${body}
   </section>`;
 }
@@ -310,18 +306,17 @@ function onClick(e) {
       if (b.getAttribute('aria-disabled') === 'true') {
         const v0 = b.dataset.v;
         S.sfx('close');
-        return S.toast(v0 === 'api'
-          ? (side === 'p1' ? 'P1 is you in this mode, so it has no brain to swap.' : 'The training dummy has no brain.')
-          : side === 'p1' ? 'P1 is you in this mode.' : (mode() === 'arcade' ? 'Arcade is solo: P2 is always the CPU ladder.' : 'Training always uses the dummy.'));
+        return S.toast(v0 === 'api' ? 'The training dummy has no brain.'
+          : (mode() === 'arcade' ? 'Arcade is solo: P2 is always the CPU ladder.' : 'Training always uses the dummy.'));
       }
       const v = b.dataset.v;
       const m0 = mode();
       const before = brainOf(side);
       if (before === v) return;
       let want = m0;
-      if (v === 'player') want = side === 'p2' ? 'versus' : (m0 === 'watch' ? 'fight' : m0);
-      else if (side === 'p2') want = (m0 === 'versus') ? 'fight' : m0;
-      else want = 'watch';
+      if (side !== 'p2') return; // P1 is always the player
+      if (v === 'player') want = 'versus';
+      else want = (m0 === 'versus') ? 'fight' : m0;
       S.sfx('click');
       S.state.mode = want;
       if (v === 'api') { aiWrite(side, 'api'); if (!aiConfig().on) aiWrite('on', true); }

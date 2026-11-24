@@ -4,7 +4,7 @@
   'use strict';
   const S = window.RFShell;
   const esc = S.esc;
-  const MENU_SCREENS = ['title', 'main', 'select', 'ladder', 'results', 'ending', 'pause', 'credits', 'soundlab', 'tourney', 'tourney-results'];
+  const MENU_SCREENS = ['title', 'main', 'select', 'ladder', 'results', 'ending', 'pause', 'credits', 'tourney', 'tourney-results'];
   const ORBIT_SCREENS = ['title', 'main', 'credits'];
   const SELECT_SCREEN = 'select';
 
@@ -146,15 +146,15 @@ const PAD_SVG = `<svg viewBox="0 0 760 412" class="ps-svg" role="img" aria-label
     return el;
   }
 
-  const brand = '<div class="rfs-brand"><small>Window Workshop Games</small><b>Robot Fight</b></div>';
+  const TITLE = esc(window.RF_GAME_TITLE || '');
+  const brand = `<div class="rfs-brand"><b>${TITLE}</b></div>`;
 
   screen('title', `
     <div class="rfs-title">
       ${brand}
       <p class="rfs-tag">Eight brawlers. One octagon. Parts fly.</p>
       <button type="button" class="rfs-f rfs-press" data-act="start">Press <kbd>Enter</kbd> · <kbd>A</kbd> · or click to start</button>
-    </div>
-    <div class="rfs-foot">© Window Workshop Games</div>`, 'rfs-center');
+    </div>`, 'rfs-center');
 
   screen('main', `
     <div class="rfs-mainwrap">
@@ -165,11 +165,8 @@ const PAD_SVG = `<svg viewBox="0 0 760 412" class="ps-svg" role="img" aria-label
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="arcade"><b>Arcade</b><small>Climb the eight-fighter ladder</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="versus"><b>Versus</b><small>Two players, one keyboard or two gamepads</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="training"><b>Training</b><small>Practice on a dummy, no timer</small></button>
-          <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="watch"><b>Bot vs Bot</b><small>Sit back and watch two CPUs fight</small></button>
-          <button type="button" class="rfs-f rfs-btn" data-act="mode" data-mode="watch" data-loop="1"><b>CPU vs CPU</b><small>Back-to-back CPU fights, looping, with a fight log</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="tournament"><b>AI Tournament</b><small>Round-robin API brains, Elo and results</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="settings"><b>Settings</b><small>Graphics, sound, CPU difficulty, round time</small></button>
-          <button type="button" class="rfs-f rfs-btn" data-act="soundlab"><b>Sound Lab</b><small>Preview and swap punches, footsteps, crowd, and more</small></button>
           <button type="button" class="rfs-f rfs-btn" data-act="credits"><b>Credits</b></button>
         </nav>
       </div>
@@ -197,11 +194,10 @@ const PAD_SVG = `<svg viewBox="0 0 760 412" class="ps-svg" role="img" aria-label
   const resultsEl = screen('results', '<div class="rfs-card rfs-results"></div>', 'rfs-center rfs-dim');
   const endingEl = screen('ending', '<div class="rfs-card rfs-results rfs-ending"></div>', 'rfs-center rfs-dim');
   const pauseEl = screen('pause', '<div class="rfs-card rfs-pause"></div>', 'rfs-center rfs-dim');
-  const soundLabEl = screen('soundlab', '<div class="rfs-soundlab"></div>', 'rfs-center rfs-dim');
   screen('credits', `
     <div class="rfs-card rfs-credits">
       <h2>Credits</h2>
-      <p class="rfs-lead"><b>Robot Fight</b> — a Window Workshop Games production.</p>
+      <p class="rfs-lead"><b>${TITLE}</b></p>
       <ul>
         <li><b>Robot fighter model:</b> “Robot character” by assetfactory on Sketchfab, Sketchfab Free Standard license (recolored in-game).</li>
         <li><b>Teal fighter model:</b> “Teal” by Lagst on Sketchfab, Sketchfab Standard license.</li>
@@ -241,10 +237,10 @@ const PAD_SVG = `<svg viewBox="0 0 760 412" class="ps-svg" role="img" aria-label
     S.$$('.rfs-screen', root).forEach((el) => el.classList.toggle('on', el.dataset.screen === name));
     const b = document.body.classList;
     b.add('rfs-on');
-    b.toggle('rfs-menu', MENU_SCREENS.includes(name) && name !== 'pause' && name !== 'results' && name !== 'soundlab');
-    b.toggle('rfs-versus', S.state.mode === 'versus' && (name === 'fight' || name === 'pause' || name === 'soundlab'));
+    b.toggle('rfs-menu', MENU_SCREENS.includes(name) && name !== 'pause' && name !== 'results');
+    b.toggle('rfs-versus', S.state.mode === 'versus' && (name === 'fight' || name === 'pause'));
     b.toggle('rfs-training', S.state.mode === 'training' && name === 'fight');
-    b.toggle('rfs-dimmed', name === 'pause' || name === 'results' || name === 'soundlab');
+    b.toggle('rfs-dimmed', name === 'pause' || name === 'results');
     b.toggle('rfs-matchhud', !!S.state.mode && S.state.mode !== 'training');
     if (name === 'fight') {
       if (document.activeElement && root.contains(document.activeElement)) document.activeElement.blur();
@@ -305,7 +301,6 @@ const PAD_SVG = `<svg viewBox="0 0 760 412" class="ps-svg" role="img" aria-label
     if (s === 'title') return;
     if (s === 'main') return S.showScreen('title');
     if (s === 'credits' || s === 'select' || s === 'tourney' || s === 'tourney-results') return S.showScreen('main');
-    if (s === 'soundlab') return S.showScreen(soundLabReturn === 'pause' ? 'pause' : 'main');
     if (s === 'ladder') return S.showScreen('select');
     if (s === 'pause') return resume();
     if (s === 'results' || s === 'ending') return toMain();
@@ -317,20 +312,11 @@ const PAD_SVG = `<svg viewBox="0 0 760 412" class="ps-svg" role="img" aria-label
     if (!b || !root.contains(b)) return;
     S.sfx('click');
     const act = b.dataset.act;
-    cancelAutoRematch();
-    if (act === 'cancelAuto') return;
     if (act === 'start') S.showScreen('main');
-    else if (act === 'mode') {
-      if (b.dataset.loop === '1' && window.RFSetLoopCpu) window.RFSetLoopCpu(true);
-      else if (b.dataset.loop === '1') {
-        try { localStorage.setItem('rf_loop_cpu', '1'); localStorage.setItem('rf_autorematch', '1'); } catch (_) {}
-      }
-      openSelect(b.dataset.mode);
-    }
+    else if (act === 'mode') openSelect(b.dataset.mode);
     else if (act === 'tournament') { if (S.openTournament) S.openTournament(); }
     else if (act === 'settings') S.openSettings();
     else if (act === 'credits') S.showScreen('credits');
-    else if (act === 'soundlab' || act === 'pauseSoundLab') openSoundLab();
     else if (act === 'back') back();
     else if (act === 'menu') toMain();
     else if (act === 'go') startFromSelect();
@@ -614,45 +600,7 @@ const PAD_SVG = `<svg viewBox="0 0 760 412" class="ps-svg" role="img" aria-label
     delete lastFocus.results;
     S.sfx(w === 0 || mode === 'versus' ? 'ko' : 'click');
     setTimeout(() => S.showScreen('results'), 250);
-    if (mode === 'watch' && autoRematchOn()) startAutoRematch();
   });
-
-  /* ---------- auto rematch (Bot vs Bot, Settings > Fight, off by default) ---------- */
-  const AUTO_SECS = 6;
-  let autoTimer = null;
-  function autoRematchOn() {
-    try { return localStorage.getItem('rf_autorematch') === '1' || localStorage.getItem('rf_loop_cpu') === '1'; } catch (_) { return false; }
-  }
-  function loopCpuOn() {
-    try { return localStorage.getItem('rf_loop_cpu') === '1'; } catch (_) { return false; }
-  }
-  function cancelAutoRematch() {
-    if (autoTimer) clearInterval(autoTimer);
-    autoTimer = null;
-    const el = S.$('.rfs-auto', resultsEl);
-    if (el) el.remove();
-  }
-  function startAutoRematch() {
-    cancelAutoRematch();
-    const box = S.$('.rfs-results', resultsEl);
-    if (!box) return;
-    const p = document.createElement('p');
-    p.className = 'rfs-auto rfs-sub';
-    const secs = loopCpuOn() ? 2 : AUTO_SECS;
-    p.innerHTML = 'Next match in <b>' + secs + '</b>s <button type="button" class="rfs-f rfs-btn rfs-small" data-act="cancelAuto">Cancel</button>';
-    box.appendChild(p);
-    let left = secs;
-    autoTimer = setInterval(() => {
-      if (S.state.paused || document.hidden) return; // hold while paused or in another tab
-      left -= 1;
-      const b2 = p.querySelector('b');
-      if (b2) b2.textContent = String(Math.max(0, left));
-      if (left <= 0) {
-        cancelAutoRematch();
-        if (S.match && S.match.phase === 'match-end' && autoRematchOn()) { S.state.paused = false; S.restartMatch(); }
-      }
-    }, 1000);
-  }
 
   function renderEnding() {
     const a = S.arcade;
@@ -661,34 +609,11 @@ const PAD_SVG = `<svg viewBox="0 0 760 412" class="ps-svg" role="img" aria-label
       <header class="rfs-selhead"><small>Arcade complete</small><b>Octagon Champion</b></header>
       <p class="rfs-sub">Rivet is scrap. All eight fighters fell to your ${esc(paintName(sel.p1))} brawler${a.continues ? ` after ${a.continues} continue${a.continues > 1 ? 's' : ''}` : ' without a single continue'}.</p>
       ${statsTable(a.total, cfg, null)}
-      <p class="rfs-note">Thanks for playing — Window Workshop Games</p>
+      <p class="rfs-note">Thanks for playing ${TITLE}</p>
       <div class="rfs-row"><button type="button" class="rfs-f rfs-btn rfs-small" data-act="credits">Credits</button><button type="button" class="rfs-f rfs-btn rfs-go" data-act="menu" data-autofocus>Main menu</button></div>`;
     delete lastFocus.ending;
     S.abortMatch(sel.p1, sel.p2);
     S.showScreen('ending');
-  }
-
-  /* ---------- sound lab (UI module is lazy-loaded on open) ---------- */
-  let soundLabReturn = 'main';
-  let soundLabMod = null;
-  let soundLabLoading = null;
-  function openSoundLab() {
-    soundLabReturn = (S.state.screen === 'pause') ? 'pause' : 'main';
-    const mount = S.$('.rfs-soundlab', soundLabEl);
-    if (mount && !soundLabMod && !soundLabLoading) {
-      mount.innerHTML = '<div class="rfs-card rfs-soundlab-card"><header class="rfs-selhead"><small>Audio</small><b>Sound Lab</b></header><p class="rfs-note">Loading Sound Lab…</p></div>';
-    }
-    S.showScreen('soundlab');
-    const run = (mod) => { soundLabMod = mod; if (S.state.screen === 'soundlab') mod.mount(mount); };
-    if (soundLabMod) { run(soundLabMod); return; }
-    if (soundLabLoading) { soundLabLoading.then(run); return; }
-    soundLabLoading = import(new URL('js/sound-lab.js', document.baseURI).href)
-      .then((mod) => { soundLabLoading = null; run(mod); return mod; })
-      .catch((e) => {
-        soundLabLoading = null;
-        console.error('[sound-lab]', e);
-        if (mount) mount.innerHTML = '<div class="rfs-card rfs-soundlab-card"><header class="rfs-selhead"><b>Sound Lab</b></header><p class="rfs-note">Could not load Sound Lab.</p><div class="rfs-row"><button type="button" class="rfs-f rfs-btn rfs-small" data-act="back">Back</button></div></div>';
-      });
   }
 
   /* ---------- pause ---------- */
@@ -700,7 +625,6 @@ const PAD_SVG = `<svg viewBox="0 0 760 412" class="ps-svg" role="img" aria-label
         <button type="button" class="rfs-f rfs-btn" data-act="resume" data-autofocus><b>Resume</b></button>
         ${mode === 'training' ? '<button type="button" class="rfs-f rfs-btn" data-act="reset"><b>Reset dummy</b></button>' : '<button type="button" class="rfs-f rfs-btn" data-act="restart"><b>Restart match</b></button>'}
         <button type="button" class="rfs-f rfs-btn" data-act="pauseSettings"><b>Settings</b></button>
-        <button type="button" class="rfs-f rfs-btn" data-act="pauseSoundLab"><b>Sound Lab</b></button>
         <button type="button" class="rfs-f rfs-btn" data-act="menu"><b>Quit to main menu</b></button>
       </nav>
       <ul class="rfs-keys">${mode === 'versus' ? `<li><em>P1</em> ${KEYS_P1}</li><li><em>P2</em> ${KEYS_P2}</li>` : KEYS_SOLO}${PAD}</ul>`;

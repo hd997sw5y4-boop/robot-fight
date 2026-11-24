@@ -314,7 +314,7 @@ export function downloadApiLog() {
   const blob = new Blob([apiLog.map((r) => JSON.stringify(r)).join('\n') + (apiLog.length ? '\n' : '')], { type: 'application/x-ndjson' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'robot-fight-ai-log-' + new Date().toISOString().replace(/[:.]/g, '-') + '.jsonl';
+  a.download = 'android-arena-ai-log-' + new Date().toISOString().replace(/[:.]/g, '-') + '.jsonl';
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
@@ -656,7 +656,7 @@ export function createApiBrain(id, getCfg) {
 export function initApiBrainUI() {
   const $ = (id) => document.getElementById(id);
   const on = $('aiOn'); const prov = $('aiProvider'); const base = $('aiBase'); const model = $('aiModel');
-  const key = $('aiKey'); const clear = $('aiClear'); const b1 = $('aiBrainP1'); const b2 = $('aiBrainP2'); const note = $('aiNote');
+  const key = $('aiKey'); const clear = $('aiClear'); const b2 = $('aiBrainP2'); const note = $('aiNote');
   if (!on) return;
   let testBtn = $('aiTestKey');
   let testOut = $('aiTestOut');
@@ -687,7 +687,7 @@ export function initApiBrainUI() {
     model.value = ls.get(K.model) || '';
     model.placeholder = AI_PROVIDERS[c.provider].model || 'model name';
     key.value = c.key ? '••••••••' : '';
-    b1.value = c.brain.p1; b2.value = c.brain.p2;
+    b2.value = c.brain.p2;
     const saved = c.key ? 'Key saved in this browser only. ' : 'No key saved. An API side holds guard until you add one. ';
     note.textContent = saved + corsNote(c.provider);
   };
@@ -697,7 +697,6 @@ export function initApiBrainUI() {
   model.addEventListener('change', () => { if (model.value.trim()) ls.set(K.model, model.value.trim()); else ls.del(K.model); paint(); });
   key.addEventListener('change', () => { const v = key.value.trim(); if (v && v !== '••••••••') ls.set(K.key, v); paint(); });
   clear.addEventListener('click', () => { ls.del(K.key); if (testOut) testOut.textContent = ''; paint(); });
-  b1.addEventListener('change', () => { ls.set(K.p1, b1.value); });
   b2.addEventListener('change', () => { ls.set(K.p2, b2.value); });
   const learn = $('aiLearn');
   if (learn) {

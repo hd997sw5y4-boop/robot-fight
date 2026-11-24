@@ -19,17 +19,12 @@
   display: flex; flex-direction: column; align-items: center; gap: 0;
   font: 600 12px/1.2 var(--ww-font); letter-spacing: .32em; color: var(--ww-text-2);
 }
-#loader .spin::before {
-  content: 'Window Workshop Games'; display: block; margin-bottom: 10px;
-  font: 600 12px/1.2 var(--ww-font); letter-spacing: .32em; text-transform: uppercase; color: var(--ww-accent);
-}
 #loader .spin::after {
-  content: 'Robot Fight'; order: -1; display: block; margin: 0 0 22px;
+  content: var(--rf-title, ''); order: -1; display: block; margin: 0 0 22px;
   font: 800 clamp(44px, 7vw, 96px)/.95 var(--ww-font); letter-spacing: .05em; text-transform: uppercase;
   background: var(--rf-head); -webkit-background-clip: text; background-clip: text; color: transparent;
   filter: drop-shadow(0 6px 26px rgba(126,148,255,.35));
 }
-#loader .spin::before { order: -2; }
 #loader .barline {
   width: min(320px, 60vw); height: 6px; margin: 18px auto 0; border-radius: 99px; overflow: hidden;
   background: rgba(255,255,255,.07); box-shadow: inset 0 1px 2px #0008, 0 0 0 1px rgba(154,171,255,.18);
@@ -106,19 +101,13 @@
 
 /* ---------- main menu ---------- */
 .rfs-screen[data-screen="main"] { background: linear-gradient(90deg, rgba(6,8,14,.86) 0%, rgba(6,8,14,.45) 42%, rgba(6,8,14,.1) 68%, rgba(6,8,14,.5) 100%); }
-nav.rfs-menu { gap: 7px; counter-reset: rfm; }
+nav.rfs-menu { gap: 7px; }
 nav.rfs-menu .rfs-btn {
-  padding: 11px 16px 11px 50px; min-height: 52px; border-left: 3px solid transparent;
+  padding: 11px 16px; min-height: 52px; border-left: 3px solid transparent;
   transition: transform .2s var(--ww-ease), background-color .2s, border-color .2s, box-shadow .2s;
-}
-nav.rfs-menu .rfs-btn::before {
-  counter-increment: rfm; content: counter(rfm, decimal-leading-zero);
-  position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
-  font: 800 italic 15px/1 var(--ww-font); color: rgba(154,171,255,.45); letter-spacing: .02em; transition: color .2s;
 }
 .rfs-btn:focus { transform: none; }
 nav.rfs-menu .rfs-btn:focus { transform: translateX(8px); border-left-color: var(--ww-accent); box-shadow: 0 0 0 1px rgba(154,171,255,.6), 0 0 26px rgba(126,148,255,.3); }
-nav.rfs-menu .rfs-btn:focus::before { color: #fff; }
 .rfs-screen.on nav.rfs-menu .rfs-btn { animation: rf-slide .45s var(--ww-ease) both; }
 .rfs-screen.on nav.rfs-menu .rfs-btn:nth-child(2) { animation-delay: .04s; }
 .rfs-screen.on nav.rfs-menu .rfs-btn:nth-child(3) { animation-delay: .08s; }
@@ -150,7 +139,7 @@ nav.rfs-menu .rfs-btn:focus::before { color: #fff; }
 .rfs-screen.rfs-dim { background: radial-gradient(ellipse at center, rgba(6,8,14,.45), rgba(6,8,14,.82)); -webkit-backdrop-filter: blur(3px) saturate(.8); backdrop-filter: blur(3px) saturate(.8); }
 .rfs-pause { padding: 20px 22px; gap: 14px; }
 .rfs-pause .rfs-selhead { text-align: center; }
-.rfs-pause nav.rfs-menu .rfs-btn { padding-left: 50px; align-items: flex-start; }
+.rfs-pause nav.rfs-menu .rfs-btn { align-items: flex-start; }
 .rfs-keys { font-size: 12px; line-height: 1.55; color: #b7bdd0; }
 
 /* ---------- results / ending ---------- */

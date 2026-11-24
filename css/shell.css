@@ -257,10 +257,6 @@ body.rfs-versus .rfs-vbar { display: flex; }
 }
 body.rfs-training #roundLabel { visibility: hidden; }
 
-/* ---------- Sound Lab ---------- */
-.rfs-screen[data-screen="soundlab"] { align-items: flex-start; padding: 18px 12px 32px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-.rfs-soundlab { width: min(720px, 96vw); margin: 0 auto; }
-.rfs-soundlab-card { width: 100%; display: flex; flex-direction: column; gap: 12px; padding: 18px 18px 22px; }
 .rfs-sl-top { justify-content: space-between; }
 .rfs-sl-list { display: flex; flex-direction: column; gap: 16px; }
 .rfs-sl-cat h3 {

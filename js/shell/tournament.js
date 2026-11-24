@@ -110,7 +110,7 @@ function boot() {
     setupEl.innerHTML = `
       <div class="rft-wrap">
         ${S.esc ? '' : ''}
-        <div class="rfs-brand"><small>Window Workshop Games</small><b>Robot Fight</b></div>
+        <div class="rfs-brand"><b>${S.esc(window.RF_GAME_TITLE || '')}</b></div>
         <h1>AI Tournament</h1>
         <p class="rft-sub">Round-robin · 2–8 API brains · same prompt, budget and throttle · sides swapped</p>
         <div class="rft-grid">${entrants.map((e, i) => cardHtml(e, i)).join('')}</div>

@@ -1696,7 +1696,7 @@ const _blobP = new THREE.Vector3();
 function updateContactShadows(f) {
   if (!f || !f.model) return;
   if (!f.blobs) f.blobs = { body: makeBlob(1.25, 0.5), left: makeBlob(0.5 * SIZE, 0.9), right: makeBlob(0.5 * SIZE, 0.9) };
-  const top = matTopY() + 0.005; // above the logo decal
+  const top = matTopY() + 0.005; // above the mat decal
   const hips = f.hipsBone || (f.hipsBone = findHips(f));
   (hips || f.root).getWorldPosition(_blobP);
   f.blobs.body.position.set(_blobP.x, top, _blobP.z);
