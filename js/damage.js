@@ -477,6 +477,29 @@ function partWorldPos(part, target) {
   return out.set(0, 1, 0);
 }
 
+// Main body smoke anchor: the chest bone (Spine2, else the highest spine/chest bone the rig has).
+// Cached per model so swapping bodies re-resolves; follows the skeleton as it ducks and falls.
+const BODY_SMOKE = { torso: true, legL: true, legR: true };
+const CHEST_NAMES = ['spine2', 'chest', 'spine1', 'spine'];
+const lastSmoke = { x: 0, y: 0, z: 0, rootY: 0, part: '', n: 0 };
+function chestWorldPos(f, out) {
+  if (f._chestModel !== f.model) {
+    f._chestModel = f.model;
+    f._chestBone = null;
+    const torso = f.parts.torso;
+    for (const want of CHEST_NAMES) {
+      f._chestBone = torso.bones.find((b) => normName(b.name) === want) || null;
+      if (f._chestBone) break;
+    }
+  }
+  if (f._chestBone) return f._chestBone.getWorldPosition(out);
+  return partWorldPos(f.parts.torso, out);
+}
+
+export function smokeStats() {
+  return { active: smokes.length, last: { ...lastSmoke } };
+}
+
 function closestOnPart(part, approx) {
   let best = approx.clone();
   let bestD = Infinity;
@@ -1584,7 +1607,13 @@ export function applyMalfunctions(f, dt) {
     part.smokeAcc += dt * (0.6 + frac * 2.8);
     while (part.smokeAcc > 0.18) {
       part.smokeAcc -= 0.18;
-      emitSmoke(partWorldPos(part, _v3));
+      // Body damage (torso, legs) smokes from the chest so it reads as coming out of the
+      // robot's core; head and arms smoke at their own joints, stumps at the stump (above).
+      if (BODY_SMOKE[id]) chestWorldPos(f, _v3);
+      else partWorldPos(part, _v3);
+      emitSmoke(_v3);
+      lastSmoke.x = _v3.x; lastSmoke.y = _v3.y; lastSmoke.z = _v3.z;
+      lastSmoke.rootY = f.root ? f.root.position.y : 0; lastSmoke.part = id; lastSmoke.n++;
     }
   }
 }
