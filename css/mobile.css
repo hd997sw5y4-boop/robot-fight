@@ -1,7 +1,7 @@
 /* Phones / tablets only (html.rf-mobile, set by js/mobile.js). Desktop is untouched, except
    the WebGL-lost notice, which only ever appears after a context loss. */
-#rfGlLost { position: fixed; inset: 0; z-index: 99999; display: flex; align-items: center; justify-content: center; background: rgba(19,6,30, .82); color: #fff; font: 600 16px/1.35 system-ui, sans-serif; text-align: center; cursor: pointer; }
-#rfGlLost div { display: flex; flex-direction: column; gap: 8px; padding: 18px 22px; border: 1px solid rgba(255,92,214,.5); border-radius: 12px; background: rgba(40,17,66,.9); }
+#rfGlLost { position: fixed; inset: 0; z-index: 99999; display: flex; align-items: center; justify-content: center; background: rgba(11,8,36, .82); color: #fff; font: 600 16px/1.35 system-ui, sans-serif; text-align: center; cursor: pointer; }
+#rfGlLost div { display: flex; flex-direction: column; gap: 8px; padding: 18px 22px; border: 1px solid rgba(92,200,255,.5); border-radius: 12px; background: rgba(24,21,76,.9); }
 #rfGlLost span { font-weight: 400; opacity: .85; }
 
 html.rf-mobile, html.rf-mobile body { -webkit-tap-highlight-color: transparent; -webkit-text-size-adjust: 100%; overscroll-behavior: none; }
@@ -12,7 +12,7 @@ html.rf-mobile button, html.rf-mobile select, html.rf-mobile [data-act], html.rf
 /* Rotate hint in portrait (landscape is the better view; portrait still works). */
 #rfRotate { display: none; }
 @media (orientation: portrait) {
-  html.rf-mobile #rfRotate:not(.gone) { display: flex; position: fixed; left: 50%; bottom: calc(10px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 9000; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px; background: rgba(31,13,55,.86); border: 1px solid rgba(255,92,214,.45); color: #ffe0f4; font: 600 12px system-ui, sans-serif; white-space: nowrap; }
+  html.rf-mobile #rfRotate:not(.gone) { display: flex; position: fixed; left: 50%; bottom: calc(10px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 9000; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px; background: rgba(19,16,64,.86); border: 1px solid rgba(92,200,255,.45); color: #e0f2ff; font: 600 12px system-ui, sans-serif; white-space: nowrap; }
   html.rf-mobile #rfRotate button { all: unset; padding: 0 4px; font-size: 15px; opacity: .8; }
 }
 
@@ -62,7 +62,7 @@ html.rf-mobile .fs-top small { font-size: 9.5px; }
 html.rf-mobile .fs-foot {
   position: sticky; bottom: 0; z-index: 5; margin: 0 calc(-1 * max(12px, env(safe-area-inset-left)));
   padding: 8px max(12px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
-  background: linear-gradient(180deg, rgba(22,7,32,0), rgba(22,7,32,.92) 35%);
+  background: linear-gradient(180deg, rgba(13,10,39,0), rgba(13,10,39,.92) 35%);
   justify-content: space-between;
 }
 html.rf-mobile .fs-foot .rfs-go { min-width: 140px; min-height: 46px; }

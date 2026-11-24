@@ -91,3 +91,7 @@ Walking footsteps use DavidDumaisAudio mech plants (`step_*`) synced to foot con
 ## Broadcast director
 
 The Broadcast camera view and post-fight replay recorder (`js/arena/broadcast.js`) are original code with no third-party assets.
+
+## Title font
+
+Audiowide by Astigmatic (Brian J. Bonislawsky), from Google Fonts, used for the neon game title. Subset to basic Latin and self-hosted as `fonts/audiowide.woff`. License: SIL Open Font License 1.1 (`fonts/OFL-Audiowide.txt`).

@@ -2,21 +2,21 @@
 .rfs-ctrl-tabs { display: flex; gap: 8px; margin: 0 0 12px; }
 .rfs-ctrl-tab {
   appearance: none; cursor: pointer; flex: 1; min-height: 32px;
-  border-radius: 8px; border: 1px solid rgba(255,92,214,.22); background: #321642; color: inherit;
+  border-radius: 8px; border: 1px solid rgba(92,200,255,.22); background: #1e1a4c; color: inherit;
   font: 700 12px var(--ww-font); letter-spacing: .08em; text-transform: uppercase;
 }
-.rfs-ctrl-tab.is-on { background: rgba(63,125,255,.22); border-color: #48e2ff; box-shadow: inset 0 0 12px rgba(63,125,255,.2); }
+.rfs-ctrl-tab.is-on { background: rgba(63,125,255,.22); border-color: #3ee8ff; box-shadow: inset 0 0 12px rgba(63,125,255,.2); }
 .rfs-ctrl-pane { display: none; }
 .rfs-ctrl-pane.is-on { display: block; }
 .ps-pad { margin: 4px 0 10px; }
 .ps-svg { display: block; width: 100%; height: auto; max-height: 280px; overflow: visible; }
 .ps-svg .ps-lab { font: 700 11px var(--ww-font, system-ui); fill: #d7deee; letter-spacing: .04em; }
-.ps-svg .ps-lab.muted { fill: #998da8; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
-.ps-svg .ps-call { font: 650 11px var(--ww-font, system-ui); fill: #d3c8e0; }
+.ps-svg .ps-lab.muted { fill: #8b93a8; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+.ps-svg .ps-call { font: 650 11px var(--ww-font, system-ui); fill: #c5cee0; }
 .ps-legend { margin: 0 0 8px; padding-left: 18px; }
 .ps, #controlsHint.ps-hint .ps, .rfs-controls .ps {
   display: inline-block; min-width: 1.15em; padding: 0 5px; margin: 0 1px;
-  border-radius: 4px; border: 1px solid rgba(255,92,214,.35);
-  background: rgba(34,13,46,.85); font: 700 11px/1.5 var(--ww-font, system-ui);
-  letter-spacing: .02em; color: #fff0fa;
+  border-radius: 4px; border: 1px solid rgba(92,200,255,.35);
+  background: rgba(20,16,54,.85); font: 700 11px/1.5 var(--ww-font, system-ui);
+  letter-spacing: .02em; color: #eef8ff;
 }

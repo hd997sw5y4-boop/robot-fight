@@ -1,64 +1,95 @@
-/* Sunset-neon theme (loaded last): dusky purple to warm pink / orange skies with neon magenta and
-   electric cyan accents. Colors only (no images, fonts or logos); glows are light box/text shadows,
-   and the drop-shadow filters are dropped on phones. */
+/* Retro-wave neon theme (loaded last). Deep indigo / violet glass, electric cyan as the main
+   accent, purple for hover / selected, a warm sunset only on the horizon lines. Neon "tubes" are
+   borders + box-shadows (cheap on phones; no filters). Title font: Audiowide, SIL OFL 1.1,
+   self-hosted in fonts/ (license in fonts/OFL-Audiowide.txt). No third-party logos or art. */
+@font-face {
+  font-family: 'RF Neon';
+  src: url('../fonts/audiowide.woff') format('woff');
+  font-display: swap;
+}
 :root {
-  --sn-magenta: #ff4fd8;
-  --sn-cyan: #3ee8ff;
-  --sn-pink: #ff8fb8;
-  --sn-orange: #ffb36b;
-  --sn-dusk: #1c0b2e;
-  --ww-accent: #ff5cd6;
-  --ww-accent-soft: rgba(255,79,216,.16);
-  --ww-accent-line: rgba(255,79,216,.45);
-  --rf-head: linear-gradient(180deg, #fff 18%, #ffc2ea 52%, #ffb36b 100%);
-  --rf-glow: 0 18px 50px rgba(10,2,20,.7), 0 0 0 1px rgba(255,79,216,.22), 0 0 24px rgba(62,232,255,.18);
-  --sn-sky: linear-gradient(180deg, #1c0b2e 0%, #3a1356 38%, #8a2c6e 68%, #e0606f 86%, #ffb36b 100%);
+  --neon: #3ee8ff;
+  --neon-2: #a46bff;
+  --neon-soft: rgba(62,232,255,.75);
+  --sun: linear-gradient(90deg, transparent, #3ee8ff 15%, #7a5cff 40%, #ff4fa3 62%, #ffb36b 80%, transparent);
+  --ww-accent: #5cc8ff;
+  --ww-accent-soft: rgba(62,232,255,.14);
+  --ww-accent-line: rgba(62,232,255,.5);
+  --ww-glass: rgba(14,12,44,.6);
+  --ww-glass-strong: rgba(12,10,38,.8);
+  --ww-surface: rgba(12,10,38,.94);
+  --rf-panel: linear-gradient(180deg, rgba(20,16,60,.78), rgba(10,8,34,.86));
+  --rf-head: linear-gradient(180deg, #fff 30%, #bdeeff);
+  --glow: 0 0 0 1px rgba(62,232,255,.12), 0 0 10px rgba(62,232,255,.38), 0 0 26px rgba(62,232,255,.14), inset 0 0 12px rgba(62,232,255,.07);
+  --glow-hot: 0 0 0 1px rgba(164,107,255,.35), 0 0 12px rgba(164,107,255,.65), 0 0 32px rgba(164,107,255,.3), inset 0 0 14px rgba(164,107,255,.14);
 }
 
-/* loader + backdrops: a sunset sky behind the menus (the 3D arena still shows through) */
-#loader { background: var(--sn-sky); }
+/* ---------- backdrops ---------- */
+#loader { background: radial-gradient(ellipse 90% 60% at 50% 100%, rgba(255,120,90,.16), transparent 60%), linear-gradient(180deg, #07061a 0%, #120d3a 55%, #241050 100%); }
 .rfs-screen[data-screen="title"] {
-  background: linear-gradient(180deg, rgba(28,11,46,.55) 0%, rgba(58,19,86,.35) 40%, rgba(160,50,110,.28) 72%, rgba(255,150,100,.32) 100%);
+  background: radial-gradient(ellipse 80% 38% at 50% 100%, rgba(255,120,90,.18), transparent 70%),
+    linear-gradient(180deg, rgba(7,6,26,.78) 0%, rgba(18,13,58,.42) 45%, rgba(36,16,80,.38) 100%);
 }
 .rfs-screen[data-screen="main"] {
-  background: linear-gradient(90deg, rgba(28,11,46,.88) 0%, rgba(58,19,86,.55) 40%, rgba(120,40,110,.12) 68%, rgba(28,11,46,.55) 100%),
-    linear-gradient(0deg, rgba(255,140,100,.22), rgba(255,140,100,0) 45%);
+  background: linear-gradient(90deg, rgba(7,6,26,.9) 0%, rgba(18,13,58,.6) 40%, rgba(18,13,58,.12) 68%, rgba(7,6,26,.6) 100%);
 }
-.rfs-screen.rfs-dim { background: radial-gradient(ellipse at center, rgba(58,19,86,.5), rgba(22,8,36,.86)); }
+.rfs-screen.rfs-dim { background: radial-gradient(ellipse at center, rgba(18,13,58,.5), rgba(7,6,26,.86)); }
 
-/* title: sunset letters with a neon rim */
-.rfs-title .rfs-brand b {
-  background: linear-gradient(100deg, #ffd6f2 0%, #fff 30%, #ffb0de 50%, #ffb36b 70%, #ffd6f2 100%);
-  background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
-  filter: drop-shadow(0 0 14px rgba(255,79,216,.55)) drop-shadow(0 0 30px rgba(62,232,255,.25));
+/* ---------- title: neon tube sign ---------- */
+.rfs-brand { position: relative; }
+.rfs-brand b.rf-neon {
+  font-family: 'RF Neon', var(--ww-font); font-weight: 400; letter-spacing: .06em; line-height: 1.02;
+  background: none; -webkit-background-clip: border-box; background-clip: border-box; color: inherit;
+  filter: none; animation: none;
 }
-.rfs-brand b { filter: drop-shadow(0 0 12px rgba(255,79,216,.45)); }
-.rfs-tag { color: #ffd9ee; text-shadow: 0 0 12px rgba(255,79,216,.55), 0 2px 10px #1c0b2e; }
-.rfs-press { border-color: rgba(62,232,255,.65); background: linear-gradient(90deg, rgba(62,232,255,.2), rgba(255,79,216,.22), rgba(255,179,107,.2)); }
-
-/* panels + buttons */
-.rfs-card { border-color: rgba(255,79,216,.35) !important; }
-.rfs-card::before { background: linear-gradient(90deg, transparent, var(--sn-cyan), var(--sn-magenta), transparent); }
-.rfs-btn { border-color: rgba(255,79,216,.22); }
-.rfs-btn small { color: #f3c9e6; }
-.rfs-btn:focus, .rfs-btn:hover {
-  background: linear-gradient(90deg, rgba(255,79,216,.28), rgba(62,232,255,.14)); border-color: var(--sn-magenta);
+.rf-neon span { display: inline-block; transform: skewX(-8deg); -webkit-text-stroke: .03em currentColor; }
+.rf-neon .w1 {
+  color: rgba(190,250,255,.16); -webkit-text-stroke-color: #b6f8ff;
+  text-shadow: 0 0 3px #3ee8ff, 0 0 10px #3ee8ff, 0 0 24px rgba(62,232,255,.75), 0 0 48px rgba(122,92,255,.55);
 }
-nav.rfs-menu .rfs-btn:focus { border-left-color: var(--sn-cyan); box-shadow: 0 0 0 1px rgba(255,79,216,.75), 0 0 22px rgba(255,79,216,.35), 0 0 34px rgba(62,232,255,.18); }
-.rfs-btn b { text-shadow: 0 0 10px rgba(255,79,216,.35); }
-.rfs-btn.rfs-go, #setpX, .fs-go { background: linear-gradient(90deg, #12b8ff, #c13cff 55%, #ff4f9a) !important; border-color: rgba(255,214,240,.8) !important; }
-.rfs-selhead small, .fs-head small, .rfs-controls h4 { color: var(--sn-cyan) !important; text-shadow: 0 0 8px rgba(62,232,255,.45); }
-.rfs-controls h3 { color: #ffd9ee; text-shadow: 0 0 10px rgba(255,79,216,.5); }
-.rfs-ctrl-tab.is-on { background: rgba(255,79,216,.2); border-color: var(--sn-magenta); box-shadow: inset 0 0 12px rgba(255,79,216,.25); }
+.rf-neon .w2 {
+  color: rgba(255,214,170,.14); -webkit-text-stroke-color: #ffe0b8;
+  text-shadow: 0 0 3px #ffb36b, 0 0 10px #ff7a59, 0 0 24px rgba(255,79,163,.55), 0 0 48px rgba(164,107,255,.6);
+}
+/* horizon line under the sign */
+.rfs-brand::after {
+  content: ''; display: block; height: 3px; margin: .5em auto 0; width: 100%; border-radius: 3px;
+  background: var(--sun); box-shadow: 0 0 10px rgba(122,92,255,.6), 0 0 20px rgba(255,120,90,.3);
+}
+.rfs-title .rfs-brand::after { width: 82%; }
+.rfs-mainwrap .rfs-brand::after { margin-left: 0; width: 86%; }
+.rfs-tag { color: #d8f6ff; text-shadow: 0 0 10px rgba(62,232,255,.55), 0 2px 10px #07061a; }
 
-/* fight HUD: neon round label + calls */
-.round-label, .round { color: #ffe3f4; text-shadow: 0 0 10px rgba(255,79,216,.7), 0 0 22px rgba(62,232,255,.3); }
-.fighter-hud .name { text-shadow: 0 0 8px rgba(255,79,216,.5), 0 1px 3px #1c0b2e; }
-.rfs-call b { filter: drop-shadow(0 0 18px rgba(255,79,216,.6)) drop-shadow(0 4px 10px rgba(28,11,46,.8)); }
-.rfs-call span { color: #ffd9ee; text-shadow: 0 0 10px rgba(62,232,255,.45); }
-#controlsHint, #bottom { color: #f3d5ea; }
+/* ---------- neon outlines ---------- */
+.rfs-card, #setp, .fs-vsbox, .fp-tcard, .fp-bcard, .rft-card {
+  border: 1px solid var(--neon-soft) !important; box-shadow: var(--glow), 0 18px 50px rgba(4,3,16,.55) !important;
+}
+.rfs-card::before, #setp .mtHead::before { background: linear-gradient(90deg, transparent, var(--neon), var(--neon-2), transparent); }
+.rfs-btn, .rfs-press, .fs-tog, .fs-random, .rfs-ctrl-tab, .fs-card, #setp button, #setp select {
+  border: 1px solid rgba(62,232,255,.6) !important; box-shadow: 0 0 8px rgba(62,232,255,.28), inset 0 0 8px rgba(62,232,255,.06);
+}
+.rfs-btn:hover, .rfs-btn:focus, .rfs-press:focus, .rfs-press:hover, .fs-tog:hover, .fs-random:hover, .fs-card:hover, .fs-card:focus,
+.rfs-ctrl-tab:hover, .rfs-ctrl-tab.is-on, .fs-tog[aria-pressed="true"], .fs-random.is-on, .fs-card.is-on {
+  border-color: #c39bff !important; box-shadow: var(--glow-hot) !important;
+}
+.rfs-btn:focus, .rfs-btn:hover { background: linear-gradient(90deg, rgba(122,92,255,.32), rgba(62,232,255,.12)); }
+nav.rfs-menu .rfs-btn:focus { border-left: 3px solid var(--neon) !important; }
+.rfs-btn b { text-shadow: 0 0 8px rgba(62,232,255,.35); }
+.rfs-btn small { color: #bfd8f5; }
+.rfs-btn.rfs-go, #setpX, .fs-go { background: linear-gradient(90deg, #1a7dff, #5b3cff 60%, #9a3cff) !important; border-color: #9ff6ff !important; }
+.fs-side { border: 1px solid var(--pc) !important; box-shadow: 0 0 0 1px rgba(255,255,255,.04), 0 0 12px var(--pc), inset 0 0 14px rgba(255,255,255,.04) !important; }
+.rfs-selhead small, .fs-head small, .rfs-controls h4 { color: var(--neon) !important; text-shadow: 0 0 8px rgba(62,232,255,.5); }
+.rfs-controls h3 { color: #e6fbff; text-shadow: 0 0 10px rgba(62,232,255,.6); }
+.rfs kbd { border-color: rgba(62,232,255,.45); }
 
-/* phones: keep the colors, drop the filter glows (GPU cost on iPhone) */
-html.rf-mobile .rfs-title .rfs-brand b, html.rf-mobile .rfs-brand b, html.rf-mobile .rfs-call b { filter: none; }
-html.rf-mobile .rfs-title .rfs-brand b { text-shadow: none; }
-@media (prefers-reduced-motion: reduce) { .rfs-title .rfs-brand b { animation: none; } }
+/* ---------- fight HUD frames ---------- */
+#top .bar { border: 1px solid rgba(62,232,255,.55); box-shadow: 0 0 8px rgba(62,232,255,.3); }
+#top .bar.energy { border-color: rgba(164,107,255,.55); box-shadow: 0 0 6px rgba(164,107,255,.35); }
+.round-label, .round { color: #e6fbff; text-shadow: 0 0 8px rgba(62,232,255,.75), 0 0 18px rgba(122,92,255,.4); }
+.fighter-hud .name { text-shadow: 0 0 8px rgba(62,232,255,.5), 0 1px 3px #07061a; }
+.rfs-call span { color: #d8f6ff; text-shadow: 0 0 10px rgba(62,232,255,.5); }
+
+/* ---------- phones: same colors, smaller glows, no filters ---------- */
+html.rf-mobile .rf-neon .w1 { text-shadow: 0 0 3px #3ee8ff, 0 0 10px rgba(62,232,255,.8), 0 0 22px rgba(122,92,255,.5); }
+html.rf-mobile .rf-neon .w2 { text-shadow: 0 0 3px #ffb36b, 0 0 10px rgba(255,122,89,.8), 0 0 22px rgba(164,107,255,.5); }
+html.rf-mobile .rfs-brand b, html.rf-mobile .rfs-call b { filter: none !important; }

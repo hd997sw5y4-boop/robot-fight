@@ -147,7 +147,8 @@ const PAD_SVG = `<svg viewBox="0 0 760 412" class="ps-svg" role="img" aria-label
   }
 
   const TITLE = esc(window.RF_GAME_TITLE || '');
-  const brand = `<div class="rfs-brand"><b>${TITLE}</b></div>`;
+  // Neon sign: first word in cyan tubing, the rest in sunset tubing (css/theme.css).
+  const brand = `<div class="rfs-brand"><b class="rf-neon">${TITLE.split(' ').map((w, i) => `<span class="${i ? 'w2' : 'w1'}">${w}</span>`).join(' ')}</b></div>`;
 
   screen('title', `
     <div class="rfs-title">
@@ -209,6 +210,7 @@ const PAD_SVG = `<svg viewBox="0 0 760 412" class="ps-svg" role="img" aria-label
         <li><b>Animations:</b> Mixamo (Adobe) — fighting idle, walks, strafes, punches, kicks, blocks, hits, knockouts, get-ups, dodges, flips, and victory/taunt clips.</li>
         <li><b>Arena textures:</b> Metal009, Metal008 (scratched metal), and Rust004 from ambientCG, CC0 1.0 — mixed into the chrome mat.</li>
         <li><b>HDRI environment:</b> Industrial Pipe and Valve 01 2K from Poly Haven, CC0 1.0.</li>
+        <li><b>Title font:</b> Audiowide by Astigmatic, SIL Open Font License 1.1.</li>
         <li><b>3D engine:</b> three.js r187, MIT license.</li>
         <li><b>Physics:</b> cannon-es, MIT license.</li>
         <li><b>Sound effects:</b> Movement, punches, blocks, footsteps, crashes, sparks, and crowd beds from Pixabay (Content License), including Armor Impact From Sword by Dragon Studio, Sword Block (The Ballad of Blades) by VoiceBosch, and clips by floraphonic, Yodguard, DavidDumaisAudio, AudioPapkin, Soumages, TanwerAman, Marregheriti, kev_durr, storegraphic, and GregorQuendel_SoundDesign. Remaining metal impact layers, UI, and fight bells from rubberduck, Ogrebane, Brian MacIntosh, and Kenney (CC0); electrical buzz from Brian MacIntosh / BMacZero; announcer lines are original, voiced with Kokoro TTS (Apache-2.0) and Chatterbox TTS; arena hum looped from yd’s Factory ambiance (OpenGameArt, CC0). Arena reverb and the sub-thump layer are synthesized in the game. Full sources are in CREDITS/LICENSES.md.</li>
