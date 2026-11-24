@@ -7,10 +7,12 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { IS_MOBILE, IS_IOS } from './mobile.js';
 import { SIZE, CAM_SIZE, MODEL, SKINS, ARENA, COMBAT, DAMAGE, GFX_PRESETS, LOOP_CLIPS, UNUSED_CLIPS, getFighterStats, CAGE_PAD, SPECIAL, MOVES, ROBOT_MOVES } from './config.js';
 import { CLIP_SPEEDS } from './clip-speeds.js';
-import { applyChrome, setChromeLow } from './chrome.js';
+import { applyChrome, setChromeLow, retargetChrome } from './chrome.js';
 import { initJointLimits, applyJointLimits, fitJointLimits, hingeOf, hingeAngle, flexHinge } from './joints.js';
 import { setWiresLow, setWireObstacles, wireWarmMaterials } from './wires.js';
 import { createApiBrain, wantsApiBrain, initApiBrainUI, fighterApiCfg, apiLabel, apiStatsSnapshot, onApiDecision } from './api-brain.js';
@@ -102,7 +104,7 @@ shellCall('onReady', {
 
 // Phones start on Low (no shadows, no floor mirror, light crowd, pixel ratio <= 1.5); the
 // Settings switch still works there, with the mobile caps kept.
-const normGfx = (k) => (k === 'low' || k === 'medium' ? k : 'high');
+const normGfx = (k) => (k === 'low' || k === 'medium' || k === 'ultra' ? k : 'high');
 let gfxKey = normGfx(getSettings().gfx);
 setChromeLow(gfxKey === "low");
 setWiresLow(gfxKey === "low");
@@ -147,16 +149,57 @@ let fovLive = fovTarget;
 const camera = new THREE.PerspectiveCamera(fovLive, 1, 0.1, 80);
 camera.position.set(0, (ARENA.matTop || 0) + 3.2 * CAM_SIZE, 12.5 * CAM_SIZE);
 
-// Bloom on High: visors, sparks, LED rings and light shafts. Multisampled target
-// keeps anti-aliasing, which a plain composer would lose.
+// Post stack used only on Ultra (High/Medium/Low still render straight to the canvas).
+// A multisampled target keeps AA, which a plain composer would lose.
 const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, {
   type: THREE.HalfFloatType, samples: IS_MOBILE ? 0 : 4,
 }));
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.18, 0.35, 1.55);
+const gtaoPass = new GTAOPass(scene, camera, 1, 1);
+gtaoPass.output = GTAOPass.OUTPUT.Default;
+gtaoPass.blendIntensity = 0.58;
+gtaoPass.updateGtaoMaterial({ radius: 0.45, distanceExponent: 2, thickness: 1, distanceFallOff: 1, scale: 0.85, samples: 16 });
+gtaoPass.enabled = false;
+composer.addPass(gtaoPass);
+const outputPass = new OutputPass();
+composer.addPass(outputPass);
+// Bloom after OutputPass so it reads display-referred (0-1) color. Blooming the HDR
+// buffer first smeared mat highlights into a white haze over the cage.
+const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.14, 0.28, 0.84);
+bloom.enabled = false;
 composer.addPass(bloom);
-composer.addPass(new OutputPass());
-let useBloom = false;
+const FILMIC_SHADER = {
+  uniforms: {
+    tDiffuse: { value: null },
+    time: { value: 0 },
+    vignette: { value: 0.22 },
+    grain: { value: 0.016 },
+  },
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }`,
+  fragmentShader: /* glsl */`
+    uniform sampler2D tDiffuse;
+    uniform float time;
+    uniform float vignette;
+    uniform float grain;
+    varying vec2 vUv;
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv);
+      float d = distance(vUv, vec2(0.5));
+      c.rgb *= 1.0 - vignette * smoothstep(0.38, 1.08, d);
+      float n = fract(sin(dot(vUv * vec2(1647.3, 913.7) + time * 17.1, vec2(12.9898, 78.233))) * 43758.5453);
+      c.rgb += (n - 0.5) * grain;
+      gl_FragColor = c;
+    }`,
+};
+const filmicPass = new ShaderPass(FILMIC_SHADER);
+filmicPass.enabled = false;
+composer.addPass(filmicPass);
+let useComposer = false;
 
 // Auto resolution: lower the render scale when frames run slow, raise it back when there is headroom.
 const dyn = { scale: 1, acc: 0, n: 0, cooldown: 0 };
@@ -167,6 +210,7 @@ function gfxPreset() {
     p.shadows = false;
     p.shadowSize = 256;
     p.mirror = 0;
+    p.ao = false;
     return p;
   }
   if (IS_MOBILE) {
@@ -181,7 +225,7 @@ function basePixelRatio() {
 function applyPixelRatio() {
   const pr = Math.max(0.5, basePixelRatio() * dyn.scale);
   renderer.setPixelRatio(pr);
-  if (useBloom) composer.setPixelRatio(pr);
+  if (useComposer) composer.setPixelRatio(pr);
 }
 function stepDynamicRes(dt) {
   const min = gfxPreset().minScale || 0.6;
@@ -212,8 +256,10 @@ function stepDynamicRes(dt) {
   }
 }
 function renderFrame() {
-  if (useBloom) composer.render();
-  else renderer.render(scene, camera);
+  if (useComposer) {
+    if (filmicPass.enabled) filmicPass.uniforms.time.value = performance.now() * 0.001;
+    composer.render();
+  } else renderer.render(scene, camera);
 }
 
 function applyFov(v) {
@@ -292,7 +338,8 @@ function syncEnvironment() {
   const on = hdriEnabled && !!hdriEnv;
   // HDRI (when on) is reflections only; the surround stays a dark, spotlit void.
   scene.environment = on ? hdriEnv : roomEnv;
-  scene.environmentIntensity = on ? 1.2 : 0.62;
+  const boost = (gfxKey === 'ultra' && (GFX_PRESETS.ultra.envBoost || 1.04)) || 1;
+  scene.environmentIntensity = (on ? 1.2 : 0.62) * boost;
   scene.background = darkBg;
   scene.backgroundBlurriness = 0;
   scene.backgroundIntensity = 1;
@@ -335,7 +382,7 @@ let floorMirror = null;
 function setMirrorRes(m) {
   const w = (GFX_PRESETS[gfxKey] && GFX_PRESETS[gfxKey].mirror) || 1024;
   const u = m.material && m.material.uniforms;
-  if (u && u.strength) u.strength.value = gfxKey === 'high' ? 0.52 : 0.38;
+  if (u && u.strength) u.strength.value = gfxKey === 'ultra' ? 0.64 : (gfxKey === 'high' ? 0.52 : 0.38);
   const rt = m.getRenderTarget && m.getRenderTarget();
   if (!rt) return;
   const h = Math.round(w / Math.max(1, window.innerWidth / Math.max(1, window.innerHeight)));
@@ -359,14 +406,138 @@ function scheduleShadows() {
     sh.needsUpdate = !sh.map || ((i + shadowTurn) & 1) === 0;
   }
 }
+function texAnisotropy() {
+  if (IS_IOS) return 1;
+  if (IS_MOBILE) return 4;
+  if (gfxKey === 'ultra') return renderer.capabilities.getMaxAnisotropy();
+  return 16;
+}
+
+function applyAnisotropy() {
+  const a = texAnisotropy();
+  const maps = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'bumpMap', 'clearcoatMap', 'clearcoatNormalMap', 'clearcoatRoughnessMap'];
+  scene.traverse((o) => {
+    if (!o.material) return;
+    for (const m of [].concat(o.material)) {
+      if (!m) continue;
+      for (const k of maps) {
+        const tex = m[k];
+        if (tex && tex.anisotropy != null && tex.anisotropy !== a) {
+          tex.anisotropy = a;
+          tex.needsUpdate = true;
+        }
+      }
+    }
+  });
+}
+
+// Ultra-only: polished clearcoat on robot skins. Other presets restore the original finish.
+function finishRobotMat(m, mesh, on) {
+  if (!m || !m.isMeshStandardMaterial) return m;
+  if (!m.userData.rfFinish) {
+    m.userData.rfFinish = {
+      roughness: m.roughness,
+      envMapIntensity: m.envMapIntensity,
+    };
+  }
+  const base = m.userData.rfFinish;
+  let mat = m;
+  if (on && !m.isMeshPhysicalMaterial) {
+    const p = new THREE.MeshPhysicalMaterial();
+    // Physical.copy() expects clearcoat/sheen vectors that Standard materials don't have.
+    THREE.MeshStandardMaterial.prototype.copy.call(p, m);
+    p.defines = { ...(m.defines || {}), STANDARD: '', PHYSICAL: '' };
+    p.onBeforeCompile = m.onBeforeCompile;
+    p.customProgramCacheKey = m.customProgramCacheKey;
+    p.userData = m.userData;
+    if (m.userData.chrome) retargetChrome(m, p);
+    p.needsUpdate = true;
+    mat = p;
+  }
+  if (on) {
+    mat.roughness = Math.max(0.07, Math.min(0.22, (base.roughness ?? 0.28) * 0.58));
+    mat.envMapIntensity = Math.min(1.85, (base.envMapIntensity ?? 1.25) * 1.28);
+    if (mat.isMeshPhysicalMaterial) {
+      mat.clearcoat = 0.85;
+      mat.clearcoatRoughness = 0.08;
+    }
+    if (mat.userData.chrome && mat.userData.chrome.uChromeEnv) mat.userData.chrome.uChromeEnv.value = 1.9;
+  } else {
+    mat.roughness = base.roughness;
+    mat.envMapIntensity = base.envMapIntensity;
+    if (mat.isMeshPhysicalMaterial) {
+      mat.clearcoat = 0;
+      mat.clearcoatRoughness = 0.1;
+    }
+    if (mat.userData.chrome && mat.userData.chrome.uChromeEnv) mat.userData.chrome.uChromeEnv.value = 1.6;
+  }
+  mat.needsUpdate = true;
+  return mat;
+}
+
+function applyEyeBloomCompat() {
+  const ultra = gfxKey === 'ultra';
+  const mul = ultra ? 1.2 : 2.2;
+  const haloOp = ultra ? 0.16 : 0.85;
+  const apply = (mesh, halo) => {
+    if (mesh && mesh.material) {
+      const m = mesh.material;
+      if (!m.userData.baseEyeCol && m.color) m.userData.baseEyeCol = m.color.clone().multiplyScalar(1 / 2.2);
+      const base = m.userData.baseEyeCol;
+      if (base) m.color.copy(base).multiplyScalar(mul);
+      m.toneMapped = ultra;
+      m.needsUpdate = true;
+    }
+    if (halo && halo.material) {
+      halo.material.opacity = haloOp;
+      halo.material.toneMapped = !ultra; // High keeps the cheap stand-in; Ultra lets the bloom pass glow
+    }
+  };
+  for (const f of [p1, p2]) {
+    if (f && f.eyes) for (const e of f.eyes) apply(e.mesh, e.halo);
+  }
+}
+
+function applyRobotGloss() {
+  const on = gfxKey === 'ultra';
+  for (const f of [p1, p2]) {
+    if (!f || !f.model) continue;
+    f.model.traverse((o) => {
+      if (!o.isMesh) return;
+      const list = [].concat(o.material);
+      const next = list.map((m) => finishRobotMat(m, o, on));
+      const changed = next.some((m, i) => m !== list[i]);
+      if (changed) o.material = next.length === 1 ? next[0] : next;
+    });
+  }
+}
+
+function setComposerAA(samples) {
+  for (const rt of [composer.renderTarget1, composer.renderTarget2]) {
+    if (!rt || rt.samples === samples) continue;
+    rt.samples = samples;
+  }
+}
+
 function applyGfx(key) {
+  if (key === 'ultra') ultraFallen = false;
   gfxKey = normGfx(key);
   if (floorMirror) { floorMirror.visible = gfxKey !== 'low' && !IS_IOS; setMirrorRes(floorMirror); }
   setChromeLow(gfxKey === 'low');
   setWiresLow(gfxKey === 'low');
   setDebrisLow(gfxKey === 'low');
   const p = gfxPreset();
-  useBloom = !!p.bloom;
+  useComposer = !!(p.bloom || p.ao || p.filmic);
+  bloom.enabled = !!p.bloom;
+  if (p.bloom) {
+    bloom.strength = p.bloomStrength != null ? p.bloomStrength : 0.14;
+    bloom.radius = p.bloomRadius != null ? p.bloomRadius : 0.28;
+    bloom.threshold = p.bloomThreshold != null ? p.bloomThreshold : 0.84;
+  }
+  gtaoPass.enabled = !!p.ao;
+  filmicPass.enabled = !!p.filmic;
+  setComposerAA(IS_MOBILE ? 0 : (gfxKey === 'ultra' ? 8 : 4));
+  renderer.toneMapping = gfxKey === 'ultra' ? THREE.AgXToneMapping : THREE.ACESFilmicToneMapping;
   dyn.scale = 1;
   applyPixelRatio();
   renderer.toneMappingExposure = p.exposure * lightMul;
@@ -385,8 +556,31 @@ function applyGfx(key) {
     }
   });
   applyLightIntensities();
+  syncEnvironment();
+  applyAnisotropy();
+  applyRobotGloss();
+  applyEyeBloomCompat();
   resize();
   if (fightersStaged) prewarmShaders(); // shadows on/off: every lit material gets a new shader
+}
+
+let ultraFallen = false;
+const ultraFb = { t: 0, slow: 0 };
+function stepUltraFallback(dt) {
+  if (gfxKey !== 'ultra' || ultraFallen || IS_MOBILE) {
+    if (gfxKey !== 'ultra') { ultraFb.t = 0; ultraFb.slow = 0; }
+    return;
+  }
+  if (dt <= 0) return;
+  ultraFb.t += dt;
+  if (ultraFb.t < 5) return; // skip shader-compile hitch
+  const fps = lastFps();
+  if (fps > 0 && fps < 40) ultraFb.slow += dt;
+  else ultraFb.slow = 0;
+  if (ultraFb.slow >= 3) {
+    ultraFallen = true;
+    applyGfx('high');
+  }
 }
 
 function applyLight(v) {
@@ -443,7 +637,7 @@ function resize() {
   const w = window.innerWidth;
   const h = Math.max(window.innerHeight, 1);
   renderer.setSize(w, h, false);
-  if (useBloom) composer.setSize(w, h); // the bloom chain's targets exist only when it is used
+  if (useComposer) composer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
@@ -471,7 +665,7 @@ function loadTex(url, colorSpace) {
   const t = texLoader.load(url);
   if (colorSpace) t.colorSpace = colorSpace;
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.anisotropy = 16;
+  t.anisotropy = texAnisotropy();
   return t;
 }
 const metalColor = loadTex('./textures/metal_color.jpg', THREE.SRGBColorSpace);
@@ -1061,7 +1255,7 @@ function tint(root, color, ownPaint) {
         m.envMapIntensity = 1.25;
         m.needsUpdate = true;
         for (const map of [m.map, m.normalMap, m.roughnessMap, m.metalnessMap, m.aoMap]) {
-          if (map) map.anisotropy = IS_IOS ? 1 : (IS_MOBILE ? 4 : 16);
+          if (map) map.anisotropy = texAnisotropy();
         }
       }
       if (m && m.aoMap && o.geometry && o.geometry.attributes.uv && !o.geometry.attributes.uv2) {
@@ -1071,6 +1265,7 @@ function tint(root, color, ownPaint) {
     o.castShadow = true;
     o.receiveShadow = true;
   });
+  if (gfxKey === 'ultra') applyRobotGloss();
 }
 
 
@@ -1129,15 +1324,17 @@ function addVisor(model, color) {
   head.add(band);
   const c = eyeTint(color);
   for (const side of [-1, 1]) {
+    const eyeMat = new THREE.MeshBasicMaterial({ color: c.clone().multiplyScalar(gfxKey === 'ultra' ? 1.2 : 2.2), toneMapped: gfxKey === 'ultra' });
+    eyeMat.userData.baseEyeCol = c.clone();
     const eye = new THREE.Mesh(
       new THREE.SphereGeometry(1, 14, 10),
-      new THREE.MeshBasicMaterial({ color: c.clone().multiplyScalar(2.2), toneMapped: false }),
+      eyeMat,
     );
     eye.name = side < 0 ? 'rfEyeL' : 'rfEyeR';
     eye.scale.set(0.024 * sx, 0.016 * sy, 0.012 * sz);
     eye.position.set(side * 0.048 * sx, 0.072 * sy, 0.142 * sz);
     const halo = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: glowTexture(), color: c, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.85, toneMapped: false,
+      map: glowTexture(), color: c, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: gfxKey === 'ultra' ? 0.16 : 0.85, toneMapped: gfxKey !== 'ultra',
     }));
     halo.name = 'rfEyeGlow';
     halo.scale.set(0.16 * sx / (0.024 * sx), 0.16 * sy / (0.016 * sy), 1); // in eye space
@@ -1159,7 +1356,10 @@ function resetEyes(f) {
   const c = eyeTint(f.id === 'p1' ? MODEL.colors.p1 : MODEL.colors.p2);
   for (const e of f.eyes) {
     e.blown = false; e.flick = 0;
-    e.mesh.material.color.copy(c).multiplyScalar(2.2);
+    e.mesh.material.userData.baseEyeCol = c.clone();
+    e.mesh.material.color.copy(c).multiplyScalar(gfxKey === 'ultra' ? 1.2 : 2.2);
+    e.mesh.material.toneMapped = gfxKey === 'ultra';
+    if (e.halo && e.halo.material) e.halo.material.opacity = gfxKey === 'ultra' ? 0.16 : 0.85;
     e.halo.material.color.copy(c); e.halo.visible = true; e.halo.material.opacity = 0.85;
   }
 }
@@ -6355,6 +6555,7 @@ function tick() {
   const renderMs = performance.now() - renderT0;
   const simMs = renderT0 - simT0;
   stepDynamicRes(wallDt);
+  stepUltraFallback(wallDt);
   if (!tick._memT || now - tick._memT > 1000) { tick._memT = now; try { memSnapshot(); } catch (_) {} }
   if (match.phase === 'fight' && p1 && p2) {
     if (!tick._visT || now - tick._visT > 200) {

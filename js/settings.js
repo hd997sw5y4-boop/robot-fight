@@ -73,7 +73,7 @@ function read() {
   const s = { ...defaults };
   try {
     const gfx = localStorage.getItem(KEYS.gfx);
-    if (localStorage.getItem(KEYS.gfxPicked) === '1' && (gfx === 'low' || gfx === 'medium' || gfx === 'high')) s.gfx = gfx;
+    if (localStorage.getItem(KEYS.gfxPicked) === '1' && (gfx === 'low' || gfx === 'medium' || gfx === 'high' || gfx === 'ultra')) s.gfx = gfx;
     const m = localStorage.getItem(KEYS.master);
     if (m != null && isFinite(+m)) s.master = Math.max(0, Math.min(1, +m));
     const x = localStorage.getItem(KEYS.sfx);
@@ -300,7 +300,7 @@ export function initSettings(nextHooks) {
   });
   const gfx = document.getElementById('setGfx');
   if (gfx) gfx.addEventListener('change', () => {
-    settings.gfx = gfx.value === 'low' || gfx.value === 'medium' ? gfx.value : 'high';
+    settings.gfx = (gfx.value === 'low' || gfx.value === 'medium' || gfx.value === 'ultra') ? gfx.value : 'high';
     try { localStorage.setItem(KEYS.gfxPicked, '1'); } catch (_) {}
     persist();
     if (hooks.applyGfx) hooks.applyGfx(settings.gfx);

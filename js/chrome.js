@@ -61,6 +61,13 @@ export function setChromeLow(low) {
   }
 }
 
+// When Ultra swaps a chrome MeshStandardMaterial for MeshPhysicalMaterial, keep the
+// shader-patch registry pointed at the live material.
+export function retargetChrome(oldMat, newMat) {
+  if (oldMat && chromeMats.has(oldMat)) chromeMats.delete(oldMat);
+  if (newMat && newMat.userData && newMat.userData.chrome) chromeMats.add(newMat);
+}
+
 export function applyChrome(mesh, mat, teamColor) {
   if (!mesh.isSkinnedMesh || !mat || !mat.isMeshStandardMaterial) return;
   buildMask(mesh);
