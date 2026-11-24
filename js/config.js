@@ -23,7 +23,13 @@ export const SPECIAL = {
   regenDelay: 0.45,
   rocketCost: 55,
   dashCost: 32,
+  chargeCost: 38,
+  slamCost: 50,
+  overheatCost: 100, // the whole bar
   rocket: {
+    // Orange glow + flame trail on the flying fist ("little fire ball"): off for now (Nov 23).
+    // Set true to bring it back; with false the trail is never built.
+    fireTrail: false,
     damage: 12,
     range: 3.2 * SIZE,
     wind: 0.14,
@@ -31,12 +37,38 @@ export const SPECIAL = {
     ret: 0.2,
     radius: 0.24 * SIZE,
   },
+  // Shoulder charge: a thruster rush with the shoulder down; stops on the body.
+  charge: { dist: 2.4 * SIZE, time: 0.42, damage: 9, knock: 0.4, hitGap: 1.22 * SIZE, recover: 0.38 },
+  // Ground slam: hop, then both fists into the mat; a shockwave ring along the floor.
+  slam: { damage: 10, knock: 0.55, radius: 2.1 * SIZE, up: 0.34, down: 0.1, recover: 0.42, hop: 0.38 * SIZE },
+  // Overheat super (full bar): a short vent-up, then a heat burst all around. Afterwards the
+  // energy bar stays empty for a while (the robot is cooling down).
+  overheat: { damage: 16, knock: 1, radius: 2.45 * SIZE, charge: 0.5, recover: 0.5, cooldown: 3.2 },
   dash: {
     dist: 1.65 * SIZE,
     time: 0.32, // bell-shaped burst: ~6.4 m/s average, ~9.5 m/s peak
     invuln: 0.12,
   },
 };
+
+// Named moves (keys / pad / CPU / API brains). Strikes play a Mixamo clip through the normal
+// strike system (contact, hitstun, recovery) with their own damage and recovery; spin and fly
+// are procedural layers on top (spinning backfist = RightHook + a full turn; flying kick =
+// SideKick + a hop forward). knock = chance a clean hit knocks down. range = root-to-root reach of
+// a lunging move (the others use the clip's measured reach plus a strike step).
+export const MOVES = {
+  // turn: radians the body squares into the target over the hit (the uppercut clip throws off-line).
+  uppercut: { kind: 'punch', clip: 'Uppercut', damage: 8, recover: 0.3, label: 'Uppercut', stepGap: 0.45 * SIZE, turn: -0.6, range: 1.45 * SIZE },
+  elbow: { kind: 'punch', clip: 'ElbowPunching', damage: 6.5, recover: 0.22, label: 'Elbow', stepGap: 0.5 * SIZE },
+  spin_backfist: { kind: 'punch', clip: 'RightHook', damage: 9, recover: 0.36, label: 'Spinning backfist',
+    spin: 1, slow: 0.8, lunge: 0.85 * SIZE, range: 2.0 * SIZE },
+  knee: { kind: 'kick', clip: 'KneeKickLead', damage: 9, recover: 0.32, label: 'Knee strike', stepGap: 0.5 * SIZE },
+  sweep_kick: { kind: 'kick', clip: 'LegSweep', damage: 6, recover: 0.42, knock: 0.85, label: 'Sweep kick' },
+  flying_kick: { kind: 'kick', clip: 'SideKick', damage: 11, recover: 0.5, label: 'Flying kick',
+    hop: 0.42 * SIZE, lunge: 1.25 * SIZE, range: 2.85 * SIZE },
+};
+export const ROBOT_MOVES = ['shoulder_charge', 'ground_slam', 'overheat'];
+export const MOVE_IDS = [...Object.keys(MOVES), ...ROBOT_MOVES];
 
 export const MODEL = {
   url: './models/RobotFighter.glb',
@@ -63,14 +95,16 @@ export const MODEL = {
 
     // --- punches + combos (PunchCombo is the combo in this list) ---
     punch: 'Punching',
-    punchVariants: ['Punching', 'PunchCombo', 'ElbowPunching', 'LeadJab', 'RightHook', 'Uppercut'],
-    punchRight: ['Punching', 'PunchCombo', 'ElbowPunching', 'LeadJab', 'RightHook', 'Uppercut'],
+    // Uppercut and ElbowPunching are their own moves now (MOVES below), not random punches.
+    punchVariants: ['Punching', 'PunchCombo', 'LeadJab', 'RightHook'],
+    punchRight: ['Punching', 'PunchCombo', 'LeadJab', 'RightHook'],
     punchLeft: [],
 
     // --- kicks (standing, front-facing). Flip-kick clips stay in the GLB for joint
     // fitting but are not mapped here and are not loaded into the mixer.
     kick: 'Kicking',
-    kickVariants: ['Kicking', 'MmaKick', 'RoundhouseKick', 'SideKick', 'MeiaLuaDeFrente', 'LegSweep', 'KneeKickLead'],
+    // KneeKickLead (knee strike) and LegSweep (sweep kick) are their own moves now (MOVES below).
+    kickVariants: ['Kicking', 'MmaKick', 'RoundhouseKick', 'SideKick', 'MeiaLuaDeFrente'],
     kickSpecial: [],
     flipSpecial: [],
     jumpKicks: [],
@@ -207,10 +241,10 @@ export const COMBAT = {
   // Extra idle after a clip by strike class (60 fps targets: jab 16-20f, hook/elbow 22-28f,
   // knee/kick 28-36f, spinning 36-44f); the clip's own follow-through covers part of it.
   recoverByClip: {
-    // punches + combos
-    LeadJab: 0.18, Punching: 0.2, PunchCombo: 0.26, ElbowPunching: 0.26, RightHook: 0.26, Uppercut: 0.28,
+    // punches + combos (named moves use MOVES[id].recover)
+    LeadJab: 0.18, Punching: 0.2, PunchCombo: 0.26, RightHook: 0.26,
     // kicks
-    Kicking: 0.36, MmaKick: 0.36, SideKick: 0.36, KneeKickLead: 0.32, LegSweep: 0.38, RoundhouseKick: 0.42,
+    Kicking: 0.36, MmaKick: 0.36, SideKick: 0.36, RoundhouseKick: 0.42,
     MeiaLuaDeFrente: 0.44,
   },
   whiffMul: 1.6,
@@ -222,11 +256,11 @@ export const COMBAT = {
   contactHold: 0.1,      // after a fist/foot connects it is pulled back this soon
   knockdownForce: 4.6,   // a heavy blow at least this hard knocks down (heavy counters always do)
   kickKnockChance: 0.25,  // other heavy kicks knock down this often
-  punchStep: 0.68 * SIZE, // longest step into a strike: lead foot steps, back foot follows (stops on contact)
+  punchStep: 0.9 * SIZE,   // longest step into a strike: lead foot steps, back foot follows (stops on contact)
   kickStep: 0.55 * SIZE,
   strikeGap: 1.3 * SIZE,   // chest-gap guard; steps in don't wait for a wide opening
   bodyRadius: 0.27 * SIZE, // striking distance to the body surface (contact itself uses skeleton capsules, game.js CAPS)
-  fistShell: 0.16 * SIZE,  // fist surface beyond the hand bone (contact tolerance)
+  fistShell: 0.2 * SIZE,   // fist surface beyond the hand bone (contact tolerance)
   kickShell: 0.15 * SIZE,
   blockReduction: 0.82,
   // Hitstun at 60 fps: light 18f, heavy 32f, counter = heavy + 10f.

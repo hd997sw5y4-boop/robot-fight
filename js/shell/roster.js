@@ -131,6 +131,13 @@
   const P1K = { l: ['KeyA'], r: ['KeyD'], u: ['KeyW'], d: ['KeyS'], punch: ['KeyF'], kick: ['KeyG'], block: ['KeyH'], ground: ['KeyT'], run: ['ShiftLeft'], rocket: ['KeyQ'], dashFwd: ['KeyE'], dashBack: ['KeyX'] };
   const P2K = { l: ['ArrowLeft'], r: ['ArrowRight'], u: ['ArrowUp'], d: ['ArrowDown'],
     punch: ['Period', 'Numpad1'], kick: ['Slash', 'Numpad2'], block: ['ShiftRight', 'Quote', 'Numpad3'], ground: ['Comma', 'Numpad4'], run: ['ControlRight', 'Numpad0'], rocket: ['BracketLeft', 'Numpad7'], dashFwd: ['BracketRight', 'Numpad8'], dashBack: ['Semicolon', 'Numpad9'] };
+  // Named moves, one key each (e.code -> move id).
+  P1K.moves = { Digit1: 'uppercut', Digit2: 'elbow', Digit3: 'spin_backfist', Digit4: 'knee', Digit5: 'sweep_kick', Digit6: 'flying_kick',
+    KeyR: 'shoulder_charge', KeyZ: 'ground_slam', KeyB: 'overheat' };
+  P2K.moves = { Digit7: 'uppercut', Digit8: 'elbow', Digit9: 'spin_backfist', Digit0: 'knee', Minus: 'sweep_kick', Equal: 'flying_kick',
+    Backslash: 'shoulder_charge', KeyL: 'ground_slam', KeyO: 'overheat',
+    Numpad5: 'uppercut', Numpad6: 'elbow', NumpadDivide: 'spin_backfist', NumpadMultiply: 'knee', NumpadSubtract: 'sweep_kick', NumpadAdd: 'flying_kick',
+    NumpadDecimal: 'shoulder_charge' };
   S.KEYMAP = { p1: P1K, p2: P2K };
   const anyDown = (codes) => codes.some(S.keyDown);
   function readSide(map, pad) {
@@ -154,6 +161,11 @@
     inp.rocket = inp.rocket || anyDown(map.rocket || []) || inp.tapRocket;
     inp.dashFwd = inp.dashFwd || anyDown(map.dashFwd || []) || inp.tapDashFwd;
     inp.dashBack = inp.dashBack || anyDown(map.dashBack || []) || inp.tapDashBack;
+    for (const code in (map.moves || {})) {
+      if (S.keyTapped && S.keyTapped(code)) inp.tapMove = map.moves[code];
+      if (!inp.move && S.keyDown(code)) inp.move = map.moves[code];
+    }
+    if (inp.tapMove) inp.move = inp.tapMove;
     inp.sidestep = Math.max(-1, Math.min(1, inp.sidestep));
     inp.inout = Math.max(-1, Math.min(1, inp.inout));
     return inp;
@@ -164,7 +176,7 @@
     if (S.state.padSwap) i = 1 - i;
     return pads[i] || null;
   };
-  const p2Held = { punch: false, kick: false, ground: false, rocket: false, dashFwd: false, dashBack: false };
+  const p2Held = { punch: false, kick: false, ground: false, rocket: false, dashFwd: false, dashBack: false, move: null };
   const idle = () => ({ sidestep: 0, inout: 0, punch: false, kick: false, block: false });
   S.inputFor = (side) => {
     const m = S.match && S.match.cfg;
@@ -180,7 +192,9 @@
       const rocket = inp.rocket || inp.tapRocket;
       const dashFwd = inp.dashFwd || inp.tapDashFwd;
       const dashBack = inp.dashBack || inp.tapDashBack;
-      const out = { ...inp, punch: punch && !p2Held.punch, kick: kick && !p2Held.kick, ground: ground && !p2Held.ground, rocket: rocket && !p2Held.rocket, dashFwd: dashFwd && !p2Held.dashFwd, dashBack: dashBack && !p2Held.dashBack };
+      const move = inp.tapMove || (inp.move && inp.move !== p2Held.move ? inp.move : null);
+      const out = { ...inp, punch: punch && !p2Held.punch, kick: kick && !p2Held.kick, ground: ground && !p2Held.ground, rocket: rocket && !p2Held.rocket, dashFwd: dashFwd && !p2Held.dashFwd, dashBack: dashBack && !p2Held.dashBack, move };
+      p2Held.move = inp.move || null;
       p2Held.punch = punch;
       p2Held.kick = kick;
       p2Held.ground = ground;

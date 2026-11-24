@@ -16,7 +16,9 @@ import { SIZE } from './config.js';
  *   groundable = the opponent is down and a stomp / ground punch could land from here
  *
  *   intent = { move: -1..1 (toward/away), strafe: -1..1,
- *              attack: null | 'punch' | 'kick' | 'ground', block: bool, run: bool }
+ *              attack: null | 'punch' | 'kick' | 'ground' | a named move, block: bool, run: bool }
+ *   named moves: uppercut, elbow, spin_backfist, knee, sweep_kick, flying_kick (self.moves says
+ *   which are in reach now) and shoulder_charge, ground_slam, overheat (self.specials, energy).
  *
  * The built-in paced brain below is every CPU's default. An outside brain (for example one
  * backed by an AI API) only has to implement think(snapshot) -> intent and be assigned to
@@ -27,6 +29,8 @@ import { SIZE } from './config.js';
  */
 
 const rand = (a, b) => a + Math.random() * (b - a);
+// A chance per second (scaled by the profile's special rate), so it doesn't depend on the frame rate.
+const perSec = (prof, rate, dt) => Math.random() < rate * ((prof.special || 0.12) / 0.12) * Math.min(0.1, dt || 0);
 
 // profile: AI_PERSONALITIES entry ({ think, react, punch, kick, block, aggression }).
 export function createPacedBrain(getProfile) {
@@ -250,7 +254,7 @@ export function createPacedBrain(getProfile) {
           else if (punchOk) kind = 'punch';
           else if (kickOk) kind = 'kick';
           if (kind) {
-            intent.attack = kind;
+            intent.attack = namedStrike(prof, self, dist, punchR) || kind;
             s.inRangeT = 0;
             s.plan = planStrike(prof, self) || 'punch'; // next one in the chain
           } else {
@@ -318,6 +322,30 @@ export function createPacedBrain(getProfile) {
       intent.block = false;
       return intent;
     }
+    // Overheat super with a full bar, up close (it hits all around).
+    if (sp.overheat && !opp.down && dist < 2.0 && perSec(prof, 0.9, snap.dt)) {
+      intent.attack = 'overheat';
+      intent.block = false;
+      return intent;
+    }
+    if (sp.ground_slam && !opp.down && dist < 1.8 && !opp.attacking && perSec(prof, 0.45, snap.dt)) {
+      intent.attack = 'ground_slam';
+      intent.block = false;
+      return intent;
+    }
+    if (sp.shoulder_charge && !opp.down && dist > punchR + 0.25 && dist < kickR + 1.7 && !opp.attacking && perSec(prof, 0.5, snap.dt)) {
+      intent.attack = 'shoulder_charge';
+      intent.block = false;
+      intent.run = false;
+      return intent;
+    }
+    // Flying kick from just outside kicking range.
+    const mv = self.moves || {};
+    if (mv.flying_kick && !opp.down && dist > kickR + 0.15 && self.cooldown <= 0 && perSec(prof, 0.4, snap.dt)) {
+      intent.attack = 'flying_kick';
+      intent.block = false;
+      return intent;
+    }
     if (sp.dash_back && (self.atWall || snap.tooClose || (opp.attacking && dist < punchR + 0.1)) && Math.random() < 0.42) {
       intent.attack = 'dash_back';
       intent.block = false;
@@ -329,6 +357,16 @@ export function createPacedBrain(getProfile) {
       return intent;
     }
     return intent;
+  }
+
+  // Inside a combo, sometimes swap the plain punch / kick for a named strike that fits the range:
+  // elbows, knees and uppercuts up close, the backfist and sweep from normal range.
+  function namedStrike(prof, self, dist, punchR) {
+    const mv = self.moves || {};
+    if (Math.random() > 0.2 + (prof.special || 0.12)) return null;
+    const close = dist < punchR - 0.2;
+    const pool = (close ? ['elbow', 'knee', 'uppercut'] : ['spin_backfist', 'sweep_kick', 'uppercut']).filter((id) => mv[id]);
+    return pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
   }
 
   function startApproach(prof, self) {

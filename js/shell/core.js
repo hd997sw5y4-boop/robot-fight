@@ -116,19 +116,41 @@
     if (b(15)) inp.sidestep += 1;
     if (b(12)) inp.inout += 1;
     if (b(13)) inp.inout -= 1;
-    inp.punch = b(0);
-    inp.kick = b(1);
-    inp.ground = b(3);
-    inp.block = b(2);
+    // Named moves (DualSense, Chrome standard mapping):
+    //   L2 + ✕ uppercut, L2 + □ elbow, L2 + ○ knee, L2 + △ sweep kick,
+    //   R1 + ✕ spinning backfist, R1 + ○ flying kick,
+    //   L2 + R2 shoulder charge, L2 + L1 ground slam, R3 overheat super.
+    // A modifier + face button replaces that button's normal action (L2 alone still runs).
+    const l2 = b(6), r1 = b(5);
+    let move = null;
+    if (l2) move = b(0) ? 'uppercut' : b(2) ? 'elbow' : b(1) ? 'knee' : b(3) ? 'sweep_kick' : b(7) ? 'shoulder_charge' : b(4) ? 'ground_slam' : null;
+    else if (r1) move = b(0) ? 'spin_backfist' : b(1) ? 'flying_kick' : null;
+    if (!move && b(11)) move = 'overheat';
+    inp.move = move;
+    inp.punch = b(0) && !l2 && !r1;
+    inp.kick = b(1) && !l2 && !r1;
+    inp.ground = b(3) && !l2;
+    inp.block = b(2) && !l2;
     inp.run = b(10) || b(6);
-    inp.rocket = b(4);
-    if (b(7)) {
+    inp.rocket = b(4) && !l2;
+    if (b(7) && !l2) {
       if (inp.inout < -0.25) inp.dashBack = true;
       else inp.dashFwd = true;
     }
-    inp.flipFront = b(5) && inp.inout > 0.5;
+    // R1 + forward front flip. R1 is also the backfist / flying-kick modifier, so the flip waits
+    // a moment after R1 goes down and is skipped if ✕ or ○ joined it.
+    const st = padR1.get(gp.index) || { at: -1, used: false };
+    const now = performance.now();
+    if (!r1) { st.at = -1; st.used = false; }
+    else {
+      if (st.at < 0) { st.at = now; st.used = false; }
+      if (b(0) || b(1)) st.used = true;
+    }
+    padR1.set(gp.index, st);
+    inp.flipFront = r1 && !st.used && now - st.at >= 70 && inp.inout > 0.5;
     return inp;
   };
+  const padR1 = new Map();
   const padPrev = new Map();
   const rep = { dir: null, t: 0 };
   function pollPads(dt) {

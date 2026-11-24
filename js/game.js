@@ -8,7 +8,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { IS_MOBILE, IS_IOS } from './mobile.js';
-import { SIZE, CAM_SIZE, MODEL, SKINS, ARENA, COMBAT, DAMAGE, GFX_PRESETS, LOOP_CLIPS, UNUSED_CLIPS, getFighterStats, CAGE_PAD, SPECIAL } from './config.js';
+import { SIZE, CAM_SIZE, MODEL, SKINS, ARENA, COMBAT, DAMAGE, GFX_PRESETS, LOOP_CLIPS, UNUSED_CLIPS, getFighterStats, CAGE_PAD, SPECIAL, MOVES, ROBOT_MOVES } from './config.js';
 import { CLIP_SPEEDS } from './clip-speeds.js';
 import { applyChrome, setChromeLow } from './chrome.js';
 import { initJointLimits, applyJointLimits, fitJointLimits, hingeOf, hingeAngle, flexHinge } from './joints.js';
@@ -45,7 +45,7 @@ import {
   onFightEnd,
 } from './api.js';
 import { createPacedBrain } from './brain.js';
-import { bindSpecials, initSpecial, tryRocketPunch, tryDash, stepSpecial, clearSpecial, specialAvail, syncEnergyHud, specialWarmObjects } from './specials.js';
+import { bindSpecials, initSpecial, tryRocketPunch, tryDash, tryCharge, trySlam, tryOverheat, stepSpecial, clearSpecial, specialAvail, syncEnergyHud, specialWarmObjects } from './specials.js';
 import {
   prepareFighterDamage,
   canPunch,
@@ -76,7 +76,7 @@ let prevCamMode = null;
 const canvas = document.getElementById('c');
 const keys = new Set();
 const tapped = new Set();
-const held = { punch: false, kick: false, ground: false, buf: null, bufT: 0 };
+const held = { punch: false, kick: false, ground: false, move: null, buf: null, bufT: 0 };
 
 // [game-shell hook] Optional menus / rounds / ladder layer (js/shell/*.js). No-op when absent.
 function shellCall(name, ...args) {
@@ -1487,10 +1487,19 @@ const SPECIAL_STRIKES = new Set([...(MODEL.animations.kickSpecial || []), ...(MO
 const STRIKE_VMAX = 12.5 * SIZE; // m/s: fastest a fist or foot may travel
 const RETRACT_SPEED = 2.4; // clip seconds per second when a landed strike is pulled back
 const PUNCH_RETURN = 0.72; // punches' pull-back (follow-through or rewind) speed vs the strike
+const PUNCH_WINDOW_PAD = 0.04;
+// A punch's step-in may travel this fast (x SIZE m/s) so a punch from normal range arrives with
+// the fist; its share of the impact force stays capped (PUNCH_CLOSE_CAP) so it isn't a shove.
+const PUNCH_STEP_V = 4.2;
+const PUNCH_CLOSE_CAP = 1.3; // clip seconds added each side of a punch's measured hit window
+const RETRACT_EASE = 0.09; // s: a landed strike eases into its pull-back instead of reversing in one frame
 function measureStrikes(f) {
   const A = MODEL.animations;
-  const kicks = new Set([...(A.kickVariants || []), ...(A.kickSpecial || []), ...(A.flipSpecial || []), A.kick]);
-  const names = new Set([...(A.punchVariants || []), ...(A.punchRight || []), ...(A.punchLeft || []), A.punch, ...kicks]);
+  const moveClips = Object.values(MOVES);
+  const kicks = new Set([...(A.kickVariants || []), ...(A.kickSpecial || []), ...(A.flipSpecial || []), A.kick,
+    ...moveClips.filter((m) => m.kind === 'kick').map((m) => m.clip)]);
+  const names = new Set([...(A.punchVariants || []), ...(A.punchRight || []), ...(A.punchLeft || []), A.punch, ...kicks,
+    ...moveClips.map((m) => m.clip)]);
   const out = {};
   const v = new THREE.Vector3();
   const save = f.current;
@@ -2611,10 +2620,16 @@ function clearStuckKeys() {
   keys.clear();
   tapped.clear();
   held.punch = held.kick = held.ground = held.flipFront = held.rocket = held.dashFwd = held.dashBack = false;
+  held.move = null;
 }
 window.addEventListener('blur', clearStuckKeys);
 document.addEventListener('visibilitychange', () => { if (document.hidden) clearStuckKeys(); });
 
+// Solo keyboard keys for the named moves (e.key, lower case). Free of every other binding.
+const SOLO_MOVE_KEYS = {
+  u: 'uppercut', o: 'elbow', h: 'spin_backfist', n: 'knee', m: 'sweep_kick', ' ': 'flying_kick',
+  z: 'shoulder_charge', g: 'ground_slam', f: 'overheat',
+};
 function rawInput() {
   const shellInp = shellCall('input', 'p1'); // [game-shell hook] versus keys / menu idle
   if (shellInp) return shellInp;
@@ -2639,29 +2654,21 @@ function rawInput() {
   inp.rocket = keys.has('q') || inp.tapRocket;
   inp.dashFwd = keys.has('e') || inp.tapDashFwd;
   inp.dashBack = keys.has('x') || inp.tapDashBack;
+  // Named moves: one key each (see SOLO_MOVE_KEYS). A tap is never lost between frames.
+  for (const k in SOLO_MOVE_KEYS) {
+    if (tapped.has(k)) inp.tapMove = SOLO_MOVE_KEYS[k];
+    if (keys.has(k) && !inp.move) inp.move = SOLO_MOVE_KEYS[k];
+  }
+  if (inp.tapMove) inp.move = inp.tapMove;
 
+  // Gamepad 1: the shell's DualSense reader (same mapping as versus), merged with the keys.
   const gp = navigator.getGamepads?.()[0];
-  if (gp) {
-    const dead = 0.28;
-    if (Math.abs(gp.axes[0] || 0) > dead) inp.sidestep += gp.axes[0];
-    if (Math.abs(gp.axes[1] || 0) > dead) inp.inout -= gp.axes[1];
-    if (gp.buttons[14]?.pressed) inp.sidestep -= 1;
-    if (gp.buttons[15]?.pressed) inp.sidestep += 1;
-    if (gp.buttons[12]?.pressed) inp.inout += 1;
-    if (gp.buttons[13]?.pressed) inp.inout -= 1;
-    if (gp.buttons[10]?.pressed || gp.buttons[6]?.pressed) inp.run = true;
-    if (gp.buttons[0]?.pressed) inp.punch = true;
-    if (gp.buttons[1]?.pressed) inp.kick = true;
-    if (gp.buttons[3]?.pressed) inp.ground = true;
-    // DualSense / Chrome standard mapping: L1 rocket, R2 dash (stick back = back dash),
-    // R1+forward front flip, Square blocks (L1/R2 are no longer block).
-    if (gp.buttons[4]?.pressed) inp.rocket = true;
-    if (gp.buttons[7]?.pressed) {
-      if (inp.inout < -0.25) inp.dashBack = true;
-      else inp.dashFwd = true;
-    }
-    if (gp.buttons[5]?.pressed && inp.inout > 0.5) inp.flipFront = true;
-    if (gp.buttons[2]?.pressed) inp.block = true;
+  const pad = gp && window.RFShell && window.RFShell.readPad ? window.RFShell.readPad(gp) : null;
+  if (pad) {
+    inp.sidestep += pad.sidestep;
+    inp.inout += pad.inout;
+    for (const k of ['punch', 'kick', 'block', 'ground', 'run', 'rocket', 'dashFwd', 'dashBack', 'flipFront']) if (pad[k]) inp[k] = true;
+    if (pad.move && !inp.move) inp.move = pad.move;
   }
   inp.sidestep = Math.max(-1, Math.min(1, inp.sidestep));
   inp.inout = Math.max(-1, Math.min(1, inp.inout));
@@ -2685,7 +2692,10 @@ function consumeAttacks(inp, dt = 0) {
   held.rocket = !!inp.rocket;
   held.dashFwd = !!inp.dashFwd;
   held.dashBack = !!inp.dashBack;
-  if (rocket) { held.buf = 'rocket'; held.bufT = COMBAT.inputBuffer || 0.3; logInputPress('p1', 'rocket_punch'); }
+  const move = inp.tapMove || (inp.move && inp.move !== held.move ? inp.move : null);
+  held.move = inp.move || null;
+  if (move) { held.buf = 'move:' + move; held.bufT = COMBAT.inputBuffer || 0.3; logInputPress('p1', move); }
+  else if (rocket) { held.buf = 'rocket'; held.bufT = COMBAT.inputBuffer || 0.3; logInputPress('p1', 'rocket_punch'); }
   else if (dashFwd) { held.buf = 'dashFwd'; held.bufT = COMBAT.inputBuffer || 0.3; logInputPress('p1', 'dash_forward'); }
   else if (dashBack) { held.buf = 'dashBack'; held.bufT = COMBAT.inputBuffer || 0.3; logInputPress('p1', 'dash_back'); }
   else if (flipFront) { held.buf = 'flipFront'; held.bufT = COMBAT.inputBuffer || 0.3; }
@@ -2702,6 +2712,7 @@ function consumeAttacks(inp, dt = 0) {
     punch: b === 'punch', kick: b === 'kick', ground: b === 'ground',
     flipFront: b === 'flipFront',
     rocket: b === 'rocket', dashFwd: b === 'dashFwd', dashBack: b === 'dashBack',
+    move: b && b.startsWith('move:') ? b.slice(5) : null,
   };
 }
 
@@ -2875,7 +2886,7 @@ function usesCpuBrain(f) {
   return !!(f && f.isCpu && !(f.brain && f.brain.kind === 'api') && !wantsApiBrain(f.id, f));
 }
 
-function tryAttack(f, kind, clipName, exact = false) {
+function tryAttack(f, kind, clipName, exact = false, moveId = null) {
   if (inBell() || match.over) { logBellBlock(f.id, kind); return false; }
   if (f.state === 'ko' || f.state === 'hit' || f.state === 'punch' || f.state === 'kick' || f.state === 'ground' || f.state === 'dash' || f.state === 'rocket') return false;
   if (f.cooldown > 0) return false;
@@ -2890,11 +2901,15 @@ function tryAttack(f, kind, clipName, exact = false) {
   if (usesCpuBrain(f) && other && STRIKE_T) {
     const tip = strikeTip(clip);
     const gap = f.root.position.distanceTo(other.root.position);
-    const close = Math.min((kind === 'kick' ? COMBAT.kickStep : COMBAT.punchStep) || 0, 0.36 * SIZE);
-    if (tip != null && tip + close < gap - 0.06) return false;
+    const mvR = moveId && MOVES[moveId] ? moveReach(MOVES[moveId]) : null;
+    const close = Math.min((kind === 'kick' ? COMBAT.kickStep : COMBAT.punchStep) || 0, 0.48 * SIZE);
+    if (mvR != null ? mvR < gap - 0.06 : (tip != null && tip + close < gap - 0.06)) return false;
   }
-  if (!f.isCpu) logInputAction(f.id, kind);
-  if (kind === 'punch' && !f.isCpu) f.lastPunchAt = performance.now() / 1000;
+  if (!f.isCpu) logInputAction(f.id, moveId || kind);
+  const mv = moveId ? MOVES[moveId] : null;
+  f.move = mv;
+  f.moveId = mv ? moveId : null;
+  if (kind === 'punch' && !f.isCpu && !mv) f.lastPunchAt = performance.now() / 1000;
   if (kind === 'punch') f.chainHit = false;
   f.state = kind;
   f.stateT = 0;
@@ -2928,7 +2943,7 @@ function tryAttack(f, kind, clipName, exact = false) {
     // Normalize the played window (lead-in skipped) so punches and kicks feel equally snappy
     // (specials keep their longer wind-ups). Still under the limb-speed cap, so nothing teleports.
     if (st && !SPECIAL_STRIKES.has(clip)) {
-      const budget = kind === 'punch' ? 0.42 : 0.58;
+      const budget = (kind === 'punch' ? 0.42 : 0.58) / ((mv && mv.slow) || 1);
       const played = (st.end - st.start) / Math.max(0.2, base);
       if (played > budget) base = Math.min(cap, base * played / budget);
     }
@@ -2938,14 +2953,53 @@ function tryAttack(f, kind, clipName, exact = false) {
     // Start in the wind-up, not at the measured contact frame, so the strike reads.
     if (st) action.time = isPoppyClip(clip) ? Math.max(0, st.start - 0.12) : Math.max(0, st.start - 0.22);
     // Punches: a readable wind-up, a very fast drive and a calmer recovery (same time to contact).
-    f.strikePlan = kind === 'punch' && st && !SPECIAL_STRIKES.has(clip)
+    f.strikePlan = kind === 'punch' && st && !SPECIAL_STRIKES.has(clip) && !(mv && mv.spin)
       ? punchPlan(clip, st, action.time, base, cap, mods.timeScale * statOf(f, 'speed')) : null;
     if (f.strikePlan) { action.time = f.strikePlan.t0; action.timeScale = f.strikePlan.rW; }
   }
   const whooshRate = (f.strikePlan && f.strikePlan.rW) || (action && action.timeScale) || 1;
   playSfx('whoosh', { rate: whooshRate, vol: 0.4 + Math.min(0.3, Math.abs(whooshRate) * 0.2) });
-  f.strikeWork = strikeFootwork(f, other, kind, clip);
+  // Spinning / flying moves travel on their own airborne path (feet IK off while the body turns
+  // or leaves the mat); the rest step in with the normal strike footwork.
+  f.strikeWork = mv && (mv.spin || mv.hop) ? null : strikeFootwork(f, other, kind, clip);
+  if (mv && (mv.spin || mv.hop) && action) startMoveAir(f, other, mv, action, clip);
   return true;
+}
+
+// Spinning backfist / flying kick: an airborne window from the wind-up to just after the hit,
+// with travel toward the opponent (stops short of the body; physics capsules stop it too). The
+// lift (flying kick) and the turn (spinning backfist) are posed in applyMoveFx.
+function startMoveAir(f, other, mv, action, clip) {
+  const tm = strikeTiming(f, action);
+  const t0 = action.time;
+  const pk = tm.peak != null ? tm.peak : tm.a0;
+  const t1 = Math.min(tm.end, tm.a1 + 0.45 * Math.max(0.05, tm.end - tm.a1));
+  const gap = chestGap(f, other);
+  const dir = toward(f, other).clone();
+  const dist = Math.max(0, Math.min(mv.lunge || 0, gap - STEP_GAP, ringRoom(f, dir, mv.lunge || 0)));
+  f.airLock = 0; // feet follow the clip (no planted-foot IK) and the root stays on the mat
+  f.airMove = { action, air: { t0, t1: mv.hop ? t1 : pk, end: tm.end }, dir, dist, moved: 0 };
+  f.moveFx = { t0, pk, t1, spun: false };
+}
+
+// Named move (keys, pad, CPU or API brain): strikes go through tryAttack with their clip,
+// robot moves are energy specials (specials.js).
+function tryMove(f, other, id) {
+  if (id === 'shoulder_charge') return tryCharge(f, other);
+  if (id === 'ground_slam') return trySlam(f, other);
+  if (id === 'overheat') return tryOverheat(f, other);
+  const mv = MOVES[id];
+  if (!mv || !f.actions[mv.clip]) return false;
+  // Uppercut, elbow and backfist are right-hand clips; the knee, sweep and flying kick need
+  // both legs (one to stand or jump on).
+  if (mv.kind === 'punch' && f.parts && f.parts.armR && f.parts.armR.detached) return false;
+  if (mv.kind === 'kick' && f.parts && (f.parts.legL.detached || f.parts.legR.detached)) return false;
+  return tryAttack(f, mv.kind, mv.clip, true, id);
+}
+// Damage spec for the strike being played (a named move overrides the punch / kick defaults).
+function attackSpec(f) {
+  const base = COMBAT[f.state] || COMBAT.punch;
+  return f.move && f.attackClip === f.move.clip ? { ...base, damage: f.move.damage, knock: f.move.knock || 0 } : base;
 }
 
 // Punch playback plan in clip seconds. A uniform speed-up hid the anticipation, so the clip
@@ -2976,7 +3030,7 @@ function punchPlan(clip, st, t0Old, base, cap, slow) {
   return { clip, t0, tw, pk, a1: st.a1, end: st.end, rW, rS, rF, rR, side: st.side || 'R' };
 }
 function punchPlanRate(p, ct) {
-  const k = 0.025; // short ramps so the speed change has no visible hitch
+  const k = 0.05; // eased ramps so the speed change reads as one fluid motion, not a snap
   if (ct < p.tw - k) return p.rW;
   if (ct < p.tw + k) return p.rW + (p.rS - p.rW) * (ct - p.tw + k) / (2 * k);
   if (ct < p.pk) return p.rS;
@@ -2988,6 +3042,8 @@ function punchPlanRate(p, ct) {
 // the wind-up: the lead foot lifts and lands with the body while the back foot stays planted,
 // then follows after the hit. Up close the feet just stay planted. (footwork() poses the feet.)
 const STEP_GAP = 0.62 * SIZE; // a step in stops at this chest gap (the strike's own lean closes the rest)
+// In-fighting moves (uppercut, elbow, knee) step in tighter: their fist / knee stays close to the body.
+const stepGapOf = (f) => (f.move && f.move.stepGap) || STEP_GAP;
 function strikeFootwork(f, other, kind, clip) {
   if (!other || !f.ikLegs || !f.ikLegs.L.foot || !f.ikLegs.R.foot) return null;
   const st = STRIKE_T && STRIKE_T[clip];
@@ -2996,7 +3052,7 @@ function strikeFootwork(f, other, kind, clip) {
   const lead = proj('L') >= proj('R') ? 'L' : 'R';
   const back = lead === 'L' ? 'R' : 'L';
   const max = (kind === 'kick' ? COMBAT.kickStep : COMBAT.punchStep) || 0;
-  const S = Math.max(0, Math.min(max, chestGap(f, other) - STEP_GAP));
+  const S = Math.max(0, Math.min(max, chestGap(f, other) - stepGapOf(f)));
   const role = { L: null, R: null };
   let stepper = lead;
   if (kind === 'kick') {
@@ -3031,7 +3087,7 @@ function fitStrikeClip(f, kind, clip, other) {
   const gap = f.root.position.distanceTo(other.root.position);
   // Only credit a short step-in: the full step often stops once chests are close,
   // so assuming the whole punchStep made Punching / Uppercut look in range and then miss.
-  const stepIn = Math.min((kind === 'kick' ? COMBAT.kickStep : COMBAT.punchStep) || 0, 0.36 * SIZE);
+  const stepIn = Math.min((kind === 'kick' ? COMBAT.kickStep : COMBAT.punchStep) || 0, 0.48 * SIZE);
   const fits = (n) => {
     const tip = strikeTip(n);
     return tip != null && tip + stepIn >= gap - 0.02 && tip <= gap + 0.35;
@@ -3063,7 +3119,7 @@ function strikeTiming(f, action) {
 }
 
 function tryBlock(f, heldBlock) {
-  if (f.state === 'ko' || f.state === 'hit' || f.state === 'punch' || f.state === 'kick' || f.state === 'ground') {
+  if (f.state === 'ko' || f.state === 'hit' || f.state === 'punch' || f.state === 'kick' || f.state === 'ground' || f.state === 'dash') {
     f.blocking = false;
     f.shield.visible = false;
     return;
@@ -3104,7 +3160,8 @@ function endAttack(f, fade = 0.2) {
     f._diag = null;
   }
   const spec = COMBAT[f.state] || COMBAT.punch;
-  const base = (COMBAT.recoverByClip && COMBAT.recoverByClip[f.attackClip]) || spec.recover || 0.25;
+  const mv = f.move && f.attackClip === f.move.clip ? f.move : null;
+  const base = (mv && mv.recover) || (COMBAT.recoverByClip && COMBAT.recoverByClip[f.attackClip]) || spec.recover || 0.25;
   const who = f.isCpu ? ((aiProfile(f).recoverMul) || COMBAT.cpuRecoverMul || 1) : (COMBAT.playerRecoverMul || 1);
   const rec = base * who * (f.hitThisAttack ? 1 : (COMBAT.whiffMul || 2)) * ((f.atkMods && f.atkMods.cooldownMul) || 1) * (!f.isCpu && f.chain > 0 ? 0.8 : 1);
   f.cooldown = Math.max(f.cooldown, rec / statOf(f, 'recovery'));
@@ -3116,6 +3173,8 @@ function endAttack(f, fade = 0.2) {
   f.state = 'idle';
   f.atkContact = false;
   f.strikePlan = null;
+  f.move = null;
+  f.moveId = null;
   f.backOff = Math.max(f.backOff || 0, 0.4);
   endAir(f);
   if (!f.hitThisAttack && f.attackClip) logStrike(f.id, f.attackClip, 'miss', 0);
@@ -3152,6 +3211,7 @@ function ringRoom(f, dir, want) {
 function endAir(f) {
   f.airLock = null;
   f.airMove = null;
+  f.moveFx = null;
   f.ghost = false;
   f.dodge = null;
 }
@@ -3698,7 +3758,7 @@ function applyHit(atk, def, spec, kind, strikeBone, contact) {
   const surge = atk.health < 25 && def.health > atk.health * 2 ? 1.12 : 1;
   const blockMul = blocked ? (1 - COMBAT.blockReduction * blockReductionMul(def)) : 1;
   const loc = LOC_MUL[hit.partId] || 1;
-  const closing = impactVelocity(atk, def, hit.dir);
+  const closing = Math.min(impactVelocity(atk, def, hit.dir), kind === 'punch' ? PUNCH_CLOSE_CAP : Infinity);
   const swing = (kind === 'kick' ? 3.4 : 2.4) * mul;
   const force = (closing + swing) * (blocked ? 0.45 : 1);
   const dmg = Math.max(1, Math.round(spec.damage * mul * surge * blockMul * loc * (0.5 + 0.55 * (force / 5))));
@@ -3763,8 +3823,9 @@ function applyHit(atk, def, spec, kind, strikeBone, contact) {
     const now = performance.now() / 1000;
     const stacked = heavy && def._lastHeavy != null && now - def._lastHeavy < 2;
     if (heavy) def._lastHeavy = now;
-    const knock = heavy && (counter || force >= COMBAT.knockdownForce || stacked || torsoWrecked(def)
-      || (kind === 'kick' && Math.random() < (COMBAT.kickKnockChance || 0)));
+    const knock = (heavy && (counter || force >= COMBAT.knockdownForce || stacked || torsoWrecked(def)
+      || (kind === 'kick' && Math.random() < (COMBAT.kickKnockChance || 0))))
+      || (spec.knock > 0 && Math.random() < spec.knock); // sweep, charge, slam, overheat
     if (window.__rfDiag) { const l = window.__rfHitLog || (window.__rfHitLog = []); if (l.length < 300) l.push({ kind, part: hit.partId, force: +force.toFixed(2), dmg, heavy, counter, stacked, knock }); }
     if (knock) {
       def._lastHeavy = null;
@@ -3995,9 +4056,12 @@ const _bowPQ = new THREE.Quaternion();
 const _bowQ = new THREE.Quaternion();
 const _bowFwd = new THREE.Vector3();
 function applyGroundBow(f) {
-  const w = f.state === 'ground' ? (f.groundBow || 0) : 0;
-  if (w <= 0.001) return;
-  const amt = (f.groundKind === 'stomp' ? COMBAT.ground.stompBow : COMBAT.ground.poundBow) * Math.min(1.85, damageFx().bend);
+  // Ground attacks: a weight 0..1 of the stomp / pound bow. Robot moves (state 'dash'): an
+  // angle in radians (forward +, back -) for the charge lean, the slam and the overheat burst.
+  const ground = f.state === 'ground';
+  const w = ground ? (f.groundBow || 0) : (f.state === 'dash' ? (f.specialBow || 0) : 0);
+  if (Math.abs(w) <= 0.001) return;
+  const amt = ground ? (f.groundKind === 'stomp' ? COMBAT.ground.stompBow : COMBAT.ground.poundBow) * Math.min(1.85, damageFx().bend) : 1;
   _bowFwd.set(Math.sin(f.root.rotation.y), 0, Math.cos(f.root.rotation.y));
   _bowAxis.copy(_UP).cross(_bowFwd).normalize();
   const share = { Spine: 0.4, Spine1: 0.33, Spine2: 0.27 };
@@ -4094,18 +4158,19 @@ function applyPunchReach(f) {
   const len2 = _ikB.distanceTo(_ikC);
   if (len1 < 0.02 || len2 < 0.02) return;
   const full = len1 + len2;
-  const lock = tight ? 0.82 : hook ? 0.90 : 0.975; // nearly straight; hooks / uppercuts keep a bend
+  const upper = f.attackClip === 'Uppercut';
+  const lock = upper ? 0.92 : tight ? 0.82 : hook ? 0.9 : 0.955; // long, but the elbow keeps a hint of bend (less robotic)
   const curLen = _ikA.distanceTo(_ikC);
 
   // Aim: blend the clip's punch direction with a line to the opponent's chest.
   _ikD.copy(_ikC).sub(_ikA);
   if (_ikD.lengthSq() < 1e-6) return;
   _ikD.normalize();
-  const chestY = other.root.position.y + 1.25 * SIZE;
+  const chestY = other.root.position.y + (upper ? 1.7 : 1.25) * SIZE; // the uppercut rises into the chin
   _ikT.set(other.root.position.x, chestY, other.root.position.z).sub(_ikA);
   if (_ikT.lengthSq() > 1e-6) _ikT.normalize();
   else _ikT.copy(_ikD);
-  const aimMix = tight ? 0.72 : hook ? 0.35 : 0.82;
+  const aimMix = upper ? 0.85 : tight ? 0.72 : hook ? 0.35 : 0.82;
   _ikD.lerp(_ikT, aimMix * w).normalize();
 
   const wantLen = curLen + (full * lock - curLen) * w;
@@ -4523,6 +4588,32 @@ function ringEdge(f) {
   return Math.min(1, Math.hypot(f.root.position.x, f.root.position.z) / ((ARENA.apothem || 6.1) - 0.55));
 }
 
+// How far (root to root) a named strike reaches: the clip's measured reach plus its own lunge
+// (spinning / flying moves) or a short strike step.
+function moveReach(mv) {
+  if (mv.range) return mv.range;
+  const tip = strikeTip(mv.clip);
+  if (tip == null) return null;
+  return tip + (mv.lunge || Math.min((mv.kind === 'kick' ? COMBAT.kickStep : COMBAT.punchStep) || 0, 0.48 * SIZE));
+}
+// Named strikes the brain may pick now: free to start, the limb is there, and in reach
+// (the clip's measured reach plus its step or lunge).
+function moveAvail(f, opp) {
+  const out = {};
+  const free = !(f.state === 'ko' || DOWN_STATES.has(f.state) || f.state === 'hit' || f.state === 'punch' || f.state === 'kick' || f.state === 'ground' || f.state === 'dash' || f.state === 'rocket') && !(f.cooldown > 0);
+  const gap = f.root.position.distanceTo(opp.root.position);
+  for (const id in MOVES) {
+    const mv = MOVES[id];
+    if (!free || !f.actions[mv.clip] || DOWN_STATES.has(opp.state)) { out[id] = false; continue; }
+    if (mv.kind === 'punch' && f.parts && f.parts.armR && f.parts.armR.detached) { out[id] = false; continue; }
+    if (mv.kind === 'kick' && f.parts && (f.parts.legL.detached || f.parts.legR.detached)) { out[id] = false; continue; }
+    const reach = moveReach(mv);
+    const tip = strikeTip(mv.clip);
+    // Lunging moves are for a bit of distance, not for when the bodies are already together.
+    out[id] = reach == null ? false : reach >= gap + 0.04 && (!mv.lunge || gap > tip * 0.75);
+  }
+  return out;
+}
 function brainSnapshot(f, opp, dt) {
   const busy = f.state === 'ko' || f.state === 'down' || f.state === 'getup' || f.state === 'hit';
   const gt = isLyingDown(opp) ? nearestGroundTarget(f, opp) : null;
@@ -4549,6 +4640,7 @@ function brainSnapshot(f, opp, dt) {
       canFlip: canFlip(f) && !(f.dodgeCD > 0),
       energy: specialAvail(f).energy,
       specials: specialAvail(f),
+      moves: moveAvail(f, opp),
     },
     tooClose: esc.tooClose,
     escape: esc.escape,
@@ -4580,7 +4672,8 @@ function intentToInput(f, opp, intent) {
     inp.blockClip = f._aiBlockClip || (f._aiBlockClip = pickBlock(f, opp));
   } else f._aiBlockClip = null;
   if (intent.dodge === 'front') inp.flipFront = true;
-  if (intent.attack === 'ground') inp.ground = true;
+  if (intent.attack && (MOVES[intent.attack] || ROBOT_MOVES.includes(intent.attack))) inp.move = intent.attack;
+  else if (intent.attack === 'ground') inp.ground = true;
   else if (intent.attack === 'rocket' || intent.attack === 'rocket_punch') inp.rocket = true;
   else if (intent.attack === 'dash_forward' || intent.attack === 'dashFwd') inp.dashFwd = true;
   else if (intent.attack === 'dash_back' || intent.attack === 'dashBack') inp.dashBack = true;
@@ -4624,7 +4717,7 @@ function stepFighter(f, other, inp, dt) {
   f.stateT += dt;
   f.dodgeCD = Math.max(0, (f.dodgeCD || 0) - dt);
   // Flip interrupted (hit, KO, round end): drop the airborne state.
-  if ((f.dodge && f.state !== 'dodge') || (f.airLock != null && f.state !== 'dodge' && f.state !== 'kick')) endAir(f);
+  if ((f.dodge && f.state !== 'dodge') || (f.airLock != null && f.state !== 'dodge' && f.state !== 'kick' && f.state !== 'punch' && !f.special)) endAir(f);
   if (f.state === 'ko') {
     setFighterMove(f, 0, 0);
     // Kneeling KO: hold the clip on its lowest frame.
@@ -4710,11 +4803,14 @@ function stepFighter(f, other, inp, dt) {
     else if (sw && sw.u < 1) {
       const ut = Math.max(0, Math.min(1, (ct - sw.t0) / Math.max(0.04, tm.a0 - sw.t0)));
       const moved = (f.root.position.x - sw.x0) * sw.fx + (f.root.position.z - sw.z0) * sw.fz;
-      if (!sw.stopped && (f.atkContact || chestGap(f, other) <= STEP_GAP || limbInside(f, other, f.state))) sw.stopped = true;
-      if (!sw.stopped && ct < tm.a0) {
+      if (!sw.stopped && (f.atkContact || chestGap(f, other) <= stepGapOf(f) || limbInside(f, other, f.state))) sw.stopped = true;
+      // The step keeps closing through the hit window until contact (or the chest-gap stop),
+      // so a strike thrown from normal range finishes its step and connects instead of the
+      // body stopping short at the start of the window while the fist is still out of reach.
+      if (!sw.stopped && ct < tm.a1) {
         const want = sw.S * ut * ut * (3 - 2 * ut);
         // (Capped well under the root-teleport check: physics steps at 60 Hz.)
-        const v = Math.max(0, Math.min(2.8 * SIZE, (want - moved) / Math.max(dt, 1 / 60)));
+        const v = Math.max(0, Math.min((f.state === 'punch' ? PUNCH_STEP_V : 2.8) * SIZE, (want - moved) / Math.max(dt, 1 / 60)));
         const fwd = toward(f, other);
         setFighterMove(f, fwd.x * v, fwd.z * v);
       } else setFighterMove(f, 0, 0);
@@ -4725,12 +4821,13 @@ function stepFighter(f, other, inp, dt) {
     // Limb contact decides, not root distance: the swept fist/foot test runs through the whole
     // active window (the old root-distance gate let near-miss strikes skip the test and sail
     // through the body).
-    const contact = !f.hitThisAttack && ct >= tm.a0 && ct <= tm.a1 ? strikeContact(f, other, f.state) : null;
+    const win = f.state === 'punch' ? PUNCH_WINDOW_PAD : 0;
+    const contact = !f.hitThisAttack && ct >= tm.a0 - win && ct <= tm.a1 + win ? strikeContact(f, other, f.state) : null;
     if (window.__rfDiag && ct >= tm.a0 && ct <= tm.a1) diagMargin(f, other, f.state, gap);
     if (contact) {
       f.hitThisAttack = true;
       f.contactT = f.stateT;
-      if (f.specialKind !== 'rocket') applyHit(f, other, spec, f.state, contact.bone, contact);
+      if (f.specialKind !== 'rocket') applyHit(f, other, attackSpec(f), f.state, contact.bone, contact);
     }
     // Solid bodies: whenever the striking limb is inside the other robot's body (any phase,
     // landed or not), the clip stops advancing there and the strike is pulled back.
@@ -4739,7 +4836,7 @@ function stepFighter(f, other, inp, dt) {
         // Already in the body at the start of the window: that is the connect.
         f.hitThisAttack = true;
         const tip = (f.strikeBones[f.state] || []).map((b) => b.getWorldPosition(new THREE.Vector3())).map((p) => ({ p, pr: capsuleProbe(other, p) })).sort((x, y) => x.pr.d - y.pr.d)[0];
-        if (f.specialKind !== 'rocket') applyHit(f, other, spec, f.state, null, tip && tip.pr.point ? { point: tip.pr.point, part: tip.pr.part } : null);
+        if (f.specialKind !== 'rocket') applyHit(f, other, attackSpec(f), f.state, null, tip && tip.pr.point ? { point: tip.pr.point, part: tip.pr.part } : null);
       }
       if (f.contactT < 0) f.contactT = f.stateT;
       // (An airborne attack can't hang in mid-air: it lands through its follow-through instead.)
@@ -4753,11 +4850,17 @@ function stepFighter(f, other, inp, dt) {
     // Cross-fading straight from the extended pose to idle floated the leg down with the robot
     // already "standing" (feet off the mat) and popped the arm. Spins and flips can't rewind
     // naturally; they still blend out.
-    const special = SPECIAL_STRIKES.has(f.attackClip);
+    const special = SPECIAL_STRIKES.has(f.attackClip) || !!airKick;
     if (pulled && !special && action && !f.retract && ct > tm.start + 0.04) {
       f.retract = true;
+      f.retractT = 0;
+      f.retractV = Math.min(RETRACT_SPEED * (f.state === 'punch' ? PUNCH_RETURN : 1), f.strikeCap || Infinity);
       action.paused = false;
-      action.timeScale = -Math.min(RETRACT_SPEED * (f.state === 'punch' ? PUNCH_RETURN : 1), f.strikeCap || Infinity);
+    }
+    if (f.retract && action && f.retractV) {
+      f.retractT = (f.retractT || 0) + dt;
+      const e = smooth01(f.retractT / RETRACT_EASE);
+      action.timeScale = -f.retractV * (0.2 + 0.8 * e);
     }
     const retracted = f.retract && action && (action.time <= tm.start + 0.02 || !action.isRunning());
     const done = airKick
@@ -4770,7 +4873,8 @@ function stepFighter(f, other, inp, dt) {
       || Math.abs(inp.sidestep) + Math.abs(inp.inout) > 0.3);
     if ((done || wantsOut || overdue) && (f.state === 'punch' || f.state === 'kick')) {
       f.retract = false;
-      endAttack(f, pulled ? 0.16 : 0.2);
+      f.retractV = 0;
+      endAttack(f, f.state === 'punch' ? (pulled ? 0.22 : 0.26) : (pulled ? 0.16 : 0.2));
       if (!wantsOut) return;
       if (inp.punch || inp.kick) f.cooldown = Math.min(f.cooldown, 0.06);
     } else return;
@@ -4799,6 +4903,7 @@ function stepFighter(f, other, inp, dt) {
   if (inp.dashBack && tryDash(f, other, -1)) return;
   if (inp.ground && tryGroundAttack(f, other)) return;
   if (inp.flipFront && tryDodge(f, other, 'front')) return;
+  if (inp.move && tryMove(f, other, inp.move)) return;
   if (inp.punch) {
     if (!f.isCpu) {
       const next = nextPlayerPunch(f);
@@ -5694,8 +5799,8 @@ function poseAfterMixer(f, dt = 1 / 60) {
       parent.updateWorldMatrix(true, false);
       const fw = toward(f, f === p1 ? p2 : p1);
       _hpB.copy(f.hips.position).applyMatrix4(parent.matrixWorld);
-      _hpB.x += fw.x * sb.shift * 0.075 * SIZE;
-      _hpB.z += fw.z * sb.shift * 0.075 * SIZE;
+      _hpB.x += fw.x * sb.shift * 0.1 * SIZE;
+      _hpB.z += fw.z * sb.shift * 0.1 * SIZE;
       _hpB.y -= Math.max(0, sb.shift) * 0.025 * SIZE;
       f.hips.position.copy(_hpB.applyMatrix4(_guM.copy(parent.matrixWorld).invert()));
     }
@@ -5717,11 +5822,60 @@ function poseAfterMixer(f, dt = 1 / 60) {
     }
   }
   f.model.position.y = f.baseY;
+  applyMoveFx(f, dt);
   applyStumpLeg(f, dt);
   applyFlinch(f, dt);
   applyGroundBow(f);
   applyStrikeTwist(f);
   applyPunchReach(f);
+}
+
+// Spinning backfist: one full turn of the body from the wind-up into the hit (eases into the
+// strike, never unwinds back). Flying kick / ground slam: the body leaves the mat (the root stays
+// on it with airLock, so groundFeet doesn't pull the feet down).
+function applyMoveFx(f, dt) {
+  const fx = f.moveFx;
+  const mv = f.move;
+  let yaw = null;
+  let lift = 0;
+  if (fx && mv && (f.state === 'punch' || f.state === 'kick') && f.attackClip === mv.clip) {
+    const action = f.actions[mv.clip];
+    const ct = action ? action.time : 0;
+    if (mv.spin && !fx.spun) {
+      const u = (ct - fx.t0) / Math.max(0.05, fx.pk - fx.t0);
+      if (u >= 1) fx.spun = true;
+      else if (!(f === p1 && cameraMode() === 'first')) {
+        const c = Math.max(0, u);
+        yaw = Math.PI * 2 * mv.spin * c * c * c * (c * (c * 6 - 15) + 10);
+      }
+    }
+    if (mv.hop) {
+      const u = (ct - fx.t0) / Math.max(0.05, fx.t1 - fx.t0);
+      if (u > 0 && u < 1) lift = mv.hop * Math.sin(Math.PI * u);
+    }
+  }
+  if (mv && mv.turn && f.state === 'punch' && f.attackClip === mv.clip && !(f === p1 && cameraMode() === 'first')) {
+    // Square up: the clip's fist line drifts off to the side, so the body turns into the target.
+    const action = f.actions[mv.clip];
+    const tm = action && strikeTiming(f, action);
+    if (tm) {
+      const ct = action.time, a0 = tm.a0, a1 = tm.a1, end = tm.end || a1 + 0.15;
+      const sm = (u) => { u = Math.max(0, Math.min(1, u)); return u * u * (3 - 2 * u); };
+      const k = ct < a0 ? sm((ct - tm.start) / Math.max(0.05, a0 - tm.start))
+        : ct <= a1 ? 1 : 1 - sm((ct - a1) / Math.max(0.05, end - a1));
+      yaw = mv.turn * k;
+    }
+  }
+  if (f.state === 'dash' && f.specialLift) lift += f.specialLift;
+  if (yaw != null) f.model.rotation.y = yaw;
+  else if (f.model.rotation.y !== 0) {
+    // Interrupted mid-turn: settle back to facing forward over ~0.1 s.
+    let r = f.model.rotation.y % (Math.PI * 2);
+    if (r > Math.PI) r -= Math.PI * 2;
+    r *= Math.exp(-Math.max(dt || 0, 1 / 120) * 30);
+    f.model.rotation.y = Math.abs(r) < 1e-3 ? 0 : r;
+  }
+  if (lift > 0) f.model.position.y += lift;
 }
 
 // Full-body punch: an additive turn about the vertical layered on the clip, hips first, then
@@ -5731,7 +5885,7 @@ function poseAfterMixer(f, dt = 1 / 60) {
 // thighs are turned back by the hip turn so the planted legs don't swing with the pelvis.
 // Degrees: [load, drive] per link.
 // Hooks and elbows already sweep across in the clip; a big extra turn drove them into the body.
-const TWIST_LINKS = [['hips', 6, 8, 0], ['Spine', 3, 5, 0.1], ['Spine1', 3, 4, 0.2], ['Spine2', 3, 3, 0.3], ['shoulder', 0, 4, 0.38]];
+const TWIST_LINKS = [['hips', 8, 12, 0], ['Spine', 4, 7, 0.1], ['Spine1', 4, 6, 0.2], ['Spine2', 3, 5, 0.3], ['shoulder', 2, 9, 0.38]];
 const SHIFT_SCALE = { ElbowPunching: 0.2, RightHook: 0.3, Uppercut: 0.3 };
 const TWIST_SCALE = { LeadJab: 0.6, Punching: 1, PunchCombo: 0.7, ElbowPunching: 0.25, RightHook: 0.25, Uppercut: 0.3 };
 const _twQ = new THREE.Quaternion();
@@ -6114,7 +6268,7 @@ function tick() {
   stepFighter(p1, p2, pin, dt);
   stepFighter(p2, p1, ain, dt);
   // A buffered press is used up once the attack it asked for has started.
-  if (held.buf && p1.state !== p1Was && (p1.state === 'punch' || p1.state === 'kick' || p1.state === 'ground' || p1.state === 'dodge')) held.buf = null;
+  if (held.buf && p1.state !== p1Was && (p1.state === 'punch' || p1.state === 'kick' || p1.state === 'ground' || p1.state === 'dodge' || p1.state === 'dash')) held.buf = null;
   stepPhysics(dt);
   stepSpecial(p1, p2, dt);
   stepSpecial(p2, p1, dt);
@@ -6427,7 +6581,22 @@ function onLoad(gltf) {
   hookFightLogShell();
   bindSpecials({
     scene, gfxKey, playSfx, setAnim, idleClipFor, toward, placeInOctagon, endAttack, setFighterMove,
-    inBell, canPunch, logBellBlock, logSpecial, logInputAction,
+    inBell, canPunch, logBellBlock, logSpecial, logInputAction, endAir, addShake,
+    matTop: ARENA.matTop || 0,
+    strikeStart: (clip) => (STRIKE_T && STRIKE_T[clip] ? STRIKE_T[clip].start : null),
+    // Shoulder charge / ground slam / overheat: a body blow through the normal hit path
+    // (damage, guard, reaction, knockdown chance, KO). False if it couldn't land.
+    dealSpecialHit(atk, def, spec, point, dir) {
+      if (def.state === 'ko' || DOWN_STATES.has(def.state) || def.invuln > 0) return false;
+      applyHit(atk, def, { damage: spec.damage, knock: spec.knock || 0 }, 'rocket', null, { point, dir });
+      return true;
+    },
+    // The shared contact light, used as the overheat glow / slam flash (no extra light).
+    heatLight(pos, color, intensity) {
+      hitLight.color.setHex(color);
+      hitLight.intensity = Math.max(hitLight.intensity, intensity);
+      hitLight.position.copy(pos);
+    },
     dealRocketHit(atk, def, point, dir) {
       applyHit(atk, def, { damage: SPECIAL.rocket.damage }, 'rocket', null, { point, dir });
       if (!def.blocking && def.hitPush) {
@@ -6507,6 +6676,22 @@ function onLoad(gltf) {
     camera.lookAt(mid.x, mt + 1.55 * SIZE, mid.z);
     renderFrame();
     return { y: camera.position.y, lookY: mt + 1.55 * SIZE, size: SIZE, matTop: mt, gfx: gfxKey };
+  };
+  // Debug / automated checks: start a named move for one side; returns whether it started.
+  window.__rfMove = (id, move) => {
+    const f = id === 'p2' ? p2 : p1;
+    const ok = tryMove(f, f === p1 ? p2 : p1, move);
+    return { ok, state: f.state, clip: f.attackClip, energy: f.energy };
+  };
+  window.__rfMoveReach = () => Object.fromEntries(Object.entries(MOVES).map(([id, mv]) => [id, +(moveReach(mv) || 0).toFixed(2)]));
+  window.__rfFighters = () => [p1, p2].map((f) => ({ state: f.state, hp: f.health, energy: f.energy, x: +f.root.position.x.toFixed(2), z: +f.root.position.z.toFixed(2), clip: f.attackClip, move: f.moveId || f.specialKind || null, cd: f.cooldown }));
+  // Debug: put P1 this far (root to root) in front of P2, facing it.
+  window.__rfPlace = (gap) => {
+    const dir = toward(p2, p1);
+    p1.root.position.set(p2.root.position.x + dir.x * gap, p1.root.position.y, p2.root.position.z + dir.z * gap);
+    if (p1.phys && p1.phys.body) { p1.phys.body.position.x = p1.root.position.x; p1.phys.body.position.z = p1.root.position.z; }
+    p1._rootWarp = true;
+    return +p1.root.position.distanceTo(p2.root.position).toFixed(2);
   };
   window.__rfSkipToFight = () => {
     startFightFromShell({ skipIntro: true });

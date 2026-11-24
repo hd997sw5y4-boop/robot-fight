@@ -15,7 +15,10 @@
 
 import { memoryKey, isLearningOn, promptNotes, defaultLearningOn, setDefaultLearningOn, clearMemory } from './api-learn.js';
 
-export const AI_ACTIONS = ['approach', 'retreat', 'circle_left', 'circle_right', 'punch', 'kick', 'flip_front', 'block', 'ground', 'wait', 'rocket_punch', 'dash_forward', 'dash_back'];
+// Named strikes (in reach when self.moves[name] is true) and robot moves (energy, self.specials).
+export const AI_MOVES = ['uppercut', 'elbow', 'spin_backfist', 'knee', 'sweep_kick', 'flying_kick'];
+export const AI_ROBOT_MOVES = ['shoulder_charge', 'ground_slam', 'overheat'];
+export const AI_ACTIONS = ['approach', 'retreat', 'circle_left', 'circle_right', 'punch', 'kick', 'flip_front', 'block', 'ground', 'wait', 'rocket_punch', 'dash_forward', 'dash_back', ...AI_MOVES, ...AI_ROBOT_MOVES];
 export const AI_TARGETS = ['head', 'torso', 'armL', 'armR', 'legL', 'legR'];
 
 export const AI_PROVIDERS = {
@@ -33,7 +36,10 @@ export const SYSTEM = 'You control one heavy humanoid robot in a 3D fighting gam
   + 'state as JSON (distances in metres, health 0-100, parts 0-1 health, 0 means torn off). Reply with JSON '
   + '{"action":"<one of the Allowed actions>","plan":"<up to 12 words>","target":"<optional one of: '
   + AI_TARGETS.join(', ') + '>"} and nothing else. inRange.punch / inRange.kick are true when that strike can land now. '
-  + 'rocket_punch, dash_forward and dash_back are specials that spend shared energy (see specials / energy in the state). legal is the only set of actions that work at this distance — do not pick approach when it is omitted. '
+  + 'rocket_punch, dash_forward and dash_back are specials that spend shared energy (see specials / energy in the state). '
+  + 'Named strikes: uppercut, elbow and knee (close, heavy), spin_backfist (strong, slow), sweep_kick (low, often knocks down), flying_kick (from just outside kick range). '
+  + 'Robot moves on energy: shoulder_charge (rush in from mid range), ground_slam (shockwave around you, hits a standing opponent nearby), overheat (needs a full bar; big burst all around, then no energy for a while). '
+  + 'legal is the only set of actions that work at this distance — do not pick approach when it is omitted. '
   + 'If the message says you are IN RANGE, attack, block or reposition; do not close the gap. '
   + 'If it says you are TOO CLOSE, retreat or circle is available — it is your choice, not a requirement. '
   + 'If you are AT THE CAGE, escape lists the directions that leave the wall; retreat peels along or off the fence, it does not walk through it. '
@@ -153,6 +159,9 @@ export function rangeInfo(s) {
   if (sp.rocket_punch && inRange.rocket) legal.push('rocket_punch');
   if (sp.dash_forward) legal.push('dash_forward');
   if (sp.dash_back) legal.push('dash_back');
+  const mv = self.moves || {};
+  for (const m of AI_MOVES) if (mv[m]) legal.push(m);
+  for (const m of AI_ROBOT_MOVES) if (sp[m]) legal.push(m);
   return { dist, inRange, legal, strikeRange: { punch, kick, rocket: +rocketRange.toFixed(2) }, energy: self.energy };
 }
 
@@ -449,6 +458,7 @@ function actionIntent(a) {
   else if (a === 'rocket_punch') it.attack = 'rocket_punch';
   else if (a === 'dash_forward') it.attack = 'dash_forward';
   else if (a === 'dash_back') it.attack = 'dash_back';
+  else if (AI_MOVES.includes(a) || AI_ROBOT_MOVES.includes(a)) it.attack = a;
   else if (a === 'flip_front') it.dodge = 'front';
   else if (a === 'block') it.block = true;
   return it;
