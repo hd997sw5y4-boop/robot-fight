@@ -302,6 +302,7 @@ export function trySlam(f, other) {
   if (ctx.playSfx) ctx.playSfx('whoosh', { rate: 0.7, vol: 0.6 });
   return true;
 }
+const SLAM_RING_LIFE = 0.45; // seconds the shockwave ring takes to reach full radius
 function flySlam(f, other, dt) {
   const s = f.special;
   const spec = SPECIAL.slam;
@@ -330,25 +331,44 @@ function flySlam(f, other, dt) {
       s.recT = 0;
       f.specialLift = 0;
       if (ctx.endAir) ctx.endAir(f);
-      startRing(f, 0xbfe8ff, spec.radius, 0.45, (ctx.matTop || 0) + 0.025);
+      startRing(f, 0xbfe8ff, spec.radius, SLAM_RING_LIFE, (ctx.matTop || 0) + 0.025);
       if (ctx.addShake) ctx.addShake(0.2, 0.22);
       if (ctx.playSfx) ctx.playSfx('clank', { vol: 1, rate: 0.55 });
       if (ctx.heatLight) ctx.heatLight(f.root.position, 0xbfe8ff, 18, 0.2 * SIZE);
-      const gap = f.root.position.distanceTo(other.root.position);
-      const grounded = other.airLock == null && !other.specialLift;
-      let landed = false;
-      if (gap <= spec.radius && grounded && canTake(other)) {
-        const p = _chP.copy(other.root.position);
-        p.y += 0.35 * SIZE;
-        landed = ctx.dealSpecialHit(f, other, spec, p, ctx.toward(f, other, new THREE.Vector3()));
-      }
-      if (ctx.logSpecial) ctx.logSpecial(f.id, 'ground_slam', landed ? (other.blocking ? 'block' : 'land') : 'miss');
+      // The damage is not dealt here: it rides the expanding ring (below), so only a robot the
+      // wave actually reaches while standing on the mat is hit.
+      s.ringT = 0;
+      s.resolved = false;
     }
     return;
   }
   s.recT += dt;
+  s.ringT += dt;
+  if (!s.resolved) {
+    // Same curve as stepRing, so the hit lands when the visible ring meets the body.
+    const k = Math.min(1, s.ringT / SLAM_RING_LIFE);
+    const front = spec.radius * (1 - Math.pow(1 - k, 2.2));
+    const gap = Math.hypot(f.root.position.x - other.root.position.x, f.root.position.z - other.root.position.z);
+    if (gap <= spec.radius && gap - spec.bodyReach <= front) {
+      s.resolved = true;
+      // A flip, a dash or a jump over the wave (not on the mat when it arrives) avoids it.
+      const grounded = other.airLock == null && !other.specialLift;
+      let landed = false;
+      if (grounded && canTake(other)) {
+        const p = _chP.copy(other.root.position);
+        p.y += 0.35 * SIZE;
+        // Strongest next to the slam, weaker at the edge of the ring.
+        const hit = { ...spec, damage: spec.damage * (1 - spec.falloff * (gap / spec.radius)) };
+        landed = ctx.dealSpecialHit(f, other, hit, p, ctx.toward(f, other, new THREE.Vector3()));
+      }
+      if (ctx.logSpecial) ctx.logSpecial(f.id, 'ground_slam', landed ? (other.blocking ? 'block' : 'land') : 'miss');
+    }
+  }
   f.specialBow = 0.9 * (1 - smooth(s.recT / spec.recover));
-  if (s.recT >= spec.recover) endMove(f, 0.25);
+  if (s.recT >= spec.recover) {
+    if (!s.resolved && ctx.logSpecial) ctx.logSpecial(f.id, 'ground_slam', 'miss'); // the wave never reached anyone
+    endMove(f, 0.25);
+  }
 }
 
 // Overheat super (full bar): hunch and vent heat (a red glow builds on the chest), then throw the
@@ -407,7 +427,10 @@ export function syncEnergyHud(p1, p2) {
     if (!el || !f) continue;
     const max = SPECIAL.energyMax;
     const v = Math.max(0, Math.min(1, (f.energy == null ? max : f.energy) / max));
-    el.style.transform = `scaleX(${v})`;
+    const q = Math.round(v * 1000) / 1000;
+    if (el._rfV === q) continue; // unchanged: skip the style write this frame
+    el._rfV = q;
+    el.style.transform = `scaleX(${q})`;
     el.parentElement && el.parentElement.classList.toggle('empty', v < 0.02);
   }
 }
