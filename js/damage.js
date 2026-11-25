@@ -1723,8 +1723,17 @@ export function resetFighterDamage(f, scene) {
   f.model.position.y = f.baseY;
 }
 
+// Called every frame: the pips (classes and tooltips) are only rewritten when a part's
+// rounded HP or detached state changes, so a quiet frame does no DOM work.
+const _partHudKey = new WeakMap();
 export function syncPartHud(f, el) {
   if (!f || !f.parts || !el) return;
+  let key = '';
+  for (const id in f.parts) { const p = f.parts[id]; if (p) key += (p.detached ? 'x' : Math.round(p.hp)) + ','; }
+  if (f.subs) for (const id in f.subs) { const p = f.subs[id]; if (p) key += (p.detached ? 'x' : Math.round(p.hp)) + ','; }
+  const prev = _partHudKey.get(el);
+  if (prev && prev.f === f && prev.key === key) return;
+  _partHudKey.set(el, { f, key });
   const nodes = el.querySelectorAll('[data-part]');
   nodes.forEach((n) => {
     const key = n.dataset.part;

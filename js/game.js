@@ -5510,7 +5510,7 @@ function syncHud(dt = 0) {
   for (const [f, hid, gid] of [[p1, 'hp1', 'ghost1'], [p2, 'hp2', 'ghost2']]) {
     const hp = Math.max(0, f.health / max);
     const bar = document.getElementById(hid);
-    if (bar) bar.style.transform = `scaleX(${hp})`;
+    if (bar && bar._rfV !== hp) { bar._rfV = hp; bar.style.transform = `scaleX(${hp})`; }
     const wrap = bar && bar.parentElement;
     if (wrap) {
       wrap.classList.toggle('danger', hp > 0 && hp <= 0.25);
@@ -5528,7 +5528,8 @@ function syncHud(dt = 0) {
         hudGhost[f.id] = hp;
         hudGhost.hitAt[f.id] = -1;
       }
-      gEl.style.transform = `scaleX(${hudGhost[f.id]})`;
+      const gv = Math.round(hudGhost[f.id] * 1000) / 1000;
+      if (gEl._rfV !== gv) { gEl._rfV = gv; gEl.style.transform = `scaleX(${gv})`; }
     }
   }
   const vig = document.getElementById('vignette');
@@ -5902,7 +5903,17 @@ let p1;
 let p2;
 let cagePanels = null;
 const match = { phase: 'idle', introT: 0, over: false, winner: null, roundLeft: null, roundIndex: 1, roundTimeOverride: null };
-const clock = new THREE.Clock();
+// Frame clock (THREE.Clock is deprecated). Same getDelta() contract: the shell wraps it to
+// report zero time while paused.
+const clock = {
+  last: null,
+  getDelta() {
+    const t = performance.now();
+    const d = this.last == null ? 0 : (t - this.last) / 1000;
+    this.last = t;
+    return d;
+  },
+};
 
 function paintRound() {
   const label = document.getElementById('roundLabel');
@@ -5912,9 +5923,13 @@ function paintRound() {
   if (match.roundLeft == null) {
     el.classList.add('hidden');
     el.textContent = '';
+    el._rfT = null;
     return;
   }
   const t = Math.max(0, Math.ceil(match.roundLeft));
+  // Runs every frame: only touch the DOM when the shown second changes.
+  if (el._rfT === t && !el.classList.contains('hidden')) return;
+  el._rfT = t;
   const m = Math.floor(t / 60);
   const s = String(t % 60).padStart(2, '0');
   el.textContent = m + ':' + s;

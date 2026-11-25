@@ -407,7 +407,10 @@ export function syncEnergyHud(p1, p2) {
     if (!el || !f) continue;
     const max = SPECIAL.energyMax;
     const v = Math.max(0, Math.min(1, (f.energy == null ? max : f.energy) / max));
-    el.style.transform = `scaleX(${v})`;
+    const q = Math.round(v * 1000) / 1000;
+    if (el._rfV === q) continue; // unchanged: skip the style write this frame
+    el._rfV = q;
+    el.style.transform = `scaleX(${q})`;
     el.parentElement && el.parentElement.classList.toggle('empty', v < 0.02);
   }
 }
