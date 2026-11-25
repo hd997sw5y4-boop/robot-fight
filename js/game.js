@@ -4225,7 +4225,7 @@ function tryGroundAttack(f, def) {
   const act = f.actions[clip];
   const st = act && STRIKE_T && STRIKE_T[clip];
   if (act) {
-    act.timeScale = stomp ? 1.15 : 1.1;
+    act.timeScale = stomp ? (COMBAT.ground.stompSpeed || 1.15) : (COMBAT.ground.poundSpeed || 1.1);
     if (st) act.time = st.start;
   }
   playSfx('whoosh', { rate: stomp ? 1.15 : 1.1, vol: 0.6 });

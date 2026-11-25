@@ -28,7 +28,9 @@ export const SPECIAL = {
   // Shoulder charge: a thruster rush with the shoulder down; stops on the body.
   charge: { dist: 2.4 * SIZE, time: 0.42, damage: 9, knock: 0.4, hitGap: 1.22 * SIZE, recover: 0.38 },
   // Ground slam: hop, then both fists into the mat; a shockwave ring along the floor.
-  slam: { damage: 10, knock: 0.55, radius: 2.1 * SIZE, up: 0.34, down: 0.1, recover: 0.42, hop: 0.38 * SIZE },
+  // The wave must travel out and reach the body (bodyReach = body radius it counts as touching);
+  // damage falls off with distance (falloff 0.4 = 60% at the edge of the ring).
+  slam: { damage: 10, knock: 0.55, radius: 1.8 * SIZE, up: 0.34, down: 0.1, recover: 0.5, hop: 0.38 * SIZE, bodyReach: 0.3 * SIZE, falloff: 0.4 },
   // Overheat super (full bar): a short vent-up, then a heat burst all around. Afterwards the
   // energy bar stays empty for a while (the robot is cooling down).
   overheat: { damage: 16, knock: 1, radius: 2.45 * SIZE, charge: 0.5, recover: 0.5, cooldown: 3.2 },
@@ -285,12 +287,14 @@ export const COMBAT = {
   ground: {
     reach: 1.05 * SIZE,      // nearest lying body segment must be this close (root XZ)
     stompReach: 0.8 * SIZE,    // closer than this it's a stomp, else a ground punch
-    stompDamage: 8,
-    poundDamage: 6,
-    perKnockdown: 2,    // per attacker, per knockdown
+    stompDamage: 10,
+    poundDamage: 8,
+    perKnockdown: 3,    // per attacker, per knockdown (still can't pin: hits don't delay the get-up)
     recover: 0.55,
-    poundBow: 1.15,     // radians of forward bow spread over the spine (procedural)
-    stompBow: 0.3,
+    poundBow: 1.25,     // radians of forward bow spread over the spine (procedural)
+    stompBow: 0.5,      // the body leans into the stomp
+    stompSpeed: 0.85,   // stomp clip playback: slower reads as a heavy, deliberate stamp
+    poundSpeed: 0.95,
   },
 };
 
