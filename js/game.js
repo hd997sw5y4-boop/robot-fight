@@ -1309,6 +1309,7 @@ function makeFighter(gltf, color, side, skinId) {
   prepareFighterDamage(f);
   cacheFeet(f);
   cacheBody(f);
+  f.airBase = measureAirBase(f, startIdle);
   if (!STRIKE_T) STRIKE_T = measureStrikes(f);
   if (!AIR_T) AIR_T = measureAir(f);
   return f;
@@ -1319,12 +1320,38 @@ function makeFighter(gltf, color, side, skinId) {
 // Attacks skip the slow lead-in, hit on the measured frames and hand control back as soon as
 // the strike is pulled back, instead of locking the robot for the whole (long) Mixamo clip.
 let STRIKE_T = null;
-// Airborne clips (front flip dodge), measured once: when the whole body leaves the mat and
-// lands again (root at 0, the clip's own hips height), plus the standing baseline.
+// Airborne clips (jump kick, front flip dodge), measured once: when the whole body leaves the mat
+// and lands again (root at 0, the clip's own hips height), plus the standing baseline.
 let AIR_T = null;
-function measureAir(f) {
+const airClipNames = () => {
   const A = MODEL.animations;
-  const names = [...(A.jumpKicks || []), A.dodgeBack, A.dodgeFront].filter(Boolean);
+  return [...(A.jumpKicks || []), A.dodgeBack, A.dodgeFront].filter(Boolean);
+};
+// Each body's own standing baseline for the airborne clips (frame 0, root at 0): feet and soles
+// differ per skin, and the measured robot's baseline floated or sank the others in the air.
+function measureAirBase(f, idle) {
+  const out = {};
+  const y0 = f.root.position.y;
+  f.mixer.stopAllAction();
+  for (const name of airClipNames()) {
+    const act = f.actions[name];
+    if (!act) continue;
+    act.reset(); act.setEffectiveWeight(1); act.timeScale = 1; act.play();
+    act.time = 0;
+    f.mixer.update(0);
+    f.root.position.y = 0;
+    f.root.updateMatrixWorld(true);
+    const low = lowestBodyY(f);
+    if (low != null) out[name] = low;
+    act.stop();
+  }
+  f.root.position.y = y0;
+  if (f.actions[idle]) f.actions[idle].play();
+  f.mixer.update(0);
+  return out;
+}
+function measureAir(f) {
+  const names = airClipNames();
   const out = {};
   const save = f.current;
   f.mixer.stopAllAction();
@@ -2435,8 +2462,15 @@ function nextPlayerPunch(f) {
   return { clip: chain[idx] || chain[0], chain: idx };
 }
 
+// Standing kicks plus the jump kick; no jump kick on a lost or badly damaged leg (canFlip).
+function kickClipsFor(f) {
+  const jumps = MODEL.animations.jumpKicks || [];
+  const ok = canFlip(f);
+  return availableClips(f, MODEL.animations.kickVariants).filter((n) => ok || !jumps.includes(n));
+}
+
 function pickKick(f) {
-  const basic = availableClips(f, MODEL.animations.kickVariants);
+  const basic = kickClipsFor(f);
   const clip = pickClip(basic, MODEL.animations.kick, f.lastKick, f);
   f.lastKick = clip;
   return clip;
@@ -2864,6 +2898,17 @@ function tryAttack(f, kind, clipName, exact = false) {
     if (f.strikePlan) { action.time = f.strikePlan.t0; action.timeScale = f.strikePlan.rW; }
   }
   f.strikeWork = strikeFootwork(f, other, kind, clip);
+  // Jump kick: the root rides the clip's own jump (take-off, arc, landing) instead of feet
+  // grounding dragging the lowest foot to the mat, and it can't hang in the air at contact. The
+  // planned step in is travelled in the air.
+  const air = action && AIR_T && AIR_T[clip];
+  if (air && air.air && kind === 'kick' && (MODEL.animations.jumpKicks || []).includes(clip) && canFlip(f)) {
+    action.time = Math.min(action.time, air.start);
+    const fwd = toward(f, other);
+    const want = f.strikeWork ? f.strikeWork.S : 0;
+    f.strikeWork = null;
+    startAir(f, clip, fwd, want > 0 ? ringRoom(f, fwd, want) : 0);
+  }
   return true;
 }
 
@@ -2930,9 +2975,10 @@ function strikeFootwork(f, other, kind, clip) {
 
 // Jabs, straights (Punching / PunchCombo) and hooks get a peak arm-extension IK so the
 // punching arm is almost fully straight and the fist actually reaches the longer punch range.
-// Elbows and uppercuts stay the short in-fighting clips.
+// Elbows and uppercuts stay the short in-fighting clips and get no IK: their arm swings round
+// with the spinning body, and aiming it straight at the chest fought that arc (held low, then
+// whipped up and over as the IK let go).
 const PUNCH_EXTEND_CLIPS = new Set(['LeadJab', 'Punching', 'PunchCombo', 'RightHook']);
-const PUNCH_AIM_CLIPS = new Set(['LeadJab', 'Punching', 'PunchCombo', 'RightHook', 'Uppercut', 'ElbowPunching']);
 
 // Choose a strike whose measured reach fits the gap: the fist/foot should just reach the
 // body surface (short elbows and uppercuts up close, jabs and long kicks from further out),
@@ -2956,7 +3002,7 @@ function fitStrikeClip(f, kind, clip, other) {
     return tip != null && tip + stepIn >= gap - 0.02 && tip <= gap + 0.35;
   };
   if (clip && fits(clip)) return clip;
-  const pool = kind === 'punch' ? punchClipsFor(f) : availableClips(f, MODEL.animations.kickVariants);
+  const pool = kind === 'punch' ? punchClipsFor(f) : kickClipsFor(f);
   const good = pool.filter(fits);
   if (good.length) return good[Math.floor(Math.random() * good.length)];
   let best = clip;
@@ -3086,7 +3132,7 @@ function startAir(f, clip, dir, dist) {
   const air = AIR_T && AIR_T[clip];
   const action = f.actions[clip];
   if (!air || !air.air || !action) return null;
-  f.airLock = -air.base; // the clip's standing baseline sits on the mat for the whole move
+  f.airLock = -((f.airBase && f.airBase[clip]) ?? air.base); // the clip's standing baseline sits on the mat for the whole move
   f.airMove = { action, air, dir: dir.clone(), dist, moved: 0 };
   return f.airMove;
 }
@@ -3925,7 +3971,7 @@ function applyGroundBow(f) {
 // strikes play backwards), instead of snapping in at the moment of contact. The fist (the
 // strike bone) is posed here before the next frame's contact test, so the hit follows it.
 function punchExtendWeight(f) {
-  if (f.state !== 'punch' || !PUNCH_AIM_CLIPS.has(f.attackClip)) return 0;
+  if (f.state !== 'punch' || !PUNCH_EXTEND_CLIPS.has(f.attackClip)) return 0;
   const action = f.actions[f.attackClip];
   if (!action) return 0;
   const tm = strikeTiming(f, action);
@@ -3946,51 +3992,30 @@ function punchExtendWeight(f) {
   return w;
 }
 
+// The punching arm is the clip's measured striking side (STRIKE_T), the same arm the strike
+// twist turns. (Taking whichever hand was furthest forward each frame swapped arms mid-strike
+// as the body turned: the IK let go of one arm and grabbed the other at full weight.)
 function punchingArmSide(f) {
-  const bones = f.strikeBones && f.strikeBones.punch;
-  if (!bones || !bones.length) return 'R';
-  let best = bones[0], bestZ = -Infinity;
-  for (const b of bones) {
-    b.getWorldPosition(_ikA);
-    f.root.worldToLocal(_ikA);
-    if (_ikA.z > bestZ) { bestZ = _ikA.z; best = b; }
-  }
-  const n = boneKey(best.name);
-  if (/^Left/.test(n)) return 'L';
-  if (/^Right/.test(n)) return 'R';
-  return 'R';
+  const st = STRIKE_T && STRIKE_T[f.attackClip];
+  return (st && st.side) || 'R';
 }
 
-function aimBoneY(bone, worldDir, weight) {
-  if (!bone || !bone.parent || !(weight > 0) || !(worldDir.lengthSq() >= 1e-8)) return;
-  bone.parent.updateWorldMatrix(true, false);
-  bone.parent.getWorldQuaternion(_ikPQ);
-  bone.getWorldQuaternion(_ikWQ);
-  _ikB.set(0, 1, 0).applyQuaternion(_ikWQ).normalize();
-  _ikC.copy(worldDir).normalize();
-  const dot = THREE.MathUtils.clamp(_ikB.dot(_ikC), -1, 1);
-  if (dot > 0.9999) return;
-  _ikQ.setFromUnitVectors(_ikB, _ikC);
-  _ikWant.copy(_ikQ).multiply(_ikWQ);
-  _ikWant.copy(_ikPQ).invert().multiply(_ikWant);
-  if (!qOk(_ikWant)) return;
-  bone.quaternion.slerp(_ikWant, weight);
-}
-
-const _ikPole = new THREE.Vector3();
-const _ikPoleDir = new THREE.Vector3();
-const _ikNat = new THREE.Vector3();
+// Arm IK on the elbow's own hinge: the elbow only flexes about its fitted axis, inside its
+// range, and the upper arm turns (shortest turn) to point the fist. The clip's elbow plane and
+// forearm twist are kept, so the elbow can't bend backward or sideways. (The old pole-vector
+// solve re-aimed both bones freely; when the body spun the pole crossed over and the elbow
+// solved bent backward, the joint limits snapped it and the forearm flipped up.)
 function applyPunchReach(f) {
   const w = Math.min(1, punchExtendWeight(f));
   if (!(w >= 0.02)) return; // NaN-safe
   const other = f === p1 ? p2 : p1;
   if (!other || !f.ikArms) return;
   const hook = f.attackClip === 'RightHook';
-  const tight = f.attackClip === 'Uppercut' || f.attackClip === 'ElbowPunching';
-  const side = punchingArmSide(f);
-  const arm = f.ikArms[side];
-  if (!arm || !arm.upper || !arm.lower || !arm.hand) return;
+  const arm = f.ikArms[punchingArmSide(f)];
+  if (!arm || !arm.upper || !arm.lower || !arm.hand || !arm.upper.parent) return;
   if (arm.upper.scale.x < 0.01) return; // missing / torn-off arm
+  const elbow = hingeOf(f, arm.lower);
+  if (!elbow || !elbow.axis || !elbow.lim) return;
 
   f.model.updateWorldMatrix(true, true);
   arm.upper.getWorldPosition(_ikA); // shoulder / upper origin
@@ -4000,7 +4025,7 @@ function applyPunchReach(f) {
   const len2 = _ikB.distanceTo(_ikC);
   if (len1 < 0.02 || len2 < 0.02) return;
   const full = len1 + len2;
-  const lock = tight ? 0.82 : hook ? 0.90 : 0.975; // nearly straight; hooks / uppercuts keep a bend
+  const lock = hook ? 0.90 : 0.975; // nearly straight; hooks keep a bend
   const curLen = _ikA.distanceTo(_ikC);
 
   // Aim: blend the clip's punch direction with a line to the opponent's chest.
@@ -4011,80 +4036,36 @@ function applyPunchReach(f) {
   _ikT.set(other.root.position.x, chestY, other.root.position.z).sub(_ikA);
   if (_ikT.lengthSq() > 1e-6) _ikT.normalize();
   else _ikT.copy(_ikD);
-  const aimMix = tight ? 0.72 : hook ? 0.35 : 0.82;
+  const aimMix = hook ? 0.35 : 0.82;
   _ikD.lerp(_ikT, aimMix * w).normalize();
 
-  const wantLen = curLen + (full * lock - curLen) * w;
   // Don't drive the fist through the opponent; the step in still closes the rest of the gap.
+  // (Weighted as a whole, so the IK fades in and out without a pop.)
   const toChest = Math.hypot(other.root.position.x - _ikA.x, other.root.position.z - _ikA.z);
   const maxToBody = Math.max(0.1, toChest - (COMBAT.bodyRadius || 0.27 * SIZE) - 0.02);
-  const reach = Math.min(wantLen, maxToBody);
-  _ikT.copy(_ikA).addScaledVector(_ikD, reach);
+  const wantLen = curLen + (Math.min(full * lock, maxToBody) - curLen) * w;
+  const reach = THREE.MathUtils.clamp(wantLen, Math.abs(len1 - len2) + 0.004, full - 0.012);
 
-  // Keep the clip's elbow plane (pole = current elbow offset from the shoulder).
-  arm.lower.getWorldPosition(_ikB);
-  _ikC.copy(_ikB).sub(_ikA);
-  const d = _ikA.distanceTo(_ikT);
-  const dist = THREE.MathUtils.clamp(d, Math.abs(len1 - len2) + 0.004, len1 + len2 - 0.012);
-  _ikD.copy(_ikT).sub(_ikA);
-  if (_ikD.lengthSq() < 1e-8) return;
-  _ikD.setLength(dist);
-
-  let cosA = (len1 * len1 + dist * dist - len2 * len2) / (2 * len1 * dist);
-  cosA = THREE.MathUtils.clamp(cosA, -1, 1);
-  const angA = Math.acos(cosA);
-  // Bend side (pole). The clip's elbow decides it while the arm is clearly bent; as the clip
-  // arm straightens that offset shrinks to noise and could swing the elbow backward (the joint
-  // limit then snapped it: the LeftForeArm "jointFlip" pops in uppercuts / elbow strikes), so
-  // it blends into the natural side: elbow down and back toward the body.
-  _ikPoleDir.copy(_ikD).normalize();
-  _ikPole.copy(_ikC).addScaledVector(_ikPoleDir, -_ikC.dot(_ikPoleDir));
-  const clipBend = _ikPole.length();
-  toward(f, other, _ikNat).multiplyScalar(-0.45);
-  _ikNat.y -= 1;
-  _ikNat.addScaledVector(_ikPoleDir, -_ikNat.dot(_ikPoleDir));
-  if (_ikNat.lengthSq() > 1e-8) {
-    _ikNat.normalize();
-    const k = Math.min(1, clipBend / (0.3 * len1));
-    if (clipBend > 1e-6) _ikPole.divideScalar(clipBend); else _ikPole.copy(_ikNat);
-    _ikPole.lerp(_ikNat, 1 - k);
-  }
-  // Solve with this pole; if the elbow then bends the wrong way (far outside its hinge range,
-  // which the joint limits would snap back as a "jointFlip"), solve again on the natural side.
-  const elbow = hingeOf(f, arm.lower);
-  _ikQu.copy(arm.upper.quaternion);
-  _ikQl.copy(arm.lower.quaternion);
-  for (let pass = 0; pass < 2; pass++) {
-    if (pass === 1) {
-      arm.upper.quaternion.copy(_ikQu);
-      arm.lower.quaternion.copy(_ikQl);
-      arm.upper.updateMatrixWorld(true);
-      if (_ikNat.lengthSq() < 1e-8) return;
-      _ikPole.copy(_ikNat);
-    }
-    _ikAxis.crossVectors(_ikD, _ikPole);
-    if (_ikAxis.lengthSq() < 1e-8) {
-      _ikAxis.set(0, 1, 0).cross(_ikD);
-      if (_ikAxis.lengthSq() < 1e-8) _ikAxis.set(1, 0, 0).cross(_ikD);
-    }
-    _ikAxis.normalize();
-    // Upper-arm direction: rotate the shoulder→target line by angA around the pole axis.
-    const upperDir = _ikD.clone().normalize().applyAxisAngle(_ikAxis, angA);
-    const elbowPos = _ikA.clone().addScaledVector(upperDir, len1);
-    const lowerDir = _ikA.clone().add(_ikD).sub(elbowPos);
-    if (lowerDir.lengthSq() < 1e-8) return;
-    lowerDir.normalize();
-    aimBoneY(arm.upper, upperDir, w);
-    arm.upper.updateMatrixWorld(true);
-    aimBoneY(arm.lower, lowerDir, w);
+  // Elbow: the inner angle that puts the fist at that distance, reached by flexing the hinge.
+  const inner = (x) => Math.acos(THREE.MathUtils.clamp((len1 * len1 + len2 * len2 - x * x) / (2 * len1 * len2), -1, 1));
+  const th = hingeAngle(elbow);
+  const th2 = THREE.MathUtils.clamp(th - (inner(reach) - inner(curLen)), elbow.lim.min * DEG, elbow.lim.max * DEG);
+  if (Number.isFinite(th2) && Math.abs(th2 - th) > 1e-5) {
+    flexHinge(elbow, th2 - th);
     arm.lower.updateMatrixWorld(true);
-    if (!elbow || !elbow.axis || !elbow.lim) return;
-    const th = hingeAngle(elbow) / DEG;
-    if (th > elbow.lim.min - 60 && th < elbow.lim.max + 60) return;
   }
+
+  // Upper arm: the shortest turn about the shoulder that points the shoulder-to-fist line along
+  // the aim (the elbow plane turns with it).
+  arm.hand.getWorldPosition(_ikC).sub(_ikA);
+  if (_ikC.lengthSq() < 1e-8) return;
+  _ikQ.setFromUnitVectors(_ikC.normalize(), _ikD);
+  arm.upper.parent.getWorldQuaternion(_ikPQ);
+  _ikWant.copy(_ikPQ).invert().multiply(_ikQ).multiply(_ikPQ);
+  if (!qOk(_ikWant)) return;
+  arm.upper.quaternion.premultiply(_ikWant);
+  arm.upper.updateMatrixWorld(true);
 }
-const _ikQu = new THREE.Quaternion();
-const _ikQl = new THREE.Quaternion();
 
 // Structural damage (not tiredness): a torso past 70% damage folds on any heavy blow.
 function torsoWrecked(f) {
@@ -4644,7 +4625,7 @@ function stepFighter(f, other, inp, dt) {
     // already "standing" (feet off the mat) and popped the arm. Spins and flips can't rewind
     // naturally; they still blend out.
     const special = SPECIAL_STRIKES.has(f.attackClip);
-    if (pulled && !special && action && !f.retract && ct > tm.start + 0.04) {
+    if (pulled && !special && !airKick && action && !f.retract && ct > tm.start + 0.04) {
       f.retract = true;
       action.paused = false;
       action.timeScale = -Math.min(RETRACT_SPEED * (f.state === 'punch' ? PUNCH_RETURN : 1), f.strikeCap || Infinity);

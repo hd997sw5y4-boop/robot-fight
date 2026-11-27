@@ -73,7 +73,9 @@ export const MODEL = {
     kickVariants: ['Kicking', 'MmaKick', 'RoundhouseKick', 'SideKick', 'MeiaLuaDeFrente', 'LegSweep', 'KneeKickLead'],
     kickSpecial: [],
     flipSpecial: [],
-    jumpKicks: [],
+    // Kicks in kickVariants that leave the mat with both feet (Kicking is a jumping switch front
+    // kick): the root follows the clip's own jump arc (game.js startAir) instead of feet grounding.
+    jumpKicks: ['Kicking'],
 
     // --- blocks-dodges ---
     dodgeBack: null, // 'Backflip' removed (lands on its hands and crawls back up: read as climbing)
@@ -243,7 +245,7 @@ export const COMBAT = {
   downRest: 0.85,      // seconds lying still before getting up (same every time: robots don't tire)
   downMax: 4.2,        // safety: get up by this long after the knockdown started
   getupTime: 1.25,     // the GettingUp clip is played over about this long
-  // Front flip dodge (Y, or R1 + forward). No back flip and no jump / flip kicks.
+  // Front flip dodge (Y, or R1 + forward). No back flip and no flip kicks (the Kicking jump kick is a normal kick).
   dodge: {
     back: 1.75 * SIZE,      // metres a back flip carries the robot away
     frontPast: 1.0 * SIZE,  // a front flip lands this far beyond the opponent (when there's room)
